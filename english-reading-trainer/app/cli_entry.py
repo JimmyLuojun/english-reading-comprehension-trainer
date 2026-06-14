@@ -15,6 +15,11 @@ Usage examples:
   trainer mark word 42 "give rise to" --type phrase
   trainer cards sentences
   trainer cards words
+  trainer review due
+  trainer review answer sentence 1 pass
+  trainer profile status
+  trainer profile prompt
+  trainer profile save
   trainer ai prompt-sentence 42          # print prompt → paste into AI chat
   trainer ai prompt-word 42 "mitigate"  # print word prompt
   trainer ai save-sentence 42            # paste JSON when prompted
@@ -37,9 +42,24 @@ from app.cards.word_card_service import (
     list_word_cards,
 )
 from app.db_connection import DatabaseConnection
-from app.db_models import LexicalType
+from app.db_models import CardType, LexicalType, ReviewOutcome
 from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import DuplicateBookError, import_txt
+from app.profile.learner_profile_generator import (
+    ProfileInputError,
+    build_profile_prompt,
+    collect_profile_stats,
+    get_latest_profile_snapshot,
+    get_profile_trigger_status,
+    profile_stats_to_payload,
+    save_profile_snapshot,
+)
+from app.review.daily_review_queue import build_daily_review_queue
+from app.review.sm2_scheduler import (
+    ReviewCardNotFoundError,
+    ReviewInputError,
+    apply_review,
+)
 
 # ---------------------------------------------------------------------------
 # DB resolution
@@ -66,12 +86,16 @@ books_app   = typer.Typer(help="Manage imported books.")
 import_app  = typer.Typer(help="Import a book into the trainer.")
 mark_app    = typer.Typer(help="Mark a sentence or word for review.")
 cards_app   = typer.Typer(help="List and inspect cards.")
+review_app  = typer.Typer(help="Review due cards.")
+profile_app = typer.Typer(help="Learner profile snapshots.")
 ai_app      = typer.Typer(help="AI analysis: generate prompts and save results.")
 
 app.add_typer(books_app,  name="books")
 books_app.add_typer(import_app, name="import")
 app.add_typer(mark_app,   name="mark")
 app.add_typer(cards_app,  name="cards")
+app.add_typer(review_app, name="review")
+app.add_typer(profile_app, name="profile")
 app.add_typer(ai_app,     name="ai")
 
 
@@ -427,6 +451,189 @@ def cards_words(
             c["mastery_state"], f"{c['ef']:.1f}",
             c["occurrence_count"], due,
         ])
+
+
+# ---------------------------------------------------------------------------
+# review due
+# ---------------------------------------------------------------------------
+
+@review_app.command("due")
+def review_due(
+    limit: int = typer.Option(40, "--limit", "-l", help="Max due cards to show"),
+) -> None:
+    """List today's mixed review queue."""
+    db = _get_db()
+    try:
+        items = build_daily_review_queue(db, daily_limit=limit)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not items:
+        typer.echo("No cards due for review.")
+        return
+
+    _print_row(["Type", "ID", "State", "EF", "Due", "Prompt"])
+    _print_row(["-" * 8, "-" * 4, "-" * 8, "-" * 4, "-" * 12, "-" * 50])
+    for item in items:
+        _print_row([
+            item.card_type.value,
+            item.card_id,
+            item.mastery_state.value,
+            f"{item.ef:.1f}",
+            item.due_at.date().isoformat(),
+            item.prompt[:50],
+        ])
+
+
+# ---------------------------------------------------------------------------
+# review answer
+# ---------------------------------------------------------------------------
+
+@review_app.command("answer")
+def review_answer(
+    card_type: str = typer.Argument(..., help="Card type: sentence | word"),
+    card_id: int = typer.Argument(..., help="Card ID"),
+    outcome: str = typer.Argument(..., help="Outcome: pass | partial | fail"),
+    latency_ms: int = typer.Option(0, "--latency-ms", help="Answer latency in ms"),
+) -> None:
+    """Record a review answer and schedule the card's next due date."""
+    try:
+        parsed_card_type = CardType(card_type)
+        parsed_outcome = ReviewOutcome(outcome)
+    except ValueError:
+        typer.echo(
+            "Invalid review input. Use card_type=sentence|word and "
+            "outcome=pass|partial|fail.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    db = _get_db()
+    try:
+        result = apply_review(
+            db,
+            parsed_card_type,
+            card_id,
+            parsed_outcome,
+            latency_ms=latency_ms,
+        )
+    except (ReviewCardNotFoundError, ReviewInputError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(
+        f"Reviewed {result.card_type.value} card id={result.card_id}: "
+        f"{result.outcome.value} (quality={result.quality})."
+    )
+    typer.echo(
+        f"Next due: {result.state_after.due_at.date().isoformat()}  "
+        f"state={result.state_after.mastery_state.value}  "
+        f"ef={result.state_after.ef:.2f}  "
+        f"interval={result.state_after.interval_days}d"
+    )
+
+
+# ---------------------------------------------------------------------------
+# profile status
+# ---------------------------------------------------------------------------
+
+@profile_app.command("status")
+def profile_status() -> None:
+    """Show whether a new learner profile snapshot is due."""
+    db = _get_db()
+    try:
+        status = get_profile_trigger_status(db)
+    except ProfileInputError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    state = "due" if status.should_generate else "not due"
+    typer.echo(f"Profile status: {state} ({status.reason})")
+    typer.echo(f"Reviews since snapshot: {status.reviews_since_snapshot}")
+    if status.last_snapshot_at is None:
+        typer.echo("Last snapshot: none")
+    else:
+        typer.echo(f"Last snapshot: {status.last_snapshot_at.date().isoformat()}")
+        typer.echo(f"Days since snapshot: {status.days_since_snapshot}")
+
+
+# ---------------------------------------------------------------------------
+# profile prompt
+# ---------------------------------------------------------------------------
+
+@profile_app.command("prompt")
+def profile_prompt(
+    lookback_days: int = typer.Option(90, "--lookback-days", help="Review lookback window"),
+) -> None:
+    """Print the filled learner-profile prompt for manual AI generation."""
+    db = _get_db()
+    try:
+        prompt = build_profile_prompt(db, lookback_days=lookback_days)
+    except (FileNotFoundError, ProfileInputError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("\n" + "=" * 72)
+    typer.echo("  COPY EVERYTHING BELOW THIS LINE AND PASTE INTO YOUR AI CHAT")
+    typer.echo("=" * 72 + "\n")
+    typer.echo(prompt)
+    typer.echo("\n" + "=" * 72)
+    typer.echo("  When done, run:  trainer profile save")
+    typer.echo("=" * 72 + "\n")
+
+
+# ---------------------------------------------------------------------------
+# profile save
+# ---------------------------------------------------------------------------
+
+@profile_app.command("save")
+def profile_save(
+    lookback_days: int = typer.Option(90, "--lookback-days", help="Stats window for payload"),
+) -> None:
+    """Save a Markdown learner profile summary from stdin."""
+    typer.echo("Paste the Markdown profile from your AI chat. Finish with Ctrl-D:\n")
+    import sys
+    try:
+        summary_md = sys.stdin.read().strip()
+    except (KeyboardInterrupt, EOFError):
+        summary_md = ""
+
+    if not summary_md:
+        typer.echo("No input received.", err=True)
+        raise typer.Exit(1)
+
+    db = _get_db()
+    try:
+        stats = collect_profile_stats(db, lookback_days=lookback_days)
+        snapshot_id = save_profile_snapshot(
+            db,
+            summary_md,
+            payload=profile_stats_to_payload(stats),
+        )
+    except ProfileInputError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Saved learner profile snapshot id={snapshot_id}")
+
+
+# ---------------------------------------------------------------------------
+# profile latest
+# ---------------------------------------------------------------------------
+
+@profile_app.command("latest")
+def profile_latest() -> None:
+    """Print the latest saved learner profile snapshot."""
+    db = _get_db()
+    snapshot = get_latest_profile_snapshot(db)
+    if snapshot is None:
+        typer.echo("No learner profile snapshots yet.")
+        return
+
+    typer.echo(f"Snapshot id={snapshot.id}  created={snapshot.created_at.date().isoformat()}")
+    typer.echo("")
+    typer.echo(snapshot.summary_md)
 
 
 # ---------------------------------------------------------------------------

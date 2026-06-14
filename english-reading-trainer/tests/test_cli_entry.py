@@ -8,6 +8,7 @@ All tests use real SQLite — no mocking.
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,26 @@ def _seed_book_and_sentence(db: DatabaseConnection, tmp_path: Path) -> tuple[int
             (result.book_id,),
         ).fetchone()["id"]
     return result.book_id, sid
+
+
+def _insert_review_log(
+    db: DatabaseConnection,
+    card_type: str,
+    card_id: int,
+    outcome: str = "pass",
+    reviewed_at: datetime | None = None,
+) -> None:
+    quality = {"pass": 5, "partial": 3, "fail": 1}[outcome]
+    reviewed_at = reviewed_at or datetime.now(timezone.utc)
+    with db.get_connection() as conn:
+        conn.execute(
+            """INSERT INTO review_logs
+               (card_type, card_id, reviewed_at, quality, outcome,
+                ef_before, ef_after, interval_before, interval_after,
+                repetitions_before, repetitions_after, latency_ms)
+               VALUES (?, ?, ?, ?, ?, 2.5, 2.5, 1, 1, 1, 1, 0)""",
+            (card_type, card_id, reviewed_at.isoformat(), quality, outcome),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +384,237 @@ class TestCardsWords:
         )
         result = runner.invoke(app, ["cards", "words"])
         assert "collocation" in result.output
+
+
+# ---------------------------------------------------------------------------
+# review due
+# ---------------------------------------------------------------------------
+
+class TestReviewDue:
+    def test_empty_message_when_no_due_cards(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["review", "due"])
+        assert result.exit_code == 0
+        assert "No cards due" in result.output
+
+    def test_shows_due_sentence_card(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+
+        result = runner.invoke(app, ["review", "due"])
+
+        assert result.exit_code == 0
+        assert "sentence" in result.output
+        assert "cat" in result.output or "lovely" in result.output
+
+    def test_limit_option(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        book_id, _ = _seed_book_and_sentence(db, tmp_path)
+        with db.get_connection() as conn:
+            sentence_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM sentences WHERE book_id = ? ORDER BY id",
+                    (book_id,),
+                ).fetchall()
+            ]
+        for sentence_id in sentence_ids:
+            runner.invoke(app, ["mark", "sentence", str(sentence_id)])
+
+        result = runner.invoke(app, ["review", "due", "--limit", "1"])
+
+        assert result.exit_code == 0
+        data_lines = [line for line in result.output.splitlines() if "sentence" in line]
+        assert len(data_lines) == 1
+
+    def test_invalid_limit_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["review", "due", "--limit", "-1"])
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# review answer
+# ---------------------------------------------------------------------------
+
+class TestReviewAnswer:
+    def test_records_sentence_pass(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+                (sid,),
+            ).fetchone()["id"]
+
+        result = runner.invoke(app, ["review", "answer", "sentence", str(card_id), "pass"])
+
+        assert result.exit_code == 0
+        assert "Reviewed sentence card" in result.output
+        with db.get_connection() as conn:
+            card = conn.execute(
+                "SELECT review_count, mastery_state FROM sentence_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+            logs = conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'sentence' AND card_id = ?",
+                (card_id,),
+            ).fetchone()[0]
+        assert card["review_count"] == 1
+        assert card["mastery_state"] == "learning"
+        assert logs == 1
+
+    def test_records_word_partial(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "word", str(sid), "cat"])
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE lemma = 'cat'"
+            ).fetchone()["id"]
+
+        result = runner.invoke(app, ["review", "answer", "word", str(card_id), "partial"])
+
+        assert result.exit_code == 0
+        assert "quality=3" in result.output
+
+    def test_invalid_outcome_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+
+        result = runner.invoke(app, ["review", "answer", "sentence", "1", "easy"])
+
+        assert result.exit_code != 0
+        assert "Invalid review input" in result.output
+
+    def test_missing_card_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["review", "answer", "sentence", "999999", "pass"])
+
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+    def test_negative_latency_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+
+        result = runner.invoke(
+            app,
+            ["review", "answer", "sentence", "1", "pass", "--latency-ms", "-1"],
+        )
+
+        assert result.exit_code != 0
+        assert "latency" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# profile status / prompt / save / latest
+# ---------------------------------------------------------------------------
+
+class TestProfileCommands:
+    def test_profile_status_not_due_without_reviews(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["profile", "status"])
+
+        assert result.exit_code == 0
+        assert "not due" in result.output
+        assert "Last snapshot: none" in result.output
+
+    def test_profile_status_due_after_twenty_reviews(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+                (sid,),
+            ).fetchone()["id"]
+        base_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+        for idx in range(20):
+            _insert_review_log(
+                db,
+                "sentence",
+                card_id,
+                reviewed_at=base_time + timedelta(minutes=idx),
+            )
+
+        result = runner.invoke(app, ["profile", "status"])
+
+        assert result.exit_code == 0
+        assert "due" in result.output
+        assert "review_count" in result.output
+
+    def test_profile_prompt_prints_rendered_prompt(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+                (sid,),
+            ).fetchone()["id"]
+        _insert_review_log(db, "sentence", card_id)
+
+        result = runner.invoke(app, ["profile", "prompt"])
+
+        assert result.exit_code == 0
+        assert "COPY EVERYTHING" in result.output
+        assert "TOTAL REVIEWS:" in result.output
+        assert "{{ total_reviews }}" not in result.output
+
+    def test_profile_prompt_invalid_lookback_exits_nonzero(
+        self, db: DatabaseConnection
+    ) -> None:
+        result = runner.invoke(app, ["profile", "prompt", "--lookback-days", "0"])
+
+        assert result.exit_code != 0
+        assert "lookback_days" in result.output
+
+    def test_profile_save_persists_snapshot(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["mark", "sentence", str(sid)])
+        summary = "## Current Weaknesses\n- Relative clauses need attention."
+
+        result = runner.invoke(app, ["profile", "save"], input=summary)
+
+        assert result.exit_code == 0
+        assert "Saved learner profile snapshot" in result.output
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT summary_md, payload_json FROM learner_profile_snapshots").fetchone()
+        assert "Relative clauses" in row["summary_md"]
+        assert "total_reviews" in row["payload_json"]
+
+    def test_profile_save_empty_input_exits_nonzero(
+        self, db: DatabaseConnection
+    ) -> None:
+        result = runner.invoke(app, ["profile", "save"], input="")
+
+        assert result.exit_code != 0
+        assert "No input" in result.output
+
+    def test_profile_latest_empty_message(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["profile", "latest"])
+
+        assert result.exit_code == 0
+        assert "No learner profile" in result.output
+
+    def test_profile_latest_shows_saved_profile(self, db: DatabaseConnection) -> None:
+        summary = "## Current Weaknesses\n- Pronoun reference is fragile."
+        runner.invoke(app, ["profile", "save"], input=summary)
+
+        result = runner.invoke(app, ["profile", "latest"])
+
+        assert result.exit_code == 0
+        assert "Snapshot id=" in result.output
+        assert "Pronoun reference" in result.output
 
 
 # ---------------------------------------------------------------------------
