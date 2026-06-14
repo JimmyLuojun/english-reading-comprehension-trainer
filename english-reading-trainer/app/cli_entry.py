@@ -32,6 +32,7 @@ from pathlib import Path
 
 import typer
 
+from app.ai.prompt_version_registry import sync_prompt_versions
 from app.cards.sentence_card_service import (
     SentenceCardAlreadyExistsError,
     create_sentence_card,
@@ -74,6 +75,7 @@ def _get_db() -> DatabaseConnection:
     db_path = os.environ.get("TRAINER_DB", str(_DEFAULT_DB))
     db = DatabaseConnection(db_path)
     db.apply_migrations(_MIGRATIONS)
+    sync_prompt_versions(db, _PROJECT_ROOT / "prompts")
     return db
 
 

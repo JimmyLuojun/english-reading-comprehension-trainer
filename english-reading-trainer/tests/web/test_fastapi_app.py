@@ -82,6 +82,25 @@ class TestBasicPages:
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
 
+    def test_default_db_factory_syncs_prompt_versions(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path = tmp_path / "web.db"
+        monkeypatch.setenv("TRAINER_DB", str(db_path))
+        client = TestClient(create_app())
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        db = DatabaseConnection(db_path)
+        with db.get_connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM prompt_versions").fetchone()[0]
+            active_count = conn.execute(
+                "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
+            ).fetchone()[0]
+        assert count == 3
+        assert active_count == 3
+
     def test_dashboard_empty(self, client: TestClient) -> None:
         response = client.get("/")
 

@@ -96,6 +96,18 @@ class TestBooksList:
         assert result.exit_code == 0
         assert "No books" in result.output
 
+    def test_startup_syncs_prompt_versions(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["books", "list"])
+
+        assert result.exit_code == 0
+        with db.get_connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM prompt_versions").fetchone()[0]
+            active_count = conn.execute(
+                "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
+            ).fetchone()[0]
+        assert count == 3
+        assert active_count == 3
+
     def test_shows_imported_book(self, db: DatabaseConnection, tmp_path: Path) -> None:
         _seed_book_and_sentence(db, tmp_path)
         result = runner.invoke(app, ["books", "list"])
