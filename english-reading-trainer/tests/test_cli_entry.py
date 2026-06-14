@@ -6,6 +6,7 @@ Sets TRAINER_DB env var to a tmp_path DB so tests are fully isolated.
 All tests use real SQLite — no mocking.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -362,3 +363,293 @@ class TestCardsWords:
         )
         result = runner.invoke(app, ["cards", "words"])
         assert "collocation" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by ai command tests
+# ---------------------------------------------------------------------------
+
+_VALID_SENTENCE_JSON = json.dumps({
+    "subject_skeleton": "cat sat",
+    "clauses": [
+        {"type": "main", "text": "The cat sat on the mat", "role": "statement"}
+    ],
+    "modifiers": [],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The cat sat on the mat",
+    "chinese_gloss": "猫坐在垫子上",
+    "predicted_error_types": ["G01"],
+    "confidence": 0.9,
+})
+
+_VALID_WORD_JSON = json.dumps({
+    "lemma": "cat",
+    "lexical_type": "word",
+    "pos": "noun",
+    "meaning_in_context": "a small domestic animal",
+    "common_collocations": ["fat cat", "cat nap", "cool cat"],
+    "near_synonyms": ["feline", "kitty"],
+    "confusable_with": [],
+    "morphology": {"root": "", "family": ["cats", "catlike"]},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+})
+
+
+# ---------------------------------------------------------------------------
+# ai prompt-sentence
+# ---------------------------------------------------------------------------
+
+class TestAiPromptSentence:
+    def test_prints_prompt_for_valid_sentence(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-sentence", str(sid)])
+        assert result.exit_code == 0
+        assert "COPY EVERYTHING" in result.output
+
+    def test_output_contains_sentence_text(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-sentence", str(sid)])
+        assert result.exit_code == 0
+        # The seed sentence contains "cat"
+        assert "cat" in result.output.lower()
+
+    def test_shows_save_hint(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-sentence", str(sid)])
+        assert "save-sentence" in result.output
+
+    def test_unknown_sentence_id_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["ai", "prompt-sentence", "999999"])
+        assert result.exit_code != 0
+
+    def test_unknown_sentence_id_shows_error(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["ai", "prompt-sentence", "999999"])
+        assert "error" in result.output.lower() or "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# ai prompt-word
+# ---------------------------------------------------------------------------
+
+class TestAiPromptWord:
+    def test_prints_prompt_for_valid_word(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-word", str(sid), "cat"])
+        assert result.exit_code == 0
+        assert "COPY EVERYTHING" in result.output
+
+    def test_output_contains_surface_form(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-word", str(sid), "cat"])
+        assert "cat" in result.output
+
+    def test_shows_save_hint(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "prompt-word", str(sid), "cat"])
+        assert "save-word" in result.output
+
+    def test_unknown_sentence_id_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["ai", "prompt-word", "999999", "cat"])
+        assert result.exit_code != 0
+
+    def test_unknown_sentence_id_shows_error(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["ai", "prompt-word", "999999", "cat"])
+        assert "error" in result.output.lower() or "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# ai save-sentence
+# ---------------------------------------------------------------------------
+
+class TestAiSaveSentence:
+    def test_valid_json_exits_zero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input=_VALID_SENTENCE_JSON
+        )
+        assert result.exit_code == 0
+
+    def test_valid_json_shows_cache_and_card_ids(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input=_VALID_SENTENCE_JSON
+        )
+        assert "cache_id" in result.output
+        assert "card" in result.output.lower()
+
+    def test_card_created_message(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input=_VALID_SENTENCE_JSON
+        )
+        assert "created" in result.output.lower()
+
+    def test_second_save_shows_updated(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["ai", "save-sentence", str(sid)], input=_VALID_SENTENCE_JSON)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input=_VALID_SENTENCE_JSON
+        )
+        assert result.exit_code == 0
+        assert "updated" in result.output.lower()
+
+    def test_empty_input_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(app, ["ai", "save-sentence", str(sid)], input="")
+        assert result.exit_code != 0
+
+    def test_invalid_json_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input="{ not valid json }"
+        )
+        assert result.exit_code != 0
+
+    def test_invalid_json_shows_validation_failed(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-sentence", str(sid)], input="{ not valid json }"
+        )
+        assert "validation" in result.output.lower() or "error" in result.output.lower()
+
+    def test_unknown_sentence_id_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(
+            app, ["ai", "save-sentence", "999999"], input=_VALID_SENTENCE_JSON
+        )
+        assert result.exit_code != 0
+
+    def test_custom_model_option_accepted(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app,
+            ["ai", "save-sentence", str(sid), "--model", "claude-opus-4-7"],
+            input=_VALID_SENTENCE_JSON,
+        )
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# ai save-word
+# ---------------------------------------------------------------------------
+
+class TestAiSaveWord:
+    def test_valid_json_exits_zero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input=_VALID_WORD_JSON
+        )
+        assert result.exit_code == 0
+
+    def test_valid_json_shows_cache_and_card_ids(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input=_VALID_WORD_JSON
+        )
+        assert "cache_id" in result.output
+        assert "card" in result.output.lower()
+
+    def test_card_created_message(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input=_VALID_WORD_JSON
+        )
+        assert "created" in result.output.lower()
+
+    def test_second_save_shows_updated(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        runner.invoke(app, ["ai", "save-word", str(sid), "cat"], input=_VALID_WORD_JSON)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input=_VALID_WORD_JSON
+        )
+        assert result.exit_code == 0
+        assert "updated" in result.output.lower()
+
+    def test_empty_input_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input=""
+        )
+        assert result.exit_code != 0
+
+    def test_invalid_json_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "cat"], input="not json"
+        )
+        assert result.exit_code != 0
+
+    def test_unknown_sentence_id_exits_nonzero(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(
+            app, ["ai", "save-word", "999999", "cat"], input=_VALID_WORD_JSON
+        )
+        assert result.exit_code != 0
+
+    def test_multiword_surface_form(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        phrase_json = json.dumps({
+            "lemma": "sit on",
+            "lexical_type": "phrase",
+            "pos": "phrase",
+            "meaning_in_context": "to be positioned on top of",
+            "common_collocations": ["sit on the fence", "sit on hands"],
+            "near_synonyms": [],
+            "confusable_with": [],
+            "morphology": {"root": "", "family": []},
+            "predicted_error_types": ["L03"],
+            "confidence": 0.85,
+        })
+        result = runner.invoke(
+            app, ["ai", "save-word", str(sid), "sat on"], input=phrase_json
+        )
+        assert result.exit_code == 0
+
+    def test_custom_model_option_accepted(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app,
+            ["ai", "save-word", str(sid), "cat", "--model", "gemini-2.0-flash"],
+            input=_VALID_WORD_JSON,
+        )
+        assert result.exit_code == 0

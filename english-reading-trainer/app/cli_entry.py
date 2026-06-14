@@ -15,6 +15,10 @@ Usage examples:
   trainer mark word 42 "give rise to" --type phrase
   trainer cards sentences
   trainer cards words
+  trainer ai prompt-sentence 42          # print prompt → paste into AI chat
+  trainer ai prompt-word 42 "mitigate"  # print word prompt
+  trainer ai save-sentence 42            # paste JSON when prompted
+  trainer ai save-word 42 "mitigate"    # paste JSON when prompted
 """
 
 import os
@@ -62,11 +66,13 @@ books_app   = typer.Typer(help="Manage imported books.")
 import_app  = typer.Typer(help="Import a book into the trainer.")
 mark_app    = typer.Typer(help="Mark a sentence or word for review.")
 cards_app   = typer.Typer(help="List and inspect cards.")
+ai_app      = typer.Typer(help="AI analysis: generate prompts and save results.")
 
 app.add_typer(books_app,  name="books")
 books_app.add_typer(import_app, name="import")
 app.add_typer(mark_app,   name="mark")
 app.add_typer(cards_app,  name="cards")
+app.add_typer(ai_app,     name="ai")
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +427,148 @@ def cards_words(
             c["mastery_state"], f"{c['ef']:.1f}",
             c["occurrence_count"], due,
         ])
+
+
+# ---------------------------------------------------------------------------
+# ai prompt-sentence / prompt-word
+# ---------------------------------------------------------------------------
+
+@ai_app.command("prompt-sentence")
+def ai_prompt_sentence(
+    sentence_id: int = typer.Argument(..., help="Sentence ID from 'trainer read'"),
+) -> None:
+    """Print the filled analysis prompt — paste it into Claude / Gemini / Codex chat."""
+    from app.ai.context_builder import build_sentence_prompt
+    db = _get_db()
+    try:
+        prompt = build_sentence_prompt(db, sentence_id)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("\n" + "=" * 72)
+    typer.echo("  COPY EVERYTHING BELOW THIS LINE AND PASTE INTO YOUR AI CHAT")
+    typer.echo("=" * 72 + "\n")
+    typer.echo(prompt)
+    typer.echo("\n" + "=" * 72)
+    typer.echo(f"  When done, run:  trainer ai save-sentence {sentence_id}")
+    typer.echo("=" * 72 + "\n")
+
+
+@ai_app.command("prompt-word")
+def ai_prompt_word(
+    sentence_id:  int = typer.Argument(..., help="Sentence ID containing the word"),
+    surface_form: str = typer.Argument(..., help="Word or phrase as it appears in text"),
+) -> None:
+    """Print the filled word-analysis prompt — paste into AI chat."""
+    from app.ai.context_builder import build_word_prompt
+    db = _get_db()
+    try:
+        prompt = build_word_prompt(db, sentence_id, surface_form)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("\n" + "=" * 72)
+    typer.echo("  COPY EVERYTHING BELOW THIS LINE AND PASTE INTO YOUR AI CHAT")
+    typer.echo("=" * 72 + "\n")
+    typer.echo(prompt)
+    typer.echo("\n" + "=" * 72)
+    typer.echo(
+        f"  When done, run:  trainer ai save-word {sentence_id} \"{surface_form}\""
+    )
+    typer.echo("=" * 72 + "\n")
+
+
+# ---------------------------------------------------------------------------
+# ai save-sentence / save-word
+# ---------------------------------------------------------------------------
+
+@ai_app.command("save-sentence")
+def ai_save_sentence(
+    sentence_id:    int = typer.Argument(..., help="Sentence ID"),
+    model:          str = typer.Option("manual", "--model", "-m",
+                        help="Model label (e.g. claude-opus-4-7, gemini-2.0)"),
+    prompt_version: str = typer.Option("v1", "--prompt-version", "-p"),
+) -> None:
+    """
+    Save a sentence analysis JSON returned by your AI chat.
+
+    Paste the JSON when prompted (finish with Ctrl-D on a new line).
+    """
+    from app.ai.analysis_saver import save_sentence_analysis
+    typer.echo("Paste the JSON from your AI chat. Finish with Ctrl-D (Mac/Linux):\n")
+    import sys
+    try:
+        raw_json = sys.stdin.read().strip()
+    except (KeyboardInterrupt, EOFError):
+        raw_json = ""
+
+    if not raw_json:
+        typer.echo("No input received.", err=True)
+        raise typer.Exit(1)
+
+    db = _get_db()
+    try:
+        result = save_sentence_analysis(
+            db, sentence_id, raw_json, model=model, prompt_version=prompt_version
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not result.is_valid:
+        typer.echo(f"Validation failed — saved as invalid (cache id={result.cache_id}).")
+        typer.echo(f"Error: {result.error[:200]}", err=True)
+        raise typer.Exit(1)
+
+    action = "created" if result.card_created else "updated"
+    typer.echo(f"Saved  cache_id={result.cache_id}")
+    typer.echo(f"Card {action}  card_id={result.card_id}")
+
+
+@ai_app.command("save-word")
+def ai_save_word(
+    sentence_id:    int = typer.Argument(..., help="Sentence ID containing the word"),
+    surface_form:   str = typer.Argument(..., help="Word or phrase"),
+    model:          str = typer.Option("manual", "--model", "-m"),
+    prompt_version: str = typer.Option("v1", "--prompt-version", "-p"),
+) -> None:
+    """
+    Save a word/phrase analysis JSON returned by your AI chat.
+
+    Paste the JSON when prompted (finish with Ctrl-D on a new line).
+    """
+    from app.ai.analysis_saver import save_word_analysis
+    typer.echo("Paste the JSON from your AI chat. Finish with Ctrl-D (Mac/Linux):\n")
+    import sys
+    try:
+        raw_json = sys.stdin.read().strip()
+    except (KeyboardInterrupt, EOFError):
+        raw_json = ""
+
+    if not raw_json:
+        typer.echo("No input received.", err=True)
+        raise typer.Exit(1)
+
+    db = _get_db()
+    try:
+        result = save_word_analysis(
+            db, sentence_id, surface_form, raw_json,
+            model=model, prompt_version=prompt_version,
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not result.is_valid:
+        typer.echo(f"Validation failed — saved as invalid (cache id={result.cache_id}).")
+        typer.echo(f"Error: {result.error[:200]}", err=True)
+        raise typer.Exit(1)
+
+    action = "created" if result.card_created else "updated"
+    typer.echo(f"Saved  cache_id={result.cache_id}")
+    typer.echo(f"Card {action}  card_id={result.card_id}")
 
 
 # ---------------------------------------------------------------------------
