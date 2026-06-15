@@ -15,6 +15,7 @@ from app.cards.word_card_service import (
     get_word_card,
     get_word_card_by_lemma,
     list_word_cards,
+    update_word_card_note,
 )
 from app.db_connection import DatabaseConnection
 from app.db_models import LexicalType, SM2_DEFAULT_EF
@@ -334,3 +335,51 @@ class TestArchiveWordCard:
     def test_archive_missing_active_card_raises(self, db: DatabaseConnection) -> None:
         with pytest.raises(WordCardNotFoundError):
             archive_word_card(db, 99999)
+
+
+class TestUpdateWordCardNote:
+    def test_updates_meaning_and_note(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "note-a")
+        card_id, _ = create_or_update_word_card(db, sid, "ephemeral")
+
+        update_word_card_note(db, card_id, current_meaning="短暂的", user_note="常考词")
+
+        card = get_word_card(db, card_id)
+        assert card is not None
+        assert card["current_meaning"] == "短暂的"
+        assert card["user_note"] == "常考词"
+
+    def test_strips_whitespace(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "note-b")
+        card_id, _ = create_or_update_word_card(db, sid, "ephemeral")
+
+        update_word_card_note(db, card_id, current_meaning="  短暂的  ", user_note="  note  ")
+
+        card = get_word_card(db, card_id)
+        assert card is not None
+        assert card["current_meaning"] == "短暂的"
+        assert card["user_note"] == "note"
+
+    def test_clears_fields_when_empty(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "note-c")
+        card_id, _ = create_or_update_word_card(db, sid, "ephemeral")
+        update_word_card_note(db, card_id, current_meaning="先填", user_note="先填")
+
+        update_word_card_note(db, card_id, current_meaning="", user_note="")
+
+        card = get_word_card(db, card_id)
+        assert card is not None
+        assert card["current_meaning"] == ""
+        assert card["user_note"] == ""
+
+    def test_missing_card_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(WordCardNotFoundError):
+            update_word_card_note(db, 99999, current_meaning="x")
+
+    def test_archived_card_raises(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "note-d")
+        card_id, _ = create_or_update_word_card(db, sid, "ephemeral")
+        archive_word_card(db, card_id)
+
+        with pytest.raises(WordCardNotFoundError):
+            update_word_card_note(db, card_id, current_meaning="x")

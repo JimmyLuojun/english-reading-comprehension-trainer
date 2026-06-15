@@ -36,6 +36,7 @@ from app.cards.word_card_service import (
     archive_word_card,
     create_or_update_word_card,
     list_word_cards,
+    update_word_card_note,
 )
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
@@ -378,6 +379,21 @@ def create_app(
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
 
+    @web_app.patch("/mark/word/{card_id}")
+    async def update_word_note_endpoint(card_id: int, request: Request) -> JSONResponse:
+        form = await _read_form(request)
+        db = db_factory()
+        try:
+            update_word_card_note(
+                db,
+                card_id,
+                current_meaning=form.get("current_meaning", ""),
+                user_note=form.get("user_note", ""),
+            )
+        except WordCardNotFoundError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+        return JSONResponse({"ok": True})
+
     @web_app.get("/cards", response_class=HTMLResponse)
     def cards() -> HTMLResponse:
         db = db_factory()
@@ -600,7 +616,8 @@ def _fetch_chapter_sentences(
 def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT id, lemma, surface_form, lexical_type, first_sentence_id
+            """SELECT id, lemma, surface_form, lexical_type, first_sentence_id,
+                      current_meaning, user_note
                  FROM word_cards
                 WHERE archived_at IS NULL
                 ORDER BY created_at DESC"""
@@ -866,8 +883,12 @@ def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
     cursor = 0
     for start, end, card in selected:
         pieces.append(_escape(text[cursor:start]))
+        meaning = _escape(str(card.get("current_meaning") or ""))
+        note = _escape(str(card.get("user_note") or ""))
         pieces.append(
-            f'<span data-word-card="{card["id"]}">{_escape(text[start:end])}</span>'
+            f'<span data-word-card="{card["id"]}"'
+            f' data-meaning="{meaning}" data-note="{note}"'
+            f'>{_escape(text[start:end])}</span>'
         )
         cursor = end
     pieces.append(_escape(text[cursor:]))
@@ -876,7 +897,12 @@ def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
 
 def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
     word_index = {
-        card["lemma"]: {"id": card["id"], "surface_form": card["surface_form"]}
+        card["lemma"]: {
+            "id": card["id"],
+            "surface_form": card["surface_form"],
+            "current_meaning": card.get("current_meaning") or "",
+            "user_note": card.get("user_note") or "",
+        }
         for card in word_cards
     }
     return f"""
@@ -914,9 +940,25 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <span class="toolbar-status">In cards</span>
         <button id="toolbar-word-delete" type="button" class="danger">Remove from cards</button>
       </div>
+      <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
+        <strong id="toolbar-word-detail-surface" class="word-detail-surface"></strong>
+        <div class="word-detail-fields">
+          <label class="word-detail-label">Meaning
+            <input id="toolbar-word-detail-meaning" type="text" placeholder="Definition…">
+          </label>
+          <label class="word-detail-label">Note
+            <input id="toolbar-word-detail-note" type="text" placeholder="Your note…">
+          </label>
+        </div>
+        <div class="word-detail-actions">
+          <button id="toolbar-word-detail-save" type="button">Save</button>
+          <button id="toolbar-word-detail-remove" type="button" class="danger">Remove from cards</button>
+        </div>
+      </div>
       <div id="toolbar-cross-sentence" class="toolbar-group" hidden>
         <span class="toolbar-status">Selection spans sentences</span>
-        <button id="toolbar-clear" type="button">Clear</button>
+        <button id="toolbar-cross-sentence-delete" type="button" class="danger" hidden>Unmark sentences</button>
+        <button id="toolbar-dismiss" type="button">Dismiss</button>
       </div>
     </div>
     <script id="word-card-index" type="application/json">{_json_script(word_index)}</script>
@@ -992,8 +1034,15 @@ def _selection_script() -> str:
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
       const wordExisting = document.getElementById("toolbar-word-existing");
       const wordDelete = document.getElementById("toolbar-word-delete");
+      const wordDetail = document.getElementById("toolbar-word-detail");
+      const wordDetailSurface = document.getElementById("toolbar-word-detail-surface");
+      const wordDetailMeaning = document.getElementById("toolbar-word-detail-meaning");
+      const wordDetailNote = document.getElementById("toolbar-word-detail-note");
+      const wordDetailSave = document.getElementById("toolbar-word-detail-save");
+      const wordDetailRemove = document.getElementById("toolbar-word-detail-remove");
       const crossSentence = document.getElementById("toolbar-cross-sentence");
-      const clearButton = document.getElementById("toolbar-clear");
+      const crossSentenceDelete = document.getElementById("toolbar-cross-sentence-delete");
+      const dismissButton = document.getElementById("toolbar-dismiss");
       const panel = document.getElementById("analysis-panel");
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
@@ -1012,6 +1061,8 @@ def _selection_script() -> str:
       let activeSentenceTranslation = "";
       let activeWordCardId = null;
       let activeWordCardIds = [];
+      let activeCrossSentenceIds = [];
+      let activeWordDetailCardId = null;
       let activeAnalysisSentenceId = null;
       let translationEditorOpen = false;
       let progressTimer = null;
@@ -1027,12 +1078,16 @@ def _selection_script() -> str:
 
       function hideToolbar() {
         hideTranslationEditor();
+        setVisible(wordDetail, false);
         toolbar.hidden = true;
         activeSentenceId = null;
         activeSentenceTranslation = "";
         activeWordCardId = null;
         activeWordCardIds = [];
+        activeCrossSentenceIds = [];
+        activeWordDetailCardId = null;
         wordDelete.dataset.cardIds = "";
+        crossSentenceDelete.dataset.sentenceIds = "";
       }
 
       function setVisible(element, visible) {
@@ -1063,15 +1118,18 @@ def _selection_script() -> str:
         return Array.from(new Set(ids));
       }
 
-      function showToolbar(range) {
-        const rect = range.getBoundingClientRect();
-        const fallbackRect = range.getClientRects()[0];
-        const anchor = rect.width || rect.height ? rect : fallbackRect;
-        if (!anchor) {
-          hideToolbar();
-          return;
-        }
+      function configureCrossSentenceActions(spans) {
+        activeCrossSentenceIds = spans
+          .filter((span) => span.dataset.marked === "1")
+          .map((span) => span.dataset.sentenceId)
+          .filter(Boolean);
+        crossSentenceDelete.dataset.sentenceIds = activeCrossSentenceIds.join(",");
+        crossSentenceDelete.textContent =
+          `Unmark ${activeCrossSentenceIds.length} sentence${activeCrossSentenceIds.length === 1 ? "" : "s"}`;
+        setVisible(crossSentenceDelete, activeCrossSentenceIds.length > 0);
+      }
 
+      function positionToolbar(anchor) {
         toolbar.hidden = false;
         requestAnimationFrame(() => {
           const toolbarRect = toolbar.getBoundingClientRect();
@@ -1086,6 +1144,28 @@ def _selection_script() -> str:
           toolbar.style.top = `${top}px`;
           toolbar.style.left = `${left}px`;
         });
+      }
+
+      function showToolbar(range) {
+        const rect = range.getBoundingClientRect();
+        const fallbackRect = range.getClientRects()[0];
+        const anchor = rect.width || rect.height ? rect : fallbackRect;
+        if (!anchor) { hideToolbar(); return; }
+        positionToolbar(anchor);
+      }
+
+      function showWordDetail(span) {
+        activeWordDetailCardId = span.dataset.wordCard;
+        wordDetailSurface.textContent = span.textContent;
+        wordDetailMeaning.value = span.dataset.meaning || "";
+        wordDetailNote.value = span.dataset.note || "";
+        wordDetailRemove.dataset.cardId = activeWordDetailCardId;
+        setVisible(sentenceForm, false);
+        setVisible(wordForm, false);
+        setVisible(wordExisting, false);
+        setVisible(crossSentence, false);
+        setVisible(wordDetail, true);
+        positionToolbar(span.getBoundingClientRect());
       }
 
       function updateToolbar() {
@@ -1110,8 +1190,12 @@ def _selection_script() -> str:
           setVisible(wordForm, false);
           setVisible(wordExisting, false);
           setVisible(crossSentence, spans.length > 1);
-          if (spans.length > 1) showToolbar(range);
-          else hideToolbar();
+          if (spans.length > 1) {
+            configureCrossSentenceActions(spans);
+            showToolbar(range);
+          } else {
+            hideToolbar();
+          }
           return;
         }
 
@@ -1146,6 +1230,7 @@ def _selection_script() -> str:
         setVisible(wordForm, !wholeSentence && !activeWordCardId);
         setVisible(wordExisting, !wholeSentence && Boolean(activeWordCardId));
         setVisible(crossSentence, false);
+        configureCrossSentenceActions([]);
         showToolbar(range);
       }
 
@@ -1228,6 +1313,37 @@ def _selection_script() -> str:
           }
         }
         window.location.assign(returnTo);
+      }
+
+      function markSentenceSpanUnmarked(sentenceId) {
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        if (!sentence) return;
+        sentence.classList.remove("marked", "analyzed", "analyzed-stale");
+        sentence.dataset.marked = "0";
+        sentence.dataset.analysisId = "";
+        sentence.dataset.analysisStale = "0";
+        sentence.dataset.translation = "";
+      }
+
+      async function deleteSentenceCardsInPlace(sentenceIds) {
+        const ids = Array.from(new Set(sentenceIds.filter(Boolean)));
+        if (!ids.length) return;
+        ids.forEach(markSentenceSpanUnmarked);
+        const requests = ids.map((sentenceId) => {
+          const url = `/mark/sentence/${sentenceId}?return_to=${encodeURIComponent(returnTo)}`;
+          return fetch(url, { method: "DELETE" }).then((response) => ({
+            sentenceId,
+            response,
+          }));
+        });
+        const results = await Promise.all(requests);
+        const failed = results.find((result) => !result.response.ok);
+        if (failed) {
+          window.location.assign(failed.response.url || returnTo);
+          return;
+        }
+        window.getSelection()?.removeAllRanges();
+        hideToolbar();
       }
 
       function openTranslationEditor() {
@@ -1470,7 +1586,14 @@ def _selection_script() -> str:
           .filter(Boolean);
         if (ids.length) deleteWordCardsAndReload(ids);
       });
-      clearButton.addEventListener("click", () => {
+      crossSentenceDelete.addEventListener("click", () => {
+        const ids = (crossSentenceDelete.dataset.sentenceIds || "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        if (ids.length) deleteSentenceCardsInPlace(ids);
+      });
+      dismissButton.addEventListener("click", () => {
         window.getSelection()?.removeAllRanges();
         hideToolbar();
       });
@@ -1479,11 +1602,34 @@ def _selection_script() -> str:
       panelRetry.addEventListener("click", () => {
         if (activeAnalysisSentenceId) requestAnalysis(activeAnalysisSentenceId, null);
       });
+      wordDetailSave.addEventListener("click", async () => {
+        if (!activeWordDetailCardId) return;
+        const cardId = activeWordDetailCardId;
+        const meaning = wordDetailMeaning.value;
+        const note = wordDetailNote.value;
+        const body = new URLSearchParams({ current_meaning: meaning, user_note: note });
+        const resp = await fetch(`/mark/word/${cardId}`, { method: "PATCH", body });
+        if (resp.ok) {
+          const span = reader.querySelector(`[data-word-card="${cardId}"]`);
+          if (span) { span.dataset.meaning = meaning; span.dataset.note = note; }
+          hideToolbar();
+        }
+      });
+      wordDetailRemove.addEventListener("click", () => {
+        const cardId = wordDetailRemove.dataset.cardId;
+        if (cardId) deleteWordCardsAndReload([cardId]);
+      });
       reader.addEventListener("click", (event) => {
+        const selection = window.getSelection();
+        const hasSelection = selection && !selection.isCollapsed;
+        const wordSpan = event.target.closest("[data-word-card]");
+        if (wordSpan && !hasSelection) {
+          showWordDetail(wordSpan);
+          return;
+        }
         const sentence = event.target.closest("[data-sentence-id]");
         if (!sentence || !sentence.dataset.analysisId) return;
-        const selection = window.getSelection();
-        if (selection && !selection.isCollapsed) return;
+        if (hasSelection) return;
         loadSavedAnalysis(sentence.dataset.sentenceId);
       });
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
@@ -1958,6 +2104,38 @@ def _css() -> str:
       color: #e5e7eb;
       font-size: 14px;
       white-space: nowrap;
+    }
+    .word-detail-panel {
+      display: grid;
+      gap: 8px;
+      width: min(340px, calc(92vw - 16px));
+    }
+    .word-detail-panel[hidden] { display: none; }
+    .word-detail-surface {
+      color: #f1f5f9;
+      font-size: 15px;
+    }
+    .word-detail-fields {
+      display: grid;
+      gap: 6px;
+    }
+    .word-detail-label {
+      display: grid;
+      gap: 3px;
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    .word-detail-label input {
+      background: #f9fafb;
+      color: #111827;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 14px;
+    }
+    .word-detail-actions {
+      display: flex;
+      gap: 6px;
     }
     .translation-editor {
       display: grid;

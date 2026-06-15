@@ -171,5 +171,30 @@ def archive_word_card(db: DatabaseConnection, card_id: int) -> int:
     return existing["id"]
 
 
+def update_word_card_note(
+    db: DatabaseConnection,
+    card_id: int,
+    current_meaning: str = "",
+    user_note: str = "",
+) -> int:
+    """
+    Update current_meaning and user_note on an active word card.
+
+    Returns the card id. Raises WordCardNotFoundError if not found.
+    """
+    with db.get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM word_cards WHERE id = ? AND archived_at IS NULL",
+            (card_id,),
+        ).fetchone()
+        if existing is None:
+            raise WordCardNotFoundError(f"Active word card id={card_id} not found.")
+        conn.execute(
+            "UPDATE word_cards SET current_meaning = ?, user_note = ? WHERE id = ?",
+            (current_meaning.strip(), user_note.strip(), card_id),
+        )
+    return card_id
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()

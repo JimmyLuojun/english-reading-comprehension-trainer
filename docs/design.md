@@ -593,6 +593,63 @@ ALTER TABLE word_cards     ADD COLUMN archived_at;
 
 `[新增 2026-06-15]`
 
+### 14.7 "Clear" 按钮语义修正
+
+当前 "Clear" 按钮的实际行为是 `window.getSelection().removeAllRanges()` + `hideToolbar()`——**仅取消文字选区，不触及任何卡片数据**。但用户自然地将其理解为"清除我的标记（黄色高亮）"，造成点击后页面无变化的困惑。
+
+修正：将按钮文案改为 **"Dismiss"**（取消选区），语义准确，不再暗示会删除标记。
+
+### 14.8 跨句选区批量取消标记
+
+**场景**：用户已经掌握了某个难句群，想一次性清除多个句子的黄色高亮，同时保留句子内的词卡下划线。
+
+**当前缺口**：跨句选区（`spans.length > 1`）时，浮层只显示词标记按钮 + "Selection spans sentences" + "Clear"，没有取消难句标记的路径。单句 "Unmark sentence" 按钮只在 `spans.length === 1` 时出现。
+
+**行为设计**：
+
+```text
+跨句选区（选中 N 个句子）
+  ├── 若选中范围内有已标记句子（M 个）
+  │     └── 显示 "Unmark M sentences" 按钮
+  │           → 并发 DELETE /mark/sentence/{id}（每个 marked 句子一个请求）
+  │           → DOM 乐观更新：移除对应 span 的 .marked / .analyzed / .analyzed-stale class
+  │           → 词卡 span（[data-word-card]）不受影响，下划线保留
+  │           → 全部请求完成后收起浮层，取消选区
+  └── 若选中范围内无已标记句子
+        └── 不显示该按钮（无需操作）
+```
+
+**词卡保留的原因**：`DELETE /mark/sentence/{id}` 只软删 `sentence_cards` 表（`archived_at`），`word_cards` 是完全独立的表，不受影响。用户在该句子内标记过的生词/短语下划线天然保留，无需额外处理。
+
+**前端实现要点**：
+
+```javascript
+// 在 updateToolbar() 的跨句分支中
+const markedSpans = spans.filter(s => s.dataset.marked === "1");
+unmarkSentencesBtn.hidden = markedSpans.length === 0;
+unmarkSentencesBtn.textContent =
+  `Unmark ${markedSpans.length} sentence${markedSpans.length > 1 ? "s" : ""}`;
+unmarkSentencesBtn.dataset.sentenceIds =
+  markedSpans.map(s => s.dataset.sentenceId).join(",");
+
+// 点击处理
+const ids = unmarkSentencesBtn.dataset.sentenceIds.split(",").filter(Boolean);
+await Promise.all(ids.map(id =>
+  fetch(`/mark/sentence/${id}`, { method: "DELETE" })
+));
+// 乐观更新 DOM
+ids.forEach(id => {
+  const span = reader.querySelector(`[data-sentence-id="${id}"]`);
+  if (!span) return;
+  span.classList.remove("marked", "analyzed", "analyzed-stale");
+  span.dataset.marked = "0";
+});
+window.getSelection()?.removeAllRanges();
+hideToolbar();
+```
+
+`[新增 2026-06-15]`
+
 ---
 
 ## 15. 用户译文驱动 AI 诊断（取代纯预测）
@@ -1017,7 +1074,7 @@ WHERE id = ? AND archived_at IS NULL
 - [x] §11 画像生成时机
 - [x] §12 技术栈与目录
 - [x] §13 开工顺序
-- [ ] §14 阅读交互：选中即操作
+- [ ] §14 阅读交互：选中即操作（§14.7 Clear→Dismiss 重命名；§14.8 跨句批量取消标记）
 - [x] §15 用户译文驱动 AI 诊断
 - [ ] §16 AI Provider 配置（DeepSeek 默认）
 - [x] §17 阅读视图排版
