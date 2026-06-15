@@ -367,3 +367,206 @@ class TestProfileRoutes:
 
         assert response.status_code == 200
         assert "Modifier attachment" in response.text
+
+
+class TestImportRoutes:
+    def test_import_page_renders_both_forms(self, client: TestClient) -> None:
+        response = client.get("/import")
+
+        assert response.status_code == 200
+        assert "Upload TXT file" in response.text
+        assert "Paste text" in response.text
+        assert "/import/file" in response.text
+        assert "/import/paste" in response.text
+
+    def test_import_nav_link_present(self, client: TestClient) -> None:
+        response = client.get("/")
+
+        assert "/import" in response.text
+
+    # --- POST /import/file ---
+
+    def test_import_file_success_redirects_to_read(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        content = b"The morning sun rose. Birds began to sing outside the window."
+        response = client.post(
+            "/import/file",
+            files={"file": ("article.txt", content, "text/plain")},
+            data={"title": "Morning Article", "author": "Test Author"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/read/")
+        with db.get_connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        assert count == 1
+
+    def test_import_file_auto_title_from_first_line(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        content = b"The Grand Adventure\n\nThis story begins on a cold day."
+        client.post(
+            "/import/file",
+            files={"file": ("a.txt", content, "text/plain")},
+            data={"title": "", "author": ""},
+            follow_redirects=False,
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title FROM books LIMIT 1").fetchone()
+        assert row["title"] == "The Grand Adventure"
+
+    def test_import_file_auto_title_fallback_when_blank_bytes(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        # All lines empty/whitespace → title falls back to "Untitled Import …"
+        content = b"   \n\nSome actual sentence here."
+        client.post(
+            "/import/file",
+            files={"file": ("b.txt", content, "text/plain")},
+            data={"title": "", "author": ""},
+            follow_redirects=False,
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title FROM books LIMIT 1").fetchone()
+        assert "Some actual sentence here." in row["title"] or row["title"].startswith("Untitled Import")
+
+    def test_import_file_empty_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/import/file",
+            files={"file": ("empty.txt", b"", "text/plain")},
+            data={"title": "Empty"},
+        )
+
+        assert response.status_code == 400
+        assert "empty" in response.text.lower()
+
+    def test_import_file_oversized_returns_413(self, client: TestClient) -> None:
+        big = b"A" * (10 * 1024 * 1024 + 1)
+        response = client.post(
+            "/import/file",
+            files={"file": ("big.txt", big, "text/plain")},
+            data={"title": "Big"},
+        )
+
+        assert response.status_code == 413
+        assert "10 MB" in response.text
+
+    def test_import_file_duplicate_returns_409_with_link(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        content = b"A unique sentence for the duplicate file test."
+        client.post(
+            "/import/file",
+            files={"file": ("dup.txt", content, "text/plain")},
+            data={"title": "First Import"},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/file",
+            files={"file": ("dup2.txt", content, "text/plain")},
+            data={"title": "Second Import"},
+        )
+
+        assert response.status_code == 409
+        assert "Already imported" in response.text
+        assert "/read/" in response.text
+
+    # --- POST /import/paste ---
+
+    def test_import_paste_success_redirects_to_read(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        response = client.post(
+            "/import/paste",
+            data={
+                "title": "Pasted Article",
+                "author": "Paste Author",
+                "text": "Science advances one experiment at a time. Results matter.",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/read/")
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, author FROM books LIMIT 1").fetchone()
+        assert row["title"] == "Pasted Article"
+        assert row["author"] == "Paste Author"
+
+    def test_import_paste_auto_title_from_text(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        client.post(
+            "/import/paste",
+            data={"title": "", "author": "", "text": "Auto Title Line\n\nBody paragraph here."},
+            follow_redirects=False,
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title FROM books LIMIT 1").fetchone()
+        assert row["title"] == "Auto Title Line"
+
+    def test_import_paste_empty_text_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/import/paste",
+            data={"title": "Blank", "author": "", "text": ""},
+        )
+
+        assert response.status_code == 400
+        assert "empty" in response.text.lower()
+
+    def test_import_paste_whitespace_only_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/import/paste",
+            data={"title": "WS", "author": "", "text": "   \n\t  "},
+        )
+
+        assert response.status_code == 400
+
+    def test_import_paste_oversized_returns_413(self, client: TestClient) -> None:
+        big = "A" * (10 * 1024 * 1024 + 1)
+        response = client.post(
+            "/import/paste",
+            data={"title": "Big", "author": "", "text": big},
+        )
+
+        assert response.status_code == 413
+
+    def test_import_paste_duplicate_returns_409(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        text = "A unique sentence for the paste duplicate test."
+        client.post(
+            "/import/paste",
+            data={"title": "First Paste", "author": "", "text": text},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/paste",
+            data={"title": "Second Paste", "author": "", "text": text},
+        )
+
+        assert response.status_code == 409
+        assert "Already imported" in response.text
+
+    def test_file_and_paste_same_content_collide(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        """File import and paste import share file_hash space — same bytes = duplicate."""
+        content = "Cross-channel duplicate detection sentence."
+        client.post(
+            "/import/file",
+            files={"file": ("x.txt", content.encode("utf-8"), "text/plain")},
+            data={"title": "Via File"},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/paste",
+            data={"title": "Via Paste", "author": "", "text": content},
+        )
+
+        assert response.status_code == 409

@@ -22,6 +22,7 @@ from app.importers.txt_importer import (
     _is_heading,
     _split_chapters,
     _text_hash,
+    import_text,
     import_txt,
 )
 from app.nlp.sentence_segmenter import normalize_for_hash
@@ -390,6 +391,66 @@ class TestImportTxtEncoding:
         f.write_bytes(content.encode("utf-8-sig"))
         result = import_txt(db, f, title="BOM Book")
         assert result.sentence_count >= 1
+
+
+class TestImportText:
+    """Direct tests for the bytes-input entry point used by the Web UI."""
+
+    def test_basic_import_returns_result(self, db: DatabaseConnection) -> None:
+        result = import_text(db, b"Hello world. This is a test.", title="Pasted")
+        assert isinstance(result, ImportResult)
+        assert result.sentence_count >= 1
+
+    def test_book_row_inserted_with_metadata(self, db: DatabaseConnection) -> None:
+        result = import_text(
+            db, b"Some content.", title="Pasted Title", author="Pasted Author"
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM books WHERE id = ?", (result.book_id,)
+            ).fetchone()
+        assert row["title"] == "Pasted Title"
+        assert row["author"] == "Pasted Author"
+        assert row["source_format"] == "txt"
+
+    def test_file_hash_matches_sha256_of_bytes(self, db: DatabaseConnection) -> None:
+        raw = b"Hash check sentence."
+        result = import_text(db, raw, title="Hash")
+        expected = hashlib.sha256(raw).hexdigest()
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT file_hash FROM books WHERE id = ?", (result.book_id,)
+            ).fetchone()
+        assert row["file_hash"] == expected
+
+    def test_empty_bytes_raises_value_error(self, db: DatabaseConnection) -> None:
+        with pytest.raises(ValueError, match="no usable text"):
+            import_text(db, b"", title="Empty")
+
+    def test_whitespace_only_raises_value_error(self, db: DatabaseConnection) -> None:
+        with pytest.raises(ValueError, match="no usable text"):
+            import_text(db, b"   \n\t  ", title="WS")
+
+    def test_duplicate_bytes_raise(self, db: DatabaseConnection) -> None:
+        raw = b"A unique pasted snippet."
+        import_text(db, raw, title="First")
+        with pytest.raises(DuplicateBookError):
+            import_text(db, raw, title="Second")
+
+    def test_same_bytes_via_file_and_text_collide(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        """import_txt and import_text must share the file_hash space."""
+        content = "Shared content between file and paste."
+        f = write_txt(tmp_path, "shared.txt", content)
+        import_txt(db, f, title="File path")
+        with pytest.raises(DuplicateBookError):
+            import_text(db, content.encode("utf-8"), title="Paste path")
+
+    def test_chapter_detection_works_via_bytes(self, db: DatabaseConnection) -> None:
+        text = "Chapter 1\nContent A.\n\nChapter 2\nContent B."
+        result = import_text(db, text.encode("utf-8"), title="Two chapters")
+        assert result.chapter_count == 2
 
 
 class TestImportTxtHierarchyIntegrity:

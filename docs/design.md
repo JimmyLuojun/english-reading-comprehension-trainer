@@ -108,7 +108,7 @@ prompt_versions(id, name, version, body_md, created_at, is_active)
 
 ### 1.3 说明
 
-- `text_hash` 用 SHA256(normalized_text)；用于跨书去重（见 §4）。
+- `text_hash` 用 SHA256(normalized\_text)；用于跨书去重（见 §4）。
 - `mastery_state` 与 SM-2 状态字段并存：`ef / interval_days / repetitions` 是算法状态，`mastery_state` 是衍生标签（new / learning / mature / lapsed），由 `repetitions` 与 `ef` 派生（见 §7.4）。
 - `due_at` 直接预计算下次到期，避免每次查询时算。
 - `ai_analysis_id` 指向 `ai_cache`，不直接存 JSON 在卡片表里。
@@ -215,7 +215,7 @@ cache_key    = (content_hash, prompt_version, model)
 
 ## 6. EPUB 重复导入的幂等性
 
-**默认：按 ********`file_hash`******** 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
+**默认：按 ************`file_hash`************ 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
 
 - 若 `file_hash` 命中：报告"已存在，是否更新结构？"；用户选更新则重新解析章节并尝试重新绑定 `sentences.text_hash`，绑不上的句子标记为 `orphaned`。
 - 若 `file_hash` 不同但 `title + author` 命中：视为新版本，提示用户手动合并。
@@ -271,7 +271,7 @@ fail     → quality = 1
 
 第一版固定此映射；后续可在 settings 里调整。
 
-### 7.4 mastery_state 派生规则
+### 7.4 mastery\_state 派生规则
 
 `mastery_state` 不存算法状态，纯粹用作 UI 标签与统计分组，按以下规则派生：
 

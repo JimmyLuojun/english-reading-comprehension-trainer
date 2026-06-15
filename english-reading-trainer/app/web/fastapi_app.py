@@ -7,6 +7,7 @@ reviewing due items, and viewing learner profile snapshots.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 from datetime import datetime
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.ai.prompt_version_registry import sync_prompt_versions
@@ -26,6 +27,7 @@ from app.cards.sentence_card_service import (
 from app.cards.word_card_service import create_or_update_word_card, list_word_cards
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
+from app.importers.txt_importer import DuplicateBookError, import_text
 from app.profile.learner_profile_generator import (
     ProfileInputError,
     build_profile_prompt,
@@ -45,6 +47,8 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _DEFAULT_DB = _PROJECT_ROOT / "data" / "reading_trainer.db"
 _MIGRATIONS = _PROJECT_ROOT / "migrations"
 _DEFAULT_PAGE_LIMIT = 50
+_MAX_IMPORT_BYTES = 10 * 1024 * 1024  # 10 MB cap for both file upload and pasted text
+_AUTO_TITLE_MAX_LEN = 80
 
 
 def create_app(
@@ -97,6 +101,58 @@ def create_app(
     @web_app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @web_app.get("/import", response_class=HTMLResponse)
+    def import_page() -> HTMLResponse:
+        return _html_page("Import", _import_forms(), active="import")
+
+    @web_app.post("/import/file")
+    async def import_file(
+        file: UploadFile = File(...),
+        title: str = Form(""),
+        author: str = Form(""),
+    ) -> Any:
+        raw = await file.read()
+        if len(raw) > _MAX_IMPORT_BYTES:
+            return _error_page(
+                f"Uploaded file exceeds {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+                status_code=413,
+            )
+        if not raw.strip():
+            return _error_page("Uploaded file is empty.", status_code=400)
+        return _do_import(db_factory(), raw, title, author)
+
+    @web_app.post("/import/paste")
+    async def import_paste(request: Request) -> Any:
+        form = await _read_form(request)
+        text = form.get("text", "")
+        title = form.get("title", "")
+        author = form.get("author", "")
+        raw = text.encode("utf-8")
+        if len(raw) > _MAX_IMPORT_BYTES:
+            return _error_page(
+                f"Pasted text exceeds {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+                status_code=413,
+            )
+        if not text.strip():
+            return _error_page("Pasted text is empty.", status_code=400)
+        return _do_import(db_factory(), raw, title, author)
+
+    def _do_import(
+        db: DatabaseConnection,
+        raw: bytes,
+        form_title: str,
+        author: str,
+    ) -> Any:
+        title = _resolve_title(form_title, raw)
+        try:
+            result = import_text(db, raw, title=title, author=author.strip())
+        except DuplicateBookError:
+            existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
+            return _duplicate_page(existing_id)
+        except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(f"/read/{result.book_id}")
 
     @web_app.get("/books", response_class=HTMLResponse)
     def books() -> HTMLResponse:
@@ -545,6 +601,87 @@ def _metric(label: str, value: int) -> str:
     return f'<div class="metric"><span>{_escape(label)}</span><strong>{value}</strong></div>'
 
 
+def _import_forms() -> str:
+    return """
+    <section class="toolbar">
+      <div>
+        <h1>Import</h1>
+        <p class="muted">Add a TXT file or paste text directly. You jump straight to the reader after import.</p>
+      </div>
+    </section>
+    <section class="band">
+      <h2>Upload TXT file</h2>
+      <form method="post" action="/import/file" enctype="multipart/form-data" class="stack-form">
+        <label for="file-title">Title (optional)</label>
+        <input id="file-title" name="title" placeholder="Leave blank to auto-detect">
+        <label for="file-author">Author (optional)</label>
+        <input id="file-author" name="author">
+        <label for="file-input">TXT file</label>
+        <input id="file-input" type="file" name="file" accept=".txt,text/plain" required>
+        <button type="submit">Import file</button>
+      </form>
+    </section>
+    <section class="band">
+      <h2>Paste text</h2>
+      <form method="post" action="/import/paste" class="stack-form">
+        <label for="paste-title">Title (optional)</label>
+        <input id="paste-title" name="title" placeholder="Leave blank to auto-detect">
+        <label for="paste-author">Author (optional)</label>
+        <input id="paste-author" name="author">
+        <label for="paste-text">Article text</label>
+        <textarea id="paste-text" name="text" rows="14" placeholder="Paste an article here..." required></textarea>
+        <button type="submit">Import pasted text</button>
+      </form>
+    </section>
+    """
+
+
+def _duplicate_page(existing_book_id: int | None) -> HTMLResponse:
+    if existing_book_id is not None:
+        link = (
+            f'<a class="button primary" href="/read/{existing_book_id}">Open existing book</a> '
+            f'<a class="button" href="/books/{existing_book_id}">View chapters</a>'
+        )
+    else:
+        link = '<a class="button" href="/books">Browse books</a>'
+    body = f"""
+    <section class="toolbar">
+      <div>
+        <h1>Already imported</h1>
+        <p class="muted">This content has the same hash as a book already in your library.</p>
+      </div>
+    </section>
+    <section class="band">
+      <p>No new book was created. Open the existing one to keep reading.</p>
+      <p>{link}</p>
+    </section>
+    """
+    return _html_page("Already imported", body, active="import", status_code=409)
+
+
+def _resolve_title(form_title: str, raw: bytes) -> str:
+    cleaned = form_title.strip()
+    if cleaned:
+        return cleaned[:_AUTO_TITLE_MAX_LEN]
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:_AUTO_TITLE_MAX_LEN]
+    return f"Untitled Import {datetime.now().date().isoformat()}"
+
+
+def _lookup_book_id_by_hash(db: DatabaseConnection, file_hash: str) -> int | None:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM books WHERE file_hash = ?", (file_hash,)
+        ).fetchone()
+    return int(row["id"]) if row else None
+
+
 async def _read_form(request: Request) -> dict[str, str]:
     raw = (await request.body()).decode("utf-8")
     parsed = parse_qs(raw, keep_blank_values=True)
@@ -594,6 +731,7 @@ def _html_page(
   <nav>
     <a class="{_active(active, "dashboard")}" href="/">Dashboard</a>
     <a class="{_active(active, "books")}" href="/books">Books</a>
+    <a class="{_active(active, "import")}" href="/import">Import</a>
     <a class="{_active(active, "cards")}" href="/cards">Cards</a>
     <a class="{_active(active, "review")}" href="/review">Review</a>
     <a class="{_active(active, "profile")}" href="/profile">Profile</a>

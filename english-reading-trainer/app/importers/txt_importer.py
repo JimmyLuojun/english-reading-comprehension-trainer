@@ -57,6 +57,33 @@ class DuplicateBookError(Exception):
 # Public API
 # ---------------------------------------------------------------------------
 
+def import_text(
+    db: DatabaseConnection,
+    raw_bytes: bytes,
+    title: str,
+    author: str = "",
+    language: str = "en",
+) -> ImportResult:
+    """
+    Parse *raw_bytes* (TXT content) and insert the full hierarchy into the DB.
+
+    This is the core importer used by both file-path imports (import_txt) and
+    direct text imports (e.g. pasted content from the web UI).
+
+    Raises:
+        DuplicateBookError: if file_hash is already in the books table.
+        ValueError: if the bytes contain no usable text.
+    """
+    file_hash = _sha256(raw_bytes)
+    text = _decode(raw_bytes)
+
+    if not text.strip():
+        raise ValueError("Input contains no usable text")
+
+    chapters_raw = _split_chapters(text)
+    return _insert(db, title, author, language, file_hash, chapters_raw)
+
+
 def import_txt(
     db: DatabaseConnection,
     file_path: str | Path,
@@ -65,7 +92,9 @@ def import_txt(
     language: str = "en",
 ) -> ImportResult:
     """
-    Parse *file_path* (TXT) and insert the full hierarchy into the DB.
+    Read *file_path* (TXT) and import it into the DB.
+
+    Thin wrapper around import_text() that handles file I/O.
 
     Raises:
         FileNotFoundError: if the file does not exist.
@@ -76,15 +105,7 @@ def import_txt(
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    raw_bytes = file_path.read_bytes()
-    file_hash = _sha256(raw_bytes)
-    text = _decode(raw_bytes)
-
-    if not text.strip():
-        raise ValueError(f"File contains no usable text: {file_path}")
-
-    chapters_raw = _split_chapters(text)
-    return _insert(db, title, author, language, file_hash, chapters_raw)
+    return import_text(db, file_path.read_bytes(), title, author, language)
 
 
 # ---------------------------------------------------------------------------
