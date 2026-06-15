@@ -956,6 +956,84 @@ class TestReadingAndMarking:
         assert "Sentence Cards" in response.text
         assert "cat" in response.text
 
+    def test_cards_page_word_table_has_definition_column(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+
+        response = client.get("/cards")
+
+        assert "Definition" in response.text
+        assert "AI Meaning" in response.text
+        assert "Source" in response.text
+
+    def test_cards_page_shows_user_definition(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "rudimentary",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'rudimentary'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "basic and elementary", "user_note": ""},
+        )
+
+        response = client.get("/cards")
+
+        assert "basic and elementary" in response.text
+
+    def test_cards_page_ai_meaning_details_element(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        import json
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ontological",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ontological'"
+            ).fetchone()["id"]
+            cache_id = conn.execute(
+                "INSERT INTO ai_cache (content_hash, prompt_version, model, "
+                "response_json, is_valid, created_at) "
+                "VALUES ('hashX', 'v2', 'gpt-4o-mini', ?, 1, '2026-01-01T00:00:00')",
+                (json.dumps({"meaning_in_context": "relating to being or existence"}),),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+
+        response = client.get("/cards")
+
+        assert "<details>" in response.text
+        assert "AI ▸" in response.text
+        assert "relating to being or existence" in response.text
+
 
 class TestReviewRoutes:
     def test_review_empty_message(self, client: TestClient) -> None:
@@ -977,6 +1055,55 @@ class TestReviewRoutes:
         assert response.status_code == 200
         assert "pass" in response.text
         assert f"/review/sentence/{card_id}" in response.text
+
+    def test_review_page_shows_reveal_for_word_with_definition(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "lasting a very short time", "user_note": ""},
+        )
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert "Reveal" in response.text
+        assert "lasting a very short time" in response.text
+
+    def test_review_page_no_reveal_when_definition_empty(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ontological",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ontological'"
+            ).fetchone()["id"]
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert 'class="review-reveal"' not in response.text
 
     def test_review_post_records_answer(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

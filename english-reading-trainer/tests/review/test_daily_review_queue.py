@@ -401,3 +401,79 @@ class TestBuildDailyReviewQueue:
         )
 
         assert [item.card_id for item in items] == [tagged_id, plain_id]
+
+
+# ---------------------------------------------------------------------------
+# answer field (§23)
+# ---------------------------------------------------------------------------
+
+class TestReviewQueueItemAnswer:
+    def test_word_card_answer_is_current_meaning(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Ephemeral beauty fades quickly.")
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note)
+                   VALUES ('ephemeral', 'ephemeral', 'word', ?, 'lasting a very short time',
+                           '', ?, NULL, 0, 'new', 2.5, 0, 0, ?, 1, '')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            ).lastrowid
+
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+
+        assert len(items) == 1
+        assert items[0].card_id == card_id
+        assert items[0].answer == "lasting a very short time"
+
+    def test_word_card_answer_empty_when_current_meaning_blank(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_word_card(db, surface_form="ontological")
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+        assert items[0].answer == ""
+
+    def test_sentence_card_answer_is_user_translation(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Coral reefs are fragile ecosystems.")
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                """INSERT INTO sentence_cards
+                   (sentence_id, created_at, last_reviewed_at, review_count,
+                    mastery_state, ef, interval_days, repetitions, due_at,
+                    user_note, user_translation)
+                   VALUES (?, ?, NULL, 0, 'new', 2.5, 0, 0, ?, '', '珊瑚礁是脆弱的生态系统。')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            ).lastrowid
+
+        items = list_due_cards(db, as_of=NOW, card_type="sentence")
+
+        assert len(items) == 1
+        assert items[0].card_id == card_id
+        assert items[0].answer == "珊瑚礁是脆弱的生态系统。"
+
+    def test_sentence_card_answer_empty_when_no_translation(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_sentence_card(db)
+        items = list_due_cards(db, as_of=NOW, card_type="sentence")
+        assert items[0].answer == ""
+
+    def test_review_queue_item_answer_defaults_to_empty(self) -> None:
+        item = ReviewQueueItem(
+            card_type=CardType.WORD,
+            card_id=1,
+            mastery_state=MasteryState.NEW,
+            ef=2.5,
+            interval_days=0,
+            repetitions=0,
+            review_count=0,
+            due_at=NOW,
+            prompt="ephemeral",
+        )
+        assert item.answer == ""

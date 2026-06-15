@@ -2025,10 +2025,26 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{_escape(card['lexical_type'])}</td>"
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{card['occurrence_count']}</td>"
+        f"<td>{_escape(card.get('current_meaning') or '—')}</td>"
+        f"<td>{_ai_meaning_cell(card)}</td>"
+        f"<td>{_escape(card.get('first_book_title') or '—')}</td>"
         "</tr>"
         for card in cards
     )
-    return f"<table><thead><tr><th>ID</th><th>Word/Phrase</th><th>Type</th><th>State</th><th>Occ.</th></tr></thead><tbody>{rows}</tbody></table>"
+    return (
+        "<table><thead><tr>"
+        "<th>ID</th><th>Word/Phrase</th><th>Type</th><th>State</th><th>Occ.</th>"
+        "<th>Definition</th><th>AI Meaning</th><th>Source</th>"
+        "</tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _ai_meaning_cell(card: dict[str, Any]) -> str:
+    ai_meaning = card.get("ai_meaning") or ""
+    if not ai_meaning:
+        return "—"
+    return f"<details><summary>AI ▸</summary>{_escape(ai_meaning)}</details>"
 
 
 def _due_table(items: list[Any], return_to: str) -> str:
@@ -2041,7 +2057,7 @@ def _due_table(items: list[Any], return_to: str) -> str:
         f"<td>{_escape(item.mastery_state.value)}</td>"
         f"<td>{_escape(_date(item.due_at.isoformat()))}</td>"
         f"<td>{_escape(item.prompt[:120])}</td>"
-        f"<td>{_review_form(item, return_to)}</td>"
+        f"<td>{_review_answer_cell(item, return_to)}</td>"
         "</tr>"
         for item in items
     )
@@ -2053,17 +2069,23 @@ def _due_table(items: list[Any], return_to: str) -> str:
     """
 
 
-def _review_form(item: Any, return_to: str) -> str:
+def _review_answer_cell(item: Any, return_to: str) -> str:
+    answer = (getattr(item, "answer", "") or "").strip()
+    reveal = (
+        f'<details class="review-reveal"><summary>Reveal</summary>'
+        f'<p class="review-reveal-text">{_escape(answer)}</p></details>'
+        if answer else ""
+    )
     options = "".join(
         f'<button type="submit" name="outcome" value="{outcome.value}">{outcome.value}</button>'
         for outcome in (ReviewOutcome.PASS, ReviewOutcome.PARTIAL, ReviewOutcome.FAIL)
     )
-    return f"""
-    <form method="post" action="/review/{item.card_type.value}/{item.card_id}" class="answer-form">
-      <input type="hidden" name="return_to" value="{_escape(return_to)}">
-      {options}
-    </form>
-    """
+    form = (
+        f'<form method="post" action="/review/{item.card_type.value}/{item.card_id}" class="answer-form">'
+        f'<input type="hidden" name="return_to" value="{_escape(return_to)}">'
+        f"{options}</form>"
+    )
+    return reveal + form
 
 
 def _latest_profile_block(snapshot: Any | None) -> str:
@@ -2719,6 +2741,9 @@ def _css() -> str:
         border-bottom: 1px solid var(--line);
       }
     }
+    .review-reveal { margin-bottom: 6px; }
+    .review-reveal-text { margin: 4px 0 0; font-style: italic; color: var(--muted); max-width: 320px; }
+    table details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
     """
 
 

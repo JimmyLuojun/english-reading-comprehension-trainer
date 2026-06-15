@@ -136,12 +136,18 @@ def list_word_cards(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return word cards ordered by occurrence_count DESC, then created_at DESC."""
+    """Return word cards with book source and AI meaning, ordered by occurrence_count DESC."""
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT * FROM word_cards
-               WHERE archived_at IS NULL
-               ORDER BY occurrence_count DESC, created_at DESC
+            """SELECT wc.*,
+                      b.title AS first_book_title,
+                      json_extract(ac.response_json, '$.meaning_in_context') AS ai_meaning
+               FROM word_cards wc
+               LEFT JOIN sentences s  ON s.id  = wc.first_sentence_id
+               LEFT JOIN books     b  ON b.id  = s.book_id
+               LEFT JOIN ai_cache  ac ON ac.id = wc.ai_analysis_id
+               WHERE wc.archived_at IS NULL
+               ORDER BY wc.occurrence_count DESC, wc.created_at DESC
                LIMIT ? OFFSET ?""",
             (limit, offset),
         ).fetchall()

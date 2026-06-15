@@ -39,6 +39,7 @@ class ReviewQueueItem:
     review_count: int
     due_at: datetime
     prompt: str
+    answer: str = ""
     error_codes: tuple[str, ...] = ()
     last_quality: int | None = None
     last_outcome: ReviewOutcome | None = None
@@ -166,6 +167,7 @@ def _sentence_due_sql() -> str:
             sc.review_count,
             sc.due_at,
             s.text AS prompt,
+            COALESCE(sc.user_translation, '') AS answer,
             (
                 SELECT rl.quality FROM review_logs rl
                  WHERE rl.card_type = 'sentence' AND rl.card_id = sc.id
@@ -197,6 +199,7 @@ def _word_due_sql() -> str:
             wc.review_count,
             wc.due_at,
             wc.surface_form AS prompt,
+            wc.current_meaning AS answer,
             (
                 SELECT rl.quality FROM review_logs rl
                  WHERE rl.card_type = 'word' AND rl.card_id = wc.id
@@ -274,6 +277,7 @@ def _item_from_row(
         review_count=int(row["review_count"]),
         due_at=datetime.fromisoformat(row["due_at"]),
         prompt=row["prompt"],
+        answer=row["answer"] or "",
         error_codes=error_codes.get((card_type, card_id), ()),
         last_quality=row["last_quality"],
         last_outcome=ReviewOutcome(last_outcome) if last_outcome else None,
