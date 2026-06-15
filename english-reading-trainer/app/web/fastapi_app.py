@@ -418,6 +418,7 @@ def create_app(
                 db,
                 surface_form=card["surface_form"],
                 sentence_text=sentence["text"],
+                allow_stale=False,
             )
             if not result.is_valid:
                 return JSONResponse(

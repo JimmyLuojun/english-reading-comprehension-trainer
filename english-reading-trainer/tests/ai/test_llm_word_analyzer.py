@@ -82,6 +82,20 @@ class TestAnalyzeWordCacheHit:
         mock.assert_not_called()
         assert result.is_stale is True
 
+    def test_allow_stale_false_ignores_stale_and_calls_llm(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_WORD_RESPONSE_V1]):
+            analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL, prompt_version="v1")
+        with _mock_llm([_VALID_WORD_RESPONSE]) as mock:
+            result = analyze_word(
+                db, _SURFACE, _SENTENCE, model=_MODEL,
+                prompt_version="v2", allow_stale=False,
+            )
+        mock.assert_called_once()
+        assert result.is_stale is False
+        assert result.from_cache is False
+
 
 # ---------------------------------------------------------------------------
 # LLM success

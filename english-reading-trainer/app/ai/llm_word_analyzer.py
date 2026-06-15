@@ -54,9 +54,14 @@ def analyze_word(
     learner_profile: str = "",
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
+    allow_stale: bool = True,
 ) -> WordAnalysisResult:
     """
     Analyse *surface_form* as it appears in *sentence_text*.
+
+    When *allow_stale* is False, a cache entry from a different prompt version
+    is ignored and a fresh LLM call is made instead. Use this in the POST
+    endpoint so a v1 stale entry never blocks a v2 analysis.
 
     Raises:
         FileNotFoundError — prompt template not found
@@ -70,7 +75,7 @@ def analyze_word(
     )
 
     cached = get_cached(db, content_hash, prompt_version, model)
-    if cached is not None:
+    if cached is not None and (not cached.is_stale or allow_stale):
         return WordAnalysisResult(
             data=cached.data,
             cache_id=cached.cache_id,
