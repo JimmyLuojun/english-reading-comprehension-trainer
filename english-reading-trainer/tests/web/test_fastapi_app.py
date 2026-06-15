@@ -37,6 +37,19 @@ _VALID_SENTENCE_ANALYSIS = {
     "confidence": 0.9,
 }
 
+_VALID_WORD_ANALYSIS = {
+    "lemma": "cat",
+    "lexical_type": "word",
+    "pos": "noun",
+    "meaning_in_context": "a small domestic feline animal",
+    "common_collocations": ["cat and mouse", "black cat"],
+    "near_synonyms": ["feline", "kitty"],
+    "confusable_with": [],
+    "morphology": {"root": "", "family": []},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+}
+
 _VALID_DIAGNOSED_ANALYSIS = {
     "subject_skeleton": "The cat sat",
     "clauses": [{"type": "main", "text": "The cat sat", "role": "statement"}],
@@ -740,6 +753,160 @@ class TestReadingAndMarking:
         assert response.status_code == 200
         assert 'data-meaning="猫"' in response.text
         assert 'data-note="宠物"' in response.text
+
+    def test_get_word_analysis_no_saved_returns_404(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+        card_id = _word_card_id(db, "cat")
+
+        response = client.get(f"/analysis/word/{card_id}")
+
+        assert response.status_code == 404
+        assert response.json()["ok"] is False
+
+    def test_get_word_analysis_missing_card_returns_404(self, client: TestClient) -> None:
+        response = client.get("/analysis/word/99999")
+        assert response.status_code == 404
+        assert response.json()["ok"] is False
+
+    def test_post_word_analysis_missing_card_returns_404(self, client: TestClient) -> None:
+        response = client.post("/analysis/word/99999")
+        assert response.status_code == 404
+        assert response.json()["ok"] is False
+
+    def test_post_word_analysis_saves_and_returns_payload(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from app.ai.llm_word_analyzer import WordAnalysisResult
+
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+        card_id = _word_card_id(db, "cat")
+        mock_result = WordAnalysisResult(
+            data=_VALID_WORD_ANALYSIS, cache_id=1, from_cache=False,
+            is_stale=False, is_valid=True,
+        )
+        with patch("app.web.fastapi_app.analyze_word", return_value=mock_result), \
+             patch("app.web.fastapi_app._update_word_card_analysis_id"):
+            # Inject the cache row so _fetch_word_analysis_payload can find it
+            with db.get_connection() as conn:
+                cache_id = conn.execute(
+                    """INSERT INTO ai_cache
+                       (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                       VALUES ('h1', 'v1', 'test', ?, 1, '2026-01-01T00:00:00+00:00')""",
+                    (json.dumps(_VALID_WORD_ANALYSIS),),
+                ).lastrowid
+                conn.execute(
+                    "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                    (cache_id, card_id),
+                )
+            response = client.post(f"/analysis/word/{card_id}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["card_id"] == card_id
+        assert payload["analysis"]["lemma"] == "cat"
+
+    def test_get_word_analysis_returns_saved_payload(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+        card_id = _word_card_id(db, "cat")
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('h2', 'v1', 'test', ?, 1, '2026-01-01T00:00:00+00:00')""",
+                (json.dumps(_VALID_WORD_ANALYSIS),),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+
+        response = client.get(f"/analysis/word/{card_id}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["surface_form"] == "cat"
+        assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
+
+    def test_read_page_includes_explain_button(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert 'id="toolbar-word-detail-explain"' in response.text
+        assert 'id="analysis-word-sections"' in response.text
+        assert 'id="analysis-sentence-sections"' in response.text
+        assert "requestWordAnalysis" in response.text
+
+    def test_toolbar_defaults_to_mutually_hidden_panels(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert '<form id="toolbar-sentence-form" method="post" class="toolbar-group" hidden>' in response.text
+        assert (
+            '<form id="toolbar-word-form" method="post" action="/mark/word" '
+            'class="toolbar-group" hidden>'
+        ) in response.text
+        assert 'id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden' in response.text
+        assert 'id="toolbar-cross-sentence" class="toolbar-group" hidden' in response.text
+        assert "toolbar-word-existing" not in response.text
+        assert "toolbar-word-delete" not in response.text
+
+    def test_toolbar_script_routes_existing_words_to_word_detail(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert "function hideAllPanels()" in response.text
+        assert "let suppressNextUpdate = false;" in response.text
+        assert "suppressNextUpdate = true;" in response.text
+        assert "setVisible(wordDetail, true);" in response.text
+        assert "setVisible(wordExisting" not in response.text
+        assert "wordDelete.addEventListener" not in response.text
 
     def test_mark_word_invalid_input_returns_400(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

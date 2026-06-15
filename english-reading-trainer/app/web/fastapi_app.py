@@ -31,10 +31,12 @@ from app.cards.sentence_card_service import (
     list_sentence_cards,
     save_sentence_translation,
 )
+from app.ai.llm_word_analyzer import analyze_word
 from app.cards.word_card_service import (
     WordCardNotFoundError,
     archive_word_card,
     create_or_update_word_card,
+    get_word_card,
     list_word_cards,
     update_word_card_note,
 )
@@ -394,6 +396,48 @@ def create_app(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
         return JSONResponse({"ok": True})
 
+    @web_app.get("/analysis/word/{card_id}")
+    def get_word_analysis(card_id: int) -> JSONResponse:
+        payload = _fetch_word_analysis_payload(db_factory(), card_id)
+        if payload is None:
+            return JSONResponse(
+                {"ok": False, "error": "No saved analysis for this word.", "retry": True},
+                status_code=404,
+            )
+        return JSONResponse(payload)
+
+    @web_app.post("/analysis/word/{card_id}")
+    async def analyze_word_endpoint(card_id: int) -> JSONResponse:
+        db = db_factory()
+        card = get_word_card(db, card_id)
+        if card is None:
+            return JSONResponse({"ok": False, "error": "Word card not found."}, status_code=404)
+        try:
+            sentence = _fetch_sentence_for_analysis(db, card["first_sentence_id"])
+            result = analyze_word(
+                db,
+                surface_form=card["surface_form"],
+                sentence_text=sentence["text"],
+            )
+            if not result.is_valid:
+                return JSONResponse(
+                    {"ok": False, "error": "AI response failed validation.", "retry": True},
+                    status_code=502,
+                )
+            _update_word_card_analysis_id(db, card_id, result.cache_id)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "retry": False}, status_code=400)
+        except (FileNotFoundError, RuntimeError) as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "retry": True}, status_code=502)
+        payload = _fetch_word_analysis_payload(db, card_id)
+        if payload is None:
+            return JSONResponse(
+                {"ok": False, "error": "Analysis was not saved.", "retry": True},
+                status_code=500,
+            )
+        payload["from_cache"] = result.from_cache
+        return JSONResponse(payload)
+
     @web_app.get("/cards", response_class=HTMLResponse)
     def cards() -> HTMLResponse:
         db = db_factory()
@@ -684,6 +728,49 @@ def _fetch_sentence_analysis_payload(
     }
 
 
+def _fetch_word_analysis_payload(
+    db: DatabaseConnection,
+    card_id: int,
+) -> dict[str, Any] | None:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT wc.id AS card_id, wc.surface_form, wc.lemma,
+                      ac.id AS cache_id, ac.prompt_version, ac.model,
+                      ac.response_json, ac.created_at
+                 FROM word_cards wc
+                 JOIN ai_cache ac ON ac.id = wc.ai_analysis_id
+                WHERE wc.id = ? AND wc.archived_at IS NULL AND ac.is_valid = 1""",
+            (card_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "ok": True,
+        "card_id": row["card_id"],
+        "surface_form": row["surface_form"],
+        "lemma": row["lemma"],
+        "cache_id": row["cache_id"],
+        "prompt_version": row["prompt_version"],
+        "model": row["model"],
+        "created_at": row["created_at"],
+        "is_stale": False,
+        "from_cache": True,
+        "analysis": json.loads(row["response_json"]),
+    }
+
+
+def _update_word_card_analysis_id(
+    db: DatabaseConnection,
+    card_id: int,
+    cache_id: int,
+) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+
+
 def _fetch_cache_metadata(
     db: DatabaseConnection,
     cache_id: int,
@@ -907,7 +994,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
     }
     return f"""
     <div id="selection-toolbar" class="selection-toolbar" hidden>
-      <form id="toolbar-sentence-form" method="post" class="toolbar-group">
+      <form id="toolbar-sentence-form" method="post" class="toolbar-group" hidden>
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
@@ -928,7 +1015,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         </div>
         <p id="toolbar-translation-status" class="toolbar-status" aria-live="polite"></p>
       </div>
-      <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group">
+      <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>
         <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
         <input id="toolbar-word-surface-form" type="hidden" name="surface_form">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
@@ -936,10 +1023,6 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button type="submit" name="lexical_type" value="phrase">Mark phrase</button>
         <button type="submit" name="lexical_type" value="collocation">Mark collocation</button>
       </form>
-      <div id="toolbar-word-existing" class="toolbar-group" hidden>
-        <span class="toolbar-status">In cards</span>
-        <button id="toolbar-word-delete" type="button" class="danger">Remove from cards</button>
-      </div>
       <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
         <strong id="toolbar-word-detail-surface" class="word-detail-surface"></strong>
         <div class="word-detail-fields">
@@ -952,6 +1035,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         </div>
         <div class="word-detail-actions">
           <button id="toolbar-word-detail-save" type="button">Save</button>
+          <button id="toolbar-word-detail-explain" type="button">Explain word</button>
           <button id="toolbar-word-detail-remove" type="button" class="danger">Remove from cards</button>
         </div>
       </div>
@@ -971,29 +1055,53 @@ def _analysis_panel() -> str:
     <aside id="analysis-panel" class="analysis-panel" hidden aria-live="polite">
       <header class="analysis-panel-header">
         <div>
-          <p class="panel-kicker">Sentence analysis</p>
+          <p id="analysis-panel-kicker" class="panel-kicker">Sentence analysis</p>
           <h2 id="analysis-panel-title">AI Analysis</h2>
           <p id="analysis-panel-meta" class="muted"></p>
         </div>
         <button id="analysis-panel-close" type="button">Close panel</button>
       </header>
       <div id="analysis-panel-status" class="analysis-status"></div>
-      <section class="analysis-section">
-        <h3>Simplified English</h3>
-        <p id="analysis-simplified" class="analysis-text"></p>
-      </section>
-      <section class="analysis-section">
-        <h3>Chinese gloss</h3>
-        <p id="analysis-gloss" class="analysis-text"></p>
-      </section>
-      <section class="analysis-section">
-        <h3>Diagnosis</h3>
-        <div id="analysis-diagnosis"></div>
-      </section>
-      <section class="analysis-section">
-        <h3>Subject skeleton</h3>
-        <p id="analysis-skeleton" class="analysis-text"></p>
-      </section>
+      <div id="analysis-sentence-sections">
+        <section class="analysis-section">
+          <h3>Simplified English</h3>
+          <p id="analysis-simplified" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>Chinese gloss</h3>
+          <p id="analysis-gloss" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>Diagnosis</h3>
+          <div id="analysis-diagnosis"></div>
+        </section>
+        <section class="analysis-section">
+          <h3>Subject skeleton</h3>
+          <p id="analysis-skeleton" class="analysis-text"></p>
+        </section>
+      </div>
+      <div id="analysis-word-sections" hidden>
+        <section class="analysis-section">
+          <h3>Meaning in context</h3>
+          <p id="analysis-word-meaning" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>Common collocations</h3>
+          <div id="analysis-word-collocations"></div>
+        </section>
+        <section class="analysis-section">
+          <h3>Near synonyms &amp; confusables</h3>
+          <div id="analysis-word-synonyms"></div>
+        </section>
+        <section class="analysis-section">
+          <h3>Morphology</h3>
+          <p id="analysis-word-morphology" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>Predicted error types</h3>
+          <p id="analysis-word-errors" class="analysis-text analysis-codes"></p>
+        </section>
+      </div>
       <footer class="analysis-panel-actions">
         <button id="analysis-panel-retry" type="button">Reanalyze</button>
         <button id="analysis-panel-return" type="button">Back to reading</button>
@@ -1032,13 +1140,12 @@ def _selection_script() -> str:
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
-      const wordExisting = document.getElementById("toolbar-word-existing");
-      const wordDelete = document.getElementById("toolbar-word-delete");
       const wordDetail = document.getElementById("toolbar-word-detail");
       const wordDetailSurface = document.getElementById("toolbar-word-detail-surface");
       const wordDetailMeaning = document.getElementById("toolbar-word-detail-meaning");
       const wordDetailNote = document.getElementById("toolbar-word-detail-note");
       const wordDetailSave = document.getElementById("toolbar-word-detail-save");
+      const wordDetailExplain = document.getElementById("toolbar-word-detail-explain");
       const wordDetailRemove = document.getElementById("toolbar-word-detail-remove");
       const crossSentence = document.getElementById("toolbar-cross-sentence");
       const crossSentenceDelete = document.getElementById("toolbar-cross-sentence-delete");
@@ -1047,12 +1154,21 @@ def _selection_script() -> str:
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
       const panelRetry = document.getElementById("analysis-panel-retry");
+      const panelKicker = document.getElementById("analysis-panel-kicker");
+      const panelTitle = document.getElementById("analysis-panel-title");
       const panelMeta = document.getElementById("analysis-panel-meta");
       const panelStatus = document.getElementById("analysis-panel-status");
+      const sentenceSections = document.getElementById("analysis-sentence-sections");
+      const wordSections = document.getElementById("analysis-word-sections");
       const simplified = document.getElementById("analysis-simplified");
       const gloss = document.getElementById("analysis-gloss");
       const skeleton = document.getElementById("analysis-skeleton");
       const diagnosis = document.getElementById("analysis-diagnosis");
+      const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
+      const wordAnalysisCollocations = document.getElementById("analysis-word-collocations");
+      const wordAnalysisSynonyms = document.getElementById("analysis-word-synonyms");
+      const wordAnalysisMorphology = document.getElementById("analysis-word-morphology");
+      const wordAnalysisErrors = document.getElementById("analysis-word-errors");
       const bookId = reader.dataset.bookId || "";
       const chapterIdx = Number.parseInt(reader.dataset.chapterIdx || "1", 10);
       const progressKey = bookId ? `reader:progress:book:${bookId}` : "";
@@ -1064,8 +1180,11 @@ def _selection_script() -> str:
       let activeCrossSentenceIds = [];
       let activeWordDetailCardId = null;
       let activeAnalysisSentenceId = null;
+      let activeAnalysisWordCardId = null;
+      let panelMode = "sentence";
       let translationEditorOpen = false;
       let progressTimer = null;
+      let suppressNextUpdate = false;
 
       const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
       const lemmaKey = (value) => value.toLowerCase().trim();
@@ -1076,9 +1195,16 @@ def _selection_script() -> str:
         translationStatus.textContent = "";
       }
 
-      function hideToolbar() {
+      function hideAllPanels() {
         hideTranslationEditor();
+        setVisible(sentenceForm, false);
+        setVisible(wordForm, false);
         setVisible(wordDetail, false);
+        setVisible(crossSentence, false);
+      }
+
+      function hideToolbar() {
+        hideAllPanels();
         toolbar.hidden = true;
         activeSentenceId = null;
         activeSentenceTranslation = "";
@@ -1086,7 +1212,7 @@ def _selection_script() -> str:
         activeWordCardIds = [];
         activeCrossSentenceIds = [];
         activeWordDetailCardId = null;
-        wordDelete.dataset.cardIds = "";
+        wordDetailRemove.dataset.cardId = "";
         crossSentenceDelete.dataset.sentenceIds = "";
       }
 
@@ -1154,21 +1280,32 @@ def _selection_script() -> str:
         positionToolbar(anchor);
       }
 
-      function showWordDetail(span) {
-        activeWordDetailCardId = span.dataset.wordCard;
-        wordDetailSurface.textContent = span.textContent;
-        wordDetailMeaning.value = span.dataset.meaning || "";
-        wordDetailNote.value = span.dataset.note || "";
+      function fillWordDetail(cardId, surface, meaning, note) {
+        activeWordDetailCardId = String(cardId || "");
+        wordDetailSurface.textContent = surface || "";
+        wordDetailMeaning.value = meaning || "";
+        wordDetailNote.value = note || "";
         wordDetailRemove.dataset.cardId = activeWordDetailCardId;
-        setVisible(sentenceForm, false);
-        setVisible(wordForm, false);
-        setVisible(wordExisting, false);
-        setVisible(crossSentence, false);
+      }
+
+      function showWordDetail(span) {
+        hideAllPanels();
+        fillWordDetail(
+          span.dataset.wordCard,
+          span.textContent,
+          span.dataset.meaning,
+          span.dataset.note,
+        );
         setVisible(wordDetail, true);
         positionToolbar(span.getBoundingClientRect());
+        suppressNextUpdate = true;
       }
 
       function updateToolbar() {
+        if (suppressNextUpdate) {
+          suppressNextUpdate = false;
+          return;
+        }
         if (translationEditorOpen || toolbar.contains(document.activeElement)) return;
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -1185,17 +1322,16 @@ def _selection_script() -> str:
         }
 
         const spans = selectedSentenceSpans(range);
-        if (spans.length !== 1) {
-          setVisible(sentenceForm, false);
-          setVisible(wordForm, false);
-          setVisible(wordExisting, false);
-          setVisible(crossSentence, spans.length > 1);
-          if (spans.length > 1) {
-            configureCrossSentenceActions(spans);
-            showToolbar(range);
-          } else {
-            hideToolbar();
-          }
+        if (!spans.length) {
+          hideToolbar();
+          return;
+        }
+
+        hideAllPanels();
+        if (spans.length > 1) {
+          configureCrossSentenceActions(spans);
+          setVisible(crossSentence, true);
+          showToolbar(range);
           return;
         }
 
@@ -1210,10 +1346,6 @@ def _selection_script() -> str:
           ? selectedCardIds
           : (existingWord ? [String(existingWord.id)] : []);
         activeWordCardId = activeWordCardIds.length ? activeWordCardIds[0] : null;
-        wordDelete.dataset.cardIds = activeWordCardIds.join(",");
-        wordDelete.textContent = activeWordCardIds.length > 1 ? "Remove selected cards" : "Remove from cards";
-        wordExisting.querySelector(".toolbar-status").textContent =
-          activeWordCardIds.length > 1 ? `${activeWordCardIds.length} in cards` : "In cards";
 
         sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
         translationForm.action = `/mark/sentence/${activeSentenceId}/translation`;
@@ -1223,14 +1355,33 @@ def _selection_script() -> str:
         analysisOpen.hidden = !wholeSentence;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
-        setVisible(sentenceForm, wholeSentence);
 
         wordSentenceId.value = activeSentenceId;
         wordSurfaceForm.value = selectedText;
-        setVisible(wordForm, !wholeSentence && !activeWordCardId);
-        setVisible(wordExisting, !wholeSentence && Boolean(activeWordCardId));
-        setVisible(crossSentence, false);
         configureCrossSentenceActions([]);
+        if (wholeSentence) {
+          setVisible(sentenceForm, true);
+        } else if (activeWordCardId) {
+          const detailSpan = reader.querySelector(`[data-word-card="${activeWordCardId}"]`);
+          if (detailSpan) {
+            fillWordDetail(
+              activeWordCardId,
+              detailSpan.textContent,
+              detailSpan.dataset.meaning,
+              detailSpan.dataset.note,
+            );
+          } else {
+            fillWordDetail(
+              activeWordCardId,
+              existingWord?.surface_form || selectedText,
+              existingWord?.current_meaning,
+              existingWord?.user_note,
+            );
+          }
+          setVisible(wordDetail, true);
+        } else {
+          setVisible(wordForm, true);
+        }
         showToolbar(range);
       }
 
@@ -1353,7 +1504,7 @@ def _selection_script() -> str:
         translationEditorOpen = true;
         translationStatus.textContent = "";
         setVisible(wordForm, false);
-        setVisible(wordExisting, false);
+        setVisible(wordDetail, false);
         setVisible(crossSentence, false);
         requestAnimationFrame(() => translationText.focus());
       }
@@ -1368,6 +1519,22 @@ def _selection_script() -> str:
         translationForm.submit();
       }
 
+      function setSentenceMode() {
+        panelMode = "sentence";
+        if (panelKicker) panelKicker.textContent = "Sentence analysis";
+        if (panelTitle) panelTitle.textContent = "AI Analysis";
+        if (sentenceSections) sentenceSections.hidden = false;
+        if (wordSections) wordSections.hidden = true;
+      }
+
+      function setWordMode() {
+        panelMode = "word";
+        if (panelKicker) panelKicker.textContent = "Word analysis";
+        if (panelTitle) panelTitle.textContent = "Word Analysis";
+        if (sentenceSections) sentenceSections.hidden = true;
+        if (wordSections) wordSections.hidden = false;
+      }
+
       function openPanel() {
         panel.hidden = false;
         document.body.classList.add("analysis-open");
@@ -1380,6 +1547,7 @@ def _selection_script() -> str:
       }
 
       function setPanelLoading(message) {
+        setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message;
@@ -1390,16 +1558,40 @@ def _selection_script() -> str:
         diagnosis.replaceChildren();
       }
 
+      function setPanelLoadingWord(message) {
+        setWordMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = message;
+        panelMeta.textContent = "";
+        panelRetry.hidden = true;
+        if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = "";
+        if (wordAnalysisCollocations) wordAnalysisCollocations.replaceChildren();
+        if (wordAnalysisSynonyms) wordAnalysisSynonyms.replaceChildren();
+        if (wordAnalysisMorphology) wordAnalysisMorphology.textContent = "";
+        if (wordAnalysisErrors) wordAnalysisErrors.textContent = "";
+      }
+
       function renderAnalysisError(message, retryable) {
+        setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status error";
         panelStatus.textContent = message;
         panelRetry.hidden = !retryable || !activeAnalysisSentenceId;
       }
 
+      function renderWordAnalysisError(message, retryable) {
+        setWordMode();
+        openPanel();
+        panelStatus.className = "analysis-status error";
+        panelStatus.textContent = message;
+        panelRetry.hidden = !retryable;
+      }
+
       function renderAnalysisPayload(payload) {
         const analysis = payload.analysis || {};
         activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
+        setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status";
         panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
@@ -1509,6 +1701,63 @@ def _selection_script() -> str:
         }
       }
 
+      function renderWordList(container, items) {
+        container.replaceChildren();
+        if (!items.length) { container.textContent = "—"; return; }
+        const ul = document.createElement("ul");
+        ul.className = "word-analysis-list";
+        for (const item of items) {
+          const li = document.createElement("li");
+          li.textContent = item;
+          ul.append(li);
+        }
+        container.append(ul);
+      }
+
+      function renderWordAnalysis(payload) {
+        const a = payload.analysis || {};
+        activeAnalysisWordCardId = String(payload.card_id || "");
+        setWordMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
+        panelRetry.hidden = false;
+        panelMeta.textContent = [
+          `prompt ${payload.prompt_version || "unknown"}`,
+          payload.from_cache ? "cache" : "fresh",
+        ].join(" · ");
+        if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
+        if (wordAnalysisCollocations) renderWordList(wordAnalysisCollocations, a.common_collocations || []);
+        const synItems = (a.near_synonyms || []).map((s) => `${s} (近义)`);
+        const confItems = (a.confusable_with || []).map((s) => `${s} (易混)`);
+        if (wordAnalysisSynonyms) renderWordList(wordAnalysisSynonyms, [...synItems, ...confItems]);
+        const root = a.morphology?.root || "";
+        const family = (a.morphology?.family || []).join(", ");
+        if (wordAnalysisMorphology) {
+          wordAnalysisMorphology.textContent = root
+            ? (family ? `${root} → ${family}` : root)
+            : (family || "—");
+        }
+        if (wordAnalysisErrors) wordAnalysisErrors.textContent = (a.predicted_error_types || []).join(", ") || "—";
+      }
+
+      async function requestWordAnalysis(cardId) {
+        activeAnalysisWordCardId = cardId;
+        setPanelLoadingWord("Analyzing word...");
+        hideToolbar();
+        try {
+          const response = await fetch(`/analysis/word/${cardId}`, { method: "POST" });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            renderWordAnalysisError(payload.error || "Word analysis failed.", Boolean(payload.retry));
+            return;
+          }
+          renderWordAnalysis(payload);
+        } catch (error) {
+          renderWordAnalysisError(`Word analysis failed: ${error}`, true);
+        }
+      }
+
       function clearEvidenceHighlight() {
         reader.querySelectorAll(".analysis-highlight").forEach((node) => {
           node.replaceWith(document.createTextNode(node.textContent || ""));
@@ -1579,13 +1828,6 @@ def _selection_script() -> str:
         if (sentence?.dataset.analysisId) loadSavedAnalysis(sentenceId);
         else requestAnalysis(sentenceId, null);
       });
-      wordDelete.addEventListener("click", () => {
-        const ids = (wordDelete.dataset.cardIds || "")
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-        if (ids.length) deleteWordCardsAndReload(ids);
-      });
       crossSentenceDelete.addEventListener("click", () => {
         const ids = (crossSentenceDelete.dataset.sentenceIds || "")
           .split(",")
@@ -1600,7 +1842,11 @@ def _selection_script() -> str:
       panelClose.addEventListener("click", closePanel);
       panelReturn.addEventListener("click", closePanel);
       panelRetry.addEventListener("click", () => {
-        if (activeAnalysisSentenceId) requestAnalysis(activeAnalysisSentenceId, null);
+        if (panelMode === "word" && activeAnalysisWordCardId) {
+          requestWordAnalysis(activeAnalysisWordCardId);
+        } else if (activeAnalysisSentenceId) {
+          requestAnalysis(activeAnalysisSentenceId, null);
+        }
       });
       wordDetailSave.addEventListener("click", async () => {
         if (!activeWordDetailCardId) return;
@@ -1610,8 +1856,10 @@ def _selection_script() -> str:
         const body = new URLSearchParams({ current_meaning: meaning, user_note: note });
         const resp = await fetch(`/mark/word/${cardId}`, { method: "PATCH", body });
         if (resp.ok) {
-          const span = reader.querySelector(`[data-word-card="${cardId}"]`);
-          if (span) { span.dataset.meaning = meaning; span.dataset.note = note; }
+          reader.querySelectorAll(`[data-word-card="${cardId}"]`).forEach((span) => {
+            span.dataset.meaning = meaning;
+            span.dataset.note = note;
+          });
           hideToolbar();
         }
       });
@@ -1619,6 +1867,11 @@ def _selection_script() -> str:
         const cardId = wordDetailRemove.dataset.cardId;
         if (cardId) deleteWordCardsAndReload([cardId]);
       });
+      if (wordDetailExplain) {
+        wordDetailExplain.addEventListener("click", () => {
+          if (activeWordDetailCardId) requestWordAnalysis(activeWordDetailCardId);
+        });
+      }
       reader.addEventListener("click", (event) => {
         const selection = window.getSelection();
         const hasSelection = selection && !selection.isCollapsed;
@@ -2090,6 +2343,7 @@ def _css() -> str:
       align-items: center;
       flex-wrap: wrap;
     }
+    .toolbar-group[hidden] { display: none; }
     .selection-toolbar button {
       border-color: #374151;
       background: #f9fafb;
@@ -2225,6 +2479,14 @@ def _css() -> str:
       color: #1d4ed8;
       background: #eff6ff;
       font-size: 13px;
+    }
+    .word-analysis-list {
+      margin: 4px 0 0;
+      padding-left: 18px;
+    }
+    .word-analysis-list li {
+      margin: 2px 0;
+      line-height: 1.45;
     }
     .evidence-item {
       width: 100%;
