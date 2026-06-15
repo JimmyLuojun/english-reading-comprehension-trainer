@@ -10,15 +10,52 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 from app.web.fastapi_app import create_app
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
+
+_VALID_SENTENCE_ANALYSIS = {
+    "subject_skeleton": "The cat sat",
+    "clauses": [{"type": "main", "text": "The cat sat", "role": "statement"}],
+    "modifiers": [],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The cat sat.",
+    "chinese_gloss": "猫坐着。",
+    "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
+    "confidence": 0.9,
+}
+
+_VALID_DIAGNOSED_ANALYSIS = {
+    "subject_skeleton": "The cat sat",
+    "clauses": [{"type": "main", "text": "The cat sat", "role": "statement"}],
+    "modifiers": [],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The cat sat.",
+    "chinese_gloss": "猫坐着。",
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": ["G02"],
+    "diagnosis_evidence": [
+        {
+            "error_type": "G02",
+            "evidence": "The translation misses the phrase \"on the mat\".",
+        }
+    ],
+    "confidence": 0.9,
+}
 
 
 @pytest.fixture()
@@ -36,7 +73,8 @@ def client(db: DatabaseConnection) -> TestClient:
 def _seed_book(db: DatabaseConnection, tmp_path: Path) -> tuple[int, list[int]]:
     path = tmp_path / "book.txt"
     path.write_text(
-        "The cat sat on the mat. It was a bright cold day. The clocks struck thirteen.",
+        "The cat sat on the mat. It was a bright cold day.\n\n"
+        "The clocks struck thirteen.",
         encoding="utf-8",
     )
     result = import_txt(db, path, title="Test Book", author="Author")
@@ -73,6 +111,48 @@ def _make_due_yesterday(db: DatabaseConnection, table_name: str, card_id: int) -
             f"UPDATE {table_name} SET due_at = ? WHERE id = ?",
             ((datetime.now(timezone.utc) - timedelta(days=1)).isoformat(), card_id),
         )
+
+
+def _attach_sentence_analysis(
+    db: DatabaseConnection,
+    sentence_id: int,
+    *,
+    prompt_version: str = "v1",
+) -> int:
+    with db.get_connection() as conn:
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, ?, 'manual', ?, 1, ?)""",
+            (
+                f"analysis-{sentence_id}-{prompt_version}",
+                prompt_version,
+                json.dumps(_VALID_SENTENCE_ANALYSIS),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        ).lastrowid
+        card_id = conn.execute(
+            "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+            (sentence_id,),
+        ).fetchone()["id"]
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    return cache_id
+
+
+def _sentence_error_codes(db: DatabaseConnection, sentence_id: int) -> set[str]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT et.code
+                 FROM sentence_cards sc
+                 JOIN sentence_card_errors sce ON sce.card_id = sc.id
+                 JOIN error_types et ON et.id = sce.error_type_id
+                WHERE sc.sentence_id = ?""",
+            (sentence_id,),
+        ).fetchall()
+    return {row["code"] for row in rows}
 
 
 class TestBasicPages:
@@ -157,11 +237,25 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert "The cat sat" in response.text
+        assert '<article class="reader"' in response.text
+        assert '<h1 class="reader-title">Test Book</h1>' in response.text
+        assert response.text.count('<p class="reader-para">') == 2
+        assert 'class="reader-text"' not in response.text
         assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
+        assert f'id="sentence-{sentence_ids[0]}"' in response.text
         assert 'id="selection-toolbar"' in response.text
         assert 'id="word-card-index"' in response.text
         assert 'id="toolbar-translation-open"' in response.text
+        assert 'id="toolbar-analysis-open"' in response.text
+        assert 'id="toolbar-translation-editor"' in response.text
+        assert 'id="analysis-panel"' in response.text
+        assert "window.prompt" not in response.text
+        assert f"reader:progress:book:${{bookId}}" in response.text
+        assert 'data-restore-progress="1"' in response.text
+        assert "top_sentence_id" in response.text
         assert "/mark/word" in response.text
+        assert "selectedWordCardIds" in response.text
+        assert "deleteWordCardsAndReload" in response.text
 
     def test_read_page_marks_active_sentence_in_metadata(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -174,6 +268,70 @@ class TestReadingAndMarking:
         assert response.status_code == 200
         assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
         assert 'data-marked="1"' in response.text
+        assert 'class="reader-sentence marked"' in response.text
+
+    def test_read_page_marks_analyzed_sentence_in_metadata(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+        cache_id = _attach_sentence_analysis(db, sentence_ids[0])
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert 'class="reader-sentence marked analyzed"' in response.text
+        assert f'data-analysis-id="{cache_id}"' in response.text
+        assert 'data-analysis-stale="0"' in response.text
+
+    def test_read_page_marks_stale_analysis_in_metadata(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+        cache_id = _attach_sentence_analysis(
+            db,
+            sentence_ids[0],
+            prompt_version="v0",
+        )
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert 'class="reader-sentence marked analyzed-stale"' in response.text
+        assert f'data-analysis-id="{cache_id}"' in response.text
+        assert 'data-analysis-stale="1"' in response.text
+
+    def test_read_page_underlines_existing_word_card(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "cat")
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert f'data-word-card="{card_id}"' in response.text
+        assert f'<span data-word-card="{card_id}">cat</span>' in response.text
+
+    def test_explicit_chapter_does_not_restore_saved_progress(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.get(f"/read/{book_id}?chapter=1")
+
+        assert response.status_code == 200
+        assert 'data-restore-progress="0"' in response.text
 
     def test_mark_sentence_creates_card_and_redirects(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -248,6 +406,116 @@ class TestReadingAndMarking:
 
         assert response.status_code == 400
         assert "user_translation" in response.text
+
+    def test_analyze_sentence_endpoint_saves_analysis_and_errors(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        result = SentenceAnalysisResult(
+            data=_VALID_SENTENCE_ANALYSIS,
+            cache_id=0,
+            from_cache=False,
+            is_stale=False,
+            is_valid=True,
+        )
+
+        with patch("app.web.fastapi_app.analyze_sentence", return_value=result) as mock:
+            response = client.post(
+                f"/analysis/sentence/{sentence_ids[0]}",
+                data={"return_to": "/read/1"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["from_cache"] is False
+        assert payload["analysis"]["simplified_en"] == "The cat sat."
+        mock.assert_called_once()
+        assert mock.call_args.kwargs["user_translation"] is None
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT ai_analysis_id FROM sentence_cards WHERE sentence_id = ?",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["ai_analysis_id"] == payload["cache_id"]
+        assert _sentence_error_codes(db, sentence_ids[0]) == {"G01"}
+
+    def test_analyze_sentence_endpoint_saves_translation_first(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        result = SentenceAnalysisResult(
+            data=_VALID_DIAGNOSED_ANALYSIS,
+            cache_id=0,
+            from_cache=False,
+            is_stale=False,
+            is_valid=True,
+        )
+
+        with patch("app.web.fastapi_app.analyze_sentence", return_value=result) as mock:
+            response = client.post(
+                f"/analysis/sentence/{sentence_ids[0]}",
+                data={
+                    "user_translation": "猫坐在垫子上。",
+                    "return_to": "/read/1",
+                },
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["user_translation"] == "猫坐在垫子上。"
+        assert payload["analysis"]["diagnosis_basis"] == "user_translation"
+        assert mock.call_args.kwargs["user_translation"] == "猫坐在垫子上。"
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_translation FROM sentence_cards WHERE sentence_id = ?",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_translation"] == "猫坐在垫子上。"
+        assert _sentence_error_codes(db, sentence_ids[0]) == {"G02"}
+
+    def test_get_sentence_analysis_returns_saved_payload(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+        cache_id = _attach_sentence_analysis(db, sentence_ids[0])
+
+        response = client.get(f"/analysis/sentence/{sentence_ids[0]}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["cache_id"] == cache_id
+        assert payload["from_cache"] is True
+        assert payload["analysis"]["subject_skeleton"] == "The cat sat"
+
+    def test_get_sentence_analysis_missing_returns_404(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.get(f"/analysis/sentence/{sentence_ids[0]}")
+
+        assert response.status_code == 404
+        assert response.json()["retry"] is True
+
+    def test_analyze_sentence_endpoint_returns_retryable_error(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        with patch(
+            "app.web.fastapi_app.analyze_sentence",
+            side_effect=RuntimeError("LLM call failed"),
+        ):
+            response = client.post(f"/analysis/sentence/{sentence_ids[0]}")
+
+        assert response.status_code == 502
+        payload = response.json()
+        assert payload["ok"] is False
+        assert payload["retry"] is True
+        assert "LLM call failed" in payload["error"]
 
     def test_unmark_sentence_archives_card_and_redirects(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

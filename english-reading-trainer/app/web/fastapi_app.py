@@ -17,8 +17,11 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from app.ai.ai_provider_config import get_ai_provider_settings
+from app.ai.analysis_saver import save_sentence_analysis
+from app.ai.llm_sentence_analyzer import analyze_sentence
 from app.ai.prompt_version_registry import sync_prompt_versions
 from app.cards.sentence_card_service import (
     SentenceCardAlreadyExistsError,
@@ -58,6 +61,9 @@ _MIGRATIONS = _PROJECT_ROOT / "migrations"
 _DEFAULT_PAGE_LIMIT = 50
 _MAX_IMPORT_BYTES = 10 * 1024 * 1024  # 10 MB cap for both file upload and pasted text
 _AUTO_TITLE_MAX_LEN = 80
+_DEFAULT_SENTENCE_PROMPT_VERSION = "v1"
+_PREDICT_SENTENCE_PROMPT = "sentence_analysis_predict"
+_DIAGNOSE_SENTENCE_PROMPT = "sentence_analysis_diagnose"
 
 
 def create_app(
@@ -198,7 +204,7 @@ def create_app(
         return _html_page(book["title"], body, active="books")
 
     @web_app.get("/read/{book_id}", response_class=HTMLResponse)
-    def read_book(book_id: int, chapter: int = 1) -> HTMLResponse:
+    def read_book(request: Request, book_id: int, chapter: int = 1) -> HTMLResponse:
         db = db_factory()
         book = _fetch_book(db, book_id)
         if book is None:
@@ -209,17 +215,23 @@ def create_app(
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
         return_to = f"/read/{book_id}?chapter={chapter}"
+        restore_progress = "chapter" not in request.query_params or (
+            request.query_params.get("restore") == "1"
+        )
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>{_escape(book["title"])}</h1>
-            <p class="muted">Chapter {chapter}: {_escape(chapter_row["title"])}</p>
-          </div>
-          <a class="button" href="/books/{book_id}">Chapters</a>
-        </section>
-        {_reader_view(sentences, return_to, chapter_row["id"], word_cards)}
+        {_reader_view(
+            rows=sentences,
+            return_to=return_to,
+            chapter_id=chapter_row["id"],
+            word_cards=word_cards,
+            book_id=book_id,
+            book_title=book["title"],
+            chapter_idx=chapter,
+            chapter_title=chapter_row["title"],
+            restore_progress=restore_progress,
+        )}
         """
-        return _html_page("Read", body, active="books")
+        return _html_page("Read", body, active="books", page_class="reader-page")
 
     @web_app.post("/mark/sentence/{sentence_id}")
     async def mark_sentence(sentence_id: int, request: Request) -> Any:
@@ -248,6 +260,85 @@ def create_app(
         except ValueError as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
+
+    @web_app.get("/analysis/sentence/{sentence_id}")
+    def get_sentence_analysis(sentence_id: int) -> JSONResponse:
+        payload = _fetch_sentence_analysis_payload(db_factory(), sentence_id)
+        if payload is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "No saved analysis for this sentence.",
+                    "retry": True,
+                },
+                status_code=404,
+            )
+        return JSONResponse(payload)
+
+    @web_app.post("/analysis/sentence/{sentence_id}")
+    async def analyze_sentence_endpoint(
+        sentence_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        db = db_factory()
+        try:
+            translation = form.get("user_translation")
+            if translation is not None and translation.strip():
+                save_sentence_translation(db, sentence_id, translation)
+
+            sentence = _fetch_sentence_for_analysis(db, sentence_id)
+            result = analyze_sentence(
+                db,
+                sentence["text"],
+                user_translation=sentence.get("user_translation") or None,
+            )
+            if not result.is_valid:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "AI response failed validation.",
+                        "retry": True,
+                    },
+                    status_code=502,
+                )
+
+            cache_meta = _fetch_cache_metadata(db, result.cache_id)
+            save_sentence_analysis(
+                db,
+                sentence_id,
+                json.dumps(result.data, ensure_ascii=False),
+                model=cache_meta.get("model") or get_ai_provider_settings().model,
+                prompt_version=cache_meta.get("prompt_version")
+                or _active_sentence_prompt_version(
+                    db,
+                    sentence.get("user_translation") or None,
+                ),
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": True},
+                status_code=502,
+            )
+
+        payload = _fetch_sentence_analysis_payload(db, sentence_id)
+        if payload is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "Analysis was not saved.",
+                    "retry": True,
+                },
+                status_code=500,
+            )
+        payload["from_cache"] = result.from_cache
+        payload["is_stale"] = bool(payload["is_stale"] or result.is_stale)
+        return JSONResponse(payload)
 
     @web_app.delete("/mark/sentence/{sentence_id}")
     async def unmark_sentence(sentence_id: int, request: Request) -> Any:
@@ -473,28 +564,139 @@ def _fetch_chapter_sentences(
 ) -> list[dict[str, Any]]:
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT s.id, s.idx, s.text,
+            """SELECT s.id, s.idx, s.text, s.paragraph_id, p.idx AS paragraph_idx,
                       CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card,
-                      COALESCE(sc.user_translation, '') AS user_translation
+                      COALESCE(sc.user_translation, '') AS user_translation,
+                      sc.ai_analysis_id,
+                      ac.prompt_version AS analysis_prompt_version,
+                      ac.model AS analysis_model,
+                      COALESCE(ac.is_valid, 0) AS analysis_is_valid
                  FROM sentences s
+                 JOIN paragraphs p ON p.id = s.paragraph_id
                  LEFT JOIN sentence_cards sc
                    ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                 LEFT JOIN ai_cache ac
+                   ON ac.id = sc.ai_analysis_id
                 WHERE s.chapter_id = ?
-                ORDER BY s.idx""",
+                ORDER BY p.idx, s.idx""",
             (chapter_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    result = [dict(row) for row in rows]
+    for row in result:
+        has_analysis = bool(row.get("ai_analysis_id") and row.get("analysis_is_valid"))
+        active_version = _active_sentence_prompt_version(
+            db,
+            row.get("user_translation") or None,
+        )
+        row["has_analysis"] = 1 if has_analysis else 0
+        row["analysis_is_stale"] = (
+            1
+            if has_analysis and row.get("analysis_prompt_version") != active_version
+            else 0
+        )
+    return result
 
 
 def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT id, lemma, surface_form, lexical_type
+            """SELECT id, lemma, surface_form, lexical_type, first_sentence_id
                  FROM word_cards
                 WHERE archived_at IS NULL
                 ORDER BY created_at DESC"""
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _fetch_sentence_for_analysis(
+    db: DatabaseConnection,
+    sentence_id: int,
+) -> dict[str, Any]:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT s.id, s.text, COALESCE(sc.user_translation, '') AS user_translation
+                 FROM sentences s
+                 LEFT JOIN sentence_cards sc
+                   ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                WHERE s.id = ?""",
+            (sentence_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"Sentence id={sentence_id} not found.")
+    return dict(row)
+
+
+def _fetch_sentence_analysis_payload(
+    db: DatabaseConnection,
+    sentence_id: int,
+) -> dict[str, Any] | None:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT sc.id AS card_id, sc.user_translation,
+                      ac.id AS cache_id, ac.prompt_version, ac.model,
+                      ac.response_json, ac.is_valid, ac.created_at
+                 FROM sentences s
+                 JOIN sentence_cards sc
+                   ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                 JOIN ai_cache ac
+                   ON ac.id = sc.ai_analysis_id
+                WHERE s.id = ? AND ac.is_valid = 1""",
+            (sentence_id,),
+        ).fetchone()
+    if row is None:
+        return None
+
+    analysis = json.loads(row["response_json"])
+    active_version = _active_sentence_prompt_version(
+        db,
+        row["user_translation"] or None,
+    )
+    return {
+        "ok": True,
+        "sentence_id": sentence_id,
+        "card_id": row["card_id"],
+        "cache_id": row["cache_id"],
+        "user_translation": row["user_translation"] or "",
+        "prompt_version": row["prompt_version"],
+        "active_prompt_version": active_version,
+        "model": row["model"],
+        "created_at": row["created_at"],
+        "is_stale": row["prompt_version"] != active_version,
+        "from_cache": True,
+        "analysis": analysis,
+    }
+
+
+def _fetch_cache_metadata(
+    db: DatabaseConnection,
+    cache_id: int,
+) -> dict[str, str]:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT prompt_version, model FROM ai_cache WHERE id = ?",
+            (cache_id,),
+        ).fetchone()
+    return dict(row) if row else {}
+
+
+def _active_sentence_prompt_version(
+    db: DatabaseConnection,
+    user_translation: str | None,
+) -> str:
+    prompt_name = (
+        _DIAGNOSE_SENTENCE_PROMPT
+        if user_translation and user_translation.strip()
+        else _PREDICT_SENTENCE_PROMPT
+    )
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT version
+                 FROM prompt_versions
+                WHERE name = ? AND is_active = 1
+                ORDER BY id DESC LIMIT 1""",
+            (prompt_name,),
+        ).fetchone()
+    return row["version"] if row else _DEFAULT_SENTENCE_PROMPT_VERSION
 
 
 def _books_table(rows: list[dict[str, Any]]) -> str:
@@ -544,28 +746,132 @@ def _reader_view(
     return_to: str,
     chapter_id: int,
     word_cards: list[dict[str, Any]],
+    book_id: int,
+    book_title: str,
+    chapter_idx: int,
+    chapter_title: str,
+    restore_progress: bool,
 ) -> str:
     if not rows:
         return '<p class="empty">No sentences in this chapter.</p>'
-    sentence_spans = " ".join(
-        _reader_sentence_span(row, chapter_id) for row in rows
+    cards_by_sentence = _word_cards_by_sentence(word_cards)
+    paragraphs = "\n".join(
+        _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
+        for paragraph_rows in _group_sentence_paragraphs(rows)
     )
+    restore_flag = "1" if restore_progress else "0"
     return f"""
-    <section class="reader" data-reader data-return-to="{_escape(return_to)}">
-      <p class="reader-text">{sentence_spans}</p>
-    </section>
+    <article class="reader" data-reader data-book-id="{book_id}"
+      data-chapter-idx="{chapter_idx}" data-return-to="{_escape(return_to)}"
+      data-restore-progress="{restore_flag}">
+      <header class="reader-header">
+        <a class="reader-back" href="/books/{book_id}">Chapters</a>
+        <h1 class="reader-title">{_escape(book_title)}</h1>
+        <h2 class="reader-chapter">Chapter {chapter_idx}: {_escape(chapter_title)}</h2>
+      </header>
+      {paragraphs}
+    </article>
+    {_analysis_panel()}
     {_selection_toolbar(return_to, word_cards)}
     """
 
 
-def _reader_sentence_span(row: dict[str, Any], chapter_id: int) -> str:
-    marked = "1" if row["has_card"] else "0"
-    return (
-        f'<span class="reader-sentence" data-sentence-id="{row["id"]}" '
-        f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
-        f'data-translation="{_escape(row.get("user_translation", ""))}">'
-        f'{_escape(row["text"])}</span>'
+def _group_sentence_paragraphs(
+    rows: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    paragraphs: list[list[dict[str, Any]]] = []
+    current_id: int | None = None
+    for row in rows:
+        paragraph_id = int(row["paragraph_id"])
+        if paragraph_id != current_id:
+            paragraphs.append([])
+            current_id = paragraph_id
+        paragraphs[-1].append(row)
+    return paragraphs
+
+
+def _reader_paragraph(
+    rows: list[dict[str, Any]],
+    chapter_id: int,
+    cards_by_sentence: dict[int, list[dict[str, Any]]],
+) -> str:
+    sentence_spans = " ".join(
+        _reader_sentence_span(row, chapter_id, cards_by_sentence.get(row["id"], []))
+        for row in rows
     )
+    return f'<p class="reader-para">{sentence_spans}</p>'
+
+
+def _word_cards_by_sentence(
+    word_cards: list[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for card in word_cards:
+        grouped.setdefault(int(card["first_sentence_id"]), []).append(card)
+    return grouped
+
+
+def _reader_sentence_span(
+    row: dict[str, Any],
+    chapter_id: int,
+    word_cards: list[dict[str, Any]],
+) -> str:
+    marked = "1" if row["has_card"] else "0"
+    classes = ["reader-sentence"]
+    if row["has_card"]:
+        classes.append("marked")
+    if row.get("has_analysis"):
+        classes.append("analyzed-stale" if row.get("analysis_is_stale") else "analyzed")
+    text = _highlight_word_cards(row["text"], word_cards)
+    return (
+        f'<span id="sentence-{row["id"]}" class="{" ".join(classes)}" '
+        f'data-sentence-id="{row["id"]}" '
+        f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
+        f'data-translation="{_escape(row.get("user_translation", ""))}" '
+        f'data-analysis-id="{_escape(row.get("ai_analysis_id") or "")}" '
+        f'data-analysis-stale="{int(row.get("analysis_is_stale") or 0)}">'
+        f'{text}</span>'
+    )
+
+
+def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
+    if not word_cards:
+        return _escape(text)
+
+    lower_text = text.lower()
+    matches: list[tuple[int, int, dict[str, Any]]] = []
+    for card in word_cards:
+        surface = str(card.get("surface_form") or card.get("lemma") or "").strip()
+        if not surface:
+            continue
+        start = lower_text.find(surface.lower())
+        if start >= 0:
+            matches.append((start, start + len(surface), card))
+
+    selected: list[tuple[int, int, dict[str, Any]]] = []
+    occupied_until = -1
+    for start, end, card in sorted(
+        matches,
+        key=lambda item: (item[0], -(item[1] - item[0])),
+    ):
+        if start < occupied_until:
+            continue
+        selected.append((start, end, card))
+        occupied_until = end
+
+    if not selected:
+        return _escape(text)
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, end, card in selected:
+        pieces.append(_escape(text[cursor:start]))
+        pieces.append(
+            f'<span data-word-card="{card["id"]}">{_escape(text[start:end])}</span>'
+        )
+        cursor = end
+    pieces.append(_escape(text[cursor:]))
+    return "".join(pieces)
 
 
 def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
@@ -580,11 +886,22 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="toolbar-translation-open" type="button">Write translation</button>
+        <button id="toolbar-analysis-open" type="button">AI analysis</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
         <input id="toolbar-translation-value" type="hidden" name="user_translation">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
       </form>
+      <div id="toolbar-translation-editor" class="translation-editor" hidden>
+        <label for="toolbar-translation-text">Your understanding</label>
+        <textarea id="toolbar-translation-text" rows="4" placeholder="Write your Chinese understanding"></textarea>
+        <div class="translation-actions">
+          <button id="toolbar-translation-cancel" type="button">Cancel</button>
+          <button id="toolbar-translation-save" type="button">Save only</button>
+          <button id="toolbar-translation-analyze" type="button">Save and AI analyze</button>
+        </div>
+        <p id="toolbar-translation-status" class="toolbar-status" aria-live="polite"></p>
+      </div>
       <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group">
         <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
         <input id="toolbar-word-surface-form" type="hidden" name="surface_form">
@@ -607,6 +924,42 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
     """
 
 
+def _analysis_panel() -> str:
+    return """
+    <aside id="analysis-panel" class="analysis-panel" hidden aria-live="polite">
+      <header class="analysis-panel-header">
+        <div>
+          <p class="panel-kicker">Sentence analysis</p>
+          <h2 id="analysis-panel-title">AI Analysis</h2>
+          <p id="analysis-panel-meta" class="muted"></p>
+        </div>
+        <button id="analysis-panel-close" type="button">Close panel</button>
+      </header>
+      <div id="analysis-panel-status" class="analysis-status"></div>
+      <section class="analysis-section">
+        <h3>Simplified English</h3>
+        <p id="analysis-simplified" class="analysis-text"></p>
+      </section>
+      <section class="analysis-section">
+        <h3>Chinese gloss</h3>
+        <p id="analysis-gloss" class="analysis-text"></p>
+      </section>
+      <section class="analysis-section">
+        <h3>Diagnosis</h3>
+        <div id="analysis-diagnosis"></div>
+      </section>
+      <section class="analysis-section">
+        <h3>Subject skeleton</h3>
+        <p id="analysis-skeleton" class="analysis-text"></p>
+      </section>
+      <footer class="analysis-panel-actions">
+        <button id="analysis-panel-retry" type="button">Reanalyze</button>
+        <button id="analysis-panel-return" type="button">Back to reading</button>
+      </footer>
+    </aside>
+    """
+
+
 def _json_script(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True).replace("<", "\\u003c")
 
@@ -625,8 +978,15 @@ def _selection_script() -> str:
       const sentenceSubmit = document.getElementById("toolbar-sentence-submit");
       const sentenceDelete = document.getElementById("toolbar-sentence-delete");
       const translationOpen = document.getElementById("toolbar-translation-open");
+      const analysisOpen = document.getElementById("toolbar-analysis-open");
       const translationForm = document.getElementById("toolbar-translation-form");
       const translationValue = document.getElementById("toolbar-translation-value");
+      const translationEditor = document.getElementById("toolbar-translation-editor");
+      const translationText = document.getElementById("toolbar-translation-text");
+      const translationCancel = document.getElementById("toolbar-translation-cancel");
+      const translationSave = document.getElementById("toolbar-translation-save");
+      const translationAnalyze = document.getElementById("toolbar-translation-analyze");
+      const translationStatus = document.getElementById("toolbar-translation-status");
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
@@ -634,19 +994,45 @@ def _selection_script() -> str:
       const wordDelete = document.getElementById("toolbar-word-delete");
       const crossSentence = document.getElementById("toolbar-cross-sentence");
       const clearButton = document.getElementById("toolbar-clear");
+      const panel = document.getElementById("analysis-panel");
+      const panelClose = document.getElementById("analysis-panel-close");
+      const panelReturn = document.getElementById("analysis-panel-return");
+      const panelRetry = document.getElementById("analysis-panel-retry");
+      const panelMeta = document.getElementById("analysis-panel-meta");
+      const panelStatus = document.getElementById("analysis-panel-status");
+      const simplified = document.getElementById("analysis-simplified");
+      const gloss = document.getElementById("analysis-gloss");
+      const skeleton = document.getElementById("analysis-skeleton");
+      const diagnosis = document.getElementById("analysis-diagnosis");
+      const bookId = reader.dataset.bookId || "";
+      const chapterIdx = Number.parseInt(reader.dataset.chapterIdx || "1", 10);
+      const progressKey = bookId ? `reader:progress:book:${bookId}` : "";
 
       let activeSentenceId = null;
       let activeSentenceTranslation = "";
       let activeWordCardId = null;
+      let activeWordCardIds = [];
+      let activeAnalysisSentenceId = null;
+      let translationEditorOpen = false;
+      let progressTimer = null;
 
       const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
       const lemmaKey = (value) => value.toLowerCase().trim();
 
+      function hideTranslationEditor() {
+        translationEditor.hidden = true;
+        translationEditorOpen = false;
+        translationStatus.textContent = "";
+      }
+
       function hideToolbar() {
+        hideTranslationEditor();
         toolbar.hidden = true;
         activeSentenceId = null;
         activeSentenceTranslation = "";
         activeWordCardId = null;
+        activeWordCardIds = [];
+        wordDelete.dataset.cardIds = "";
       }
 
       function setVisible(element, visible) {
@@ -661,6 +1047,20 @@ def _selection_script() -> str:
             return false;
           }
         });
+      }
+
+      function selectedWordCardIds(range) {
+        const ids = Array.from(reader.querySelectorAll("[data-word-card]"))
+          .filter((span) => {
+            try {
+              return range.intersectsNode(span);
+            } catch {
+              return false;
+            }
+          })
+          .map((span) => span.dataset.wordCard)
+          .filter(Boolean);
+        return Array.from(new Set(ids));
       }
 
       function showToolbar(range) {
@@ -689,6 +1089,7 @@ def _selection_script() -> str:
       }
 
       function updateToolbar() {
+        if (translationEditorOpen || toolbar.contains(document.activeElement)) return;
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
           hideToolbar();
@@ -719,15 +1120,25 @@ def _selection_script() -> str:
         activeSentenceTranslation = sentence.dataset.translation || "";
         const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
         const markedSentence = sentence.dataset.marked === "1";
-        const existingWord = wordCards[lemmaKey(selectedText)];
-        activeWordCardId = existingWord ? existingWord.id : null;
+        const selectedCardIds = selectedWordCardIds(range);
+        const existingWord = selectedCardIds.length ? null : wordCards[lemmaKey(selectedText)];
+        activeWordCardIds = selectedCardIds.length
+          ? selectedCardIds
+          : (existingWord ? [String(existingWord.id)] : []);
+        activeWordCardId = activeWordCardIds.length ? activeWordCardIds[0] : null;
+        wordDelete.dataset.cardIds = activeWordCardIds.join(",");
+        wordDelete.textContent = activeWordCardIds.length > 1 ? "Remove selected cards" : "Remove from cards";
+        wordExisting.querySelector(".toolbar-status").textContent =
+          activeWordCardIds.length > 1 ? `${activeWordCardIds.length} in cards` : "In cards";
 
         sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
         translationForm.action = `/mark/sentence/${activeSentenceId}/translation`;
         sentenceSubmit.hidden = !wholeSentence || markedSentence;
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
         translationOpen.hidden = !wholeSentence;
+        analysisOpen.hidden = !wholeSentence;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
+        analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
         setVisible(sentenceForm, wholeSentence);
 
         wordSentenceId.value = activeSentenceId;
@@ -736,6 +1147,58 @@ def _selection_script() -> str:
         setVisible(wordExisting, !wholeSentence && Boolean(activeWordCardId));
         setVisible(crossSentence, false);
         showToolbar(range);
+      }
+
+      function readProgress() {
+        if (!progressKey) return null;
+        try {
+          return JSON.parse(window.localStorage.getItem(progressKey) || "null");
+        } catch {
+          return null;
+        }
+      }
+
+      function restoreReaderProgress() {
+        if (reader.dataset.restoreProgress !== "1") return;
+        const saved = readProgress();
+        if (!saved) return;
+        const savedChapter = Number.parseInt(saved.chapter_idx, 10);
+        if (savedChapter && savedChapter !== chapterIdx) {
+          window.location.replace(`/read/${bookId}?chapter=${savedChapter}&restore=1`);
+          return;
+        }
+        const sentenceId = Number.parseInt(saved.top_sentence_id, 10);
+        if (!sentenceId) return;
+        window.setTimeout(() => {
+          document.getElementById(`sentence-${sentenceId}`)?.scrollIntoView({ block: "start" });
+        }, 0);
+      }
+
+      function topSentenceId() {
+        const spans = Array.from(reader.querySelectorAll("[data-sentence-id]"));
+        for (const span of spans) {
+          const rect = span.getBoundingClientRect();
+          if (rect.bottom >= 0) {
+            return Number.parseInt(span.dataset.sentenceId, 10);
+          }
+        }
+        return spans.length ? Number.parseInt(spans[spans.length - 1].dataset.sentenceId, 10) : null;
+      }
+
+      function saveReaderProgress() {
+        if (!progressKey) return;
+        const sentenceId = topSentenceId();
+        if (!sentenceId) return;
+        window.localStorage.setItem(progressKey, JSON.stringify({
+          chapter_idx: chapterIdx,
+          top_sentence_id: sentenceId,
+          ts: new Date().toISOString(),
+        }));
+      }
+
+      function scheduleProgressSave() {
+        window.clearTimeout(progressTimer);
+        progressTimer = window.setTimeout(saveReaderProgress, 300);
       }
 
       async function deleteAndReload(url) {
@@ -750,30 +1213,295 @@ def _selection_script() -> str:
         }
       }
 
-      toolbar.addEventListener("mousedown", (event) => event.preventDefault());
+      async function deleteWordCardsAndReload(cardIds) {
+        const ids = cardIds.filter(Boolean);
+        if (!ids.length) return;
+        for (const cardId of ids) {
+          const separator = `/mark/word/${cardId}`.includes("?") ? "&" : "?";
+          const response = await fetch(
+            `/mark/word/${cardId}${separator}return_to=${encodeURIComponent(returnTo)}`,
+            { method: "DELETE" },
+          );
+          if (!response.ok) {
+            window.location.assign(response.url || returnTo);
+            return;
+          }
+        }
+        window.location.assign(returnTo);
+      }
+
+      function openTranslationEditor() {
+        if (!activeSentenceId) return;
+        translationText.value = activeSentenceTranslation;
+        translationEditor.hidden = false;
+        translationEditorOpen = true;
+        translationStatus.textContent = "";
+        setVisible(wordForm, false);
+        setVisible(wordExisting, false);
+        setVisible(crossSentence, false);
+        requestAnimationFrame(() => translationText.focus());
+      }
+
+      function saveTranslationOnly() {
+        const value = translationText.value.trim();
+        if (!value) {
+          translationStatus.textContent = "Enter a translation first, or use AI analysis without saving.";
+          return;
+        }
+        translationValue.value = value;
+        translationForm.submit();
+      }
+
+      function openPanel() {
+        panel.hidden = false;
+        document.body.classList.add("analysis-open");
+      }
+
+      function closePanel() {
+        panel.hidden = true;
+        document.body.classList.remove("analysis-open");
+        clearEvidenceHighlight();
+      }
+
+      function setPanelLoading(message) {
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = message;
+        panelMeta.textContent = "";
+        simplified.textContent = "";
+        gloss.textContent = "";
+        skeleton.textContent = "";
+        diagnosis.replaceChildren();
+      }
+
+      function renderAnalysisError(message, retryable) {
+        openPanel();
+        panelStatus.className = "analysis-status error";
+        panelStatus.textContent = message;
+        panelRetry.hidden = !retryable || !activeAnalysisSentenceId;
+      }
+
+      function renderAnalysisPayload(payload) {
+        const analysis = payload.analysis || {};
+        activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
+        panelRetry.hidden = false;
+        panelMeta.textContent = [
+          `prompt ${payload.prompt_version || "unknown"}`,
+          payload.is_stale ? "stale" : "current",
+          payload.from_cache ? "cache" : "fresh",
+        ].join(" · ");
+        simplified.textContent = analysis.simplified_en || "";
+        gloss.textContent = analysis.chinese_gloss || "";
+        skeleton.textContent = analysis.subject_skeleton || "";
+        renderDiagnosis(analysis);
+      }
+
+      function renderDiagnosis(analysis) {
+        diagnosis.replaceChildren();
+        const basis = document.createElement("p");
+        basis.className = "analysis-text muted";
+        basis.textContent = analysis.diagnosis_basis === "user_translation"
+          ? "Based on your translation"
+          : "Predicted without a translation";
+        diagnosis.append(basis);
+
+        const codes = analysis.diagnosis_basis === "user_translation"
+          ? (analysis.diagnosed_error_types || [])
+          : (analysis.predicted_error_types || []);
+        if (codes.length) {
+          const codeLine = document.createElement("p");
+          codeLine.className = "analysis-codes";
+          codeLine.textContent = codes.join(", ");
+          diagnosis.append(codeLine);
+        }
+
+        const evidence = analysis.diagnosis_evidence || [];
+        if (!evidence.length) {
+          const empty = document.createElement("p");
+          empty.className = "analysis-text";
+          empty.textContent = codes.length ? "No detailed evidence saved." : "No specific issue found.";
+          diagnosis.append(empty);
+          return;
+        }
+
+        for (const item of evidence) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "evidence-item";
+          const code = item.error_type || "OK";
+          const text = item.evidence || "";
+          button.textContent = `${code}: ${text}`;
+          button.addEventListener("mouseenter", () => highlightEvidence(text));
+          button.addEventListener("mouseleave", clearEvidenceHighlight);
+          button.addEventListener("click", () => highlightEvidence(text));
+          diagnosis.append(button);
+        }
+      }
+
+      function updateSentenceAnalysisState(sentenceId, payload) {
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        if (!sentence) return;
+        sentence.dataset.marked = "1";
+        sentence.dataset.analysisId = payload.cache_id || "";
+        sentence.dataset.analysisStale = payload.is_stale ? "1" : "0";
+        sentence.dataset.translation = payload.user_translation || sentence.dataset.translation || "";
+        sentence.classList.add("marked");
+        sentence.classList.remove("analyzed", "analyzed-stale");
+        sentence.classList.add(payload.is_stale ? "analyzed-stale" : "analyzed");
+      }
+
+      async function loadSavedAnalysis(sentenceId) {
+        activeAnalysisSentenceId = sentenceId;
+        setPanelLoading("Loading analysis...");
+        try {
+          const response = await fetch(`/analysis/sentence/${sentenceId}`);
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            renderAnalysisError(payload.error || "No saved analysis found.", Boolean(payload.retry));
+            return;
+          }
+          renderAnalysisPayload(payload);
+        } catch (error) {
+          renderAnalysisError(`Could not load analysis: ${error}`, true);
+        }
+      }
+
+      async function requestAnalysis(sentenceId, translation) {
+        activeAnalysisSentenceId = sentenceId;
+        setPanelLoading("Analyzing sentence...");
+        const params = new URLSearchParams();
+        params.set("return_to", returnTo);
+        if (translation && translation.trim()) params.set("user_translation", translation.trim());
+        try {
+          const response = await fetch(`/analysis/sentence/${sentenceId}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: params.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            renderAnalysisError(payload.error || "Analysis failed.", Boolean(payload.retry));
+            return;
+          }
+          updateSentenceAnalysisState(sentenceId, payload);
+          renderAnalysisPayload(payload);
+        } catch (error) {
+          renderAnalysisError(`Analysis failed: ${error}`, true);
+        }
+      }
+
+      function clearEvidenceHighlight() {
+        reader.querySelectorAll(".analysis-highlight").forEach((node) => {
+          node.replaceWith(document.createTextNode(node.textContent || ""));
+        });
+        reader.querySelectorAll(".analysis-highlight-fallback").forEach((node) => {
+          node.classList.remove("analysis-highlight-fallback");
+        });
+      }
+
+      function evidencePhrase(text) {
+        const matches = Array.from(text.matchAll(/[\"'“‘`]([^\"'“”‘’`]{3,120})[\"'”’`]/g));
+        if (matches.length) {
+          return matches.sort((a, b) => b[1].length - a[1].length)[0][1];
+        }
+        return normalizeText(text).slice(0, 80);
+      }
+
+      function highlightEvidence(text) {
+        clearEvidenceHighlight();
+        const sentence = activeAnalysisSentenceId
+          ? document.getElementById(`sentence-${activeAnalysisSentenceId}`)
+          : null;
+        if (!sentence) return;
+        const phrase = evidencePhrase(text).toLowerCase();
+        if (!phrase) {
+          sentence.classList.add("analysis-highlight-fallback");
+          return;
+        }
+        const walker = document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          const index = (node.nodeValue || "").toLowerCase().indexOf(phrase);
+          if (index >= 0) {
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + phrase.length);
+            const mark = document.createElement("span");
+            mark.className = "analysis-highlight";
+            range.surroundContents(mark);
+            return;
+          }
+          node = walker.nextNode();
+        }
+        sentence.classList.add("analysis-highlight-fallback");
+      }
+
+      toolbar.addEventListener("mousedown", (event) => {
+        if (event.target.closest("textarea, input")) return;
+        event.preventDefault();
+      });
       sentenceDelete.addEventListener("click", () => {
         if (activeSentenceId) deleteAndReload(`/mark/sentence/${activeSentenceId}`);
       });
-      translationOpen.addEventListener("click", () => {
+      translationOpen.addEventListener("click", openTranslationEditor);
+      translationCancel.addEventListener("click", hideTranslationEditor);
+      translationSave.addEventListener("click", saveTranslationOnly);
+      translationAnalyze.addEventListener("click", () => {
+        const sentenceId = activeSentenceId;
+        const value = translationText.value.trim();
+        hideToolbar();
+        if (sentenceId) requestAnalysis(sentenceId, value || null);
+      });
+      analysisOpen.addEventListener("click", () => {
         if (!activeSentenceId) return;
-        const value = window.prompt(
-          "Write your understanding or Chinese translation:",
-          activeSentenceTranslation,
-        );
-        if (value && value.trim()) {
-          translationValue.value = value.trim();
-          translationForm.submit();
-        }
+        const sentenceId = activeSentenceId;
+        const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        hideToolbar();
+        if (sentence?.dataset.analysisId) loadSavedAnalysis(sentenceId);
+        else requestAnalysis(sentenceId, null);
       });
       wordDelete.addEventListener("click", () => {
-        if (activeWordCardId) deleteAndReload(`/mark/word/${activeWordCardId}`);
+        const ids = (wordDelete.dataset.cardIds || "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        if (ids.length) deleteWordCardsAndReload(ids);
       });
       clearButton.addEventListener("click", () => {
         window.getSelection()?.removeAllRanges();
         hideToolbar();
       });
+      panelClose.addEventListener("click", closePanel);
+      panelReturn.addEventListener("click", closePanel);
+      panelRetry.addEventListener("click", () => {
+        if (activeAnalysisSentenceId) requestAnalysis(activeAnalysisSentenceId, null);
+      });
+      reader.addEventListener("click", (event) => {
+        const sentence = event.target.closest("[data-sentence-id]");
+        if (!sentence || !sentence.dataset.analysisId) return;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return;
+        loadSavedAnalysis(sentence.dataset.sentenceId);
+      });
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
-      window.addEventListener("scroll", hideToolbar, { passive: true });
+      window.addEventListener("scroll", () => {
+        hideToolbar();
+        scheduleProgressSave();
+      }, { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", () => {
+          if (!translationEditorOpen) return;
+          const keyboardInset = Math.max(
+            10,
+            window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop + 10,
+          );
+          toolbar.style.bottom = `${keyboardInset}px`;
+        });
+      }
+      restoreReaderProgress();
     })();
     """
 
@@ -985,8 +1713,10 @@ def _html_page(
     body: str,
     *,
     active: str,
+    page_class: str = "",
     status_code: int = 200,
 ) -> HTMLResponse:
+    body_class = f' class="{_escape(page_class)}"' if page_class else ""
     return HTMLResponse(
         f"""<!doctype html>
 <html lang="en">
@@ -996,7 +1726,7 @@ def _html_page(
   <title>{_escape(title)} - English Reading Trainer</title>
   <style>{_css()}</style>
 </head>
-<body>
+<body{body_class}>
   <nav>
     <a class="{_active(active, "dashboard")}" href="/">Dashboard</a>
     <a class="{_active(active, "books")}" href="/books">Books</a>
@@ -1058,9 +1788,21 @@ def _css() -> str:
       border-color: var(--accent);
       color: var(--accent-strong);
     }
+    .reader-page {
+      background: #ffffff;
+    }
+    .reader-page nav {
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(10px);
+    }
     main {
       width: min(1180px, calc(100vw - 32px));
       margin: 24px auto 48px;
+    }
+    .reader-page main {
+      width: 100%;
+      margin: 0;
     }
     h1 { margin: 0; font-size: 26px; }
     h2 { margin: 24px 0 10px; font-size: 18px; }
@@ -1115,21 +1857,71 @@ def _css() -> str:
     }
     th { color: var(--muted); font-weight: 600; background: #f2f4f7; }
     tr:last-child td { border-bottom: 0; }
-    .sentence-meta { color: var(--muted); font-size: 13px; }
     .reader {
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 34px 18px;
+      max-width: 680px;
+      margin: 32px auto 96px;
+      padding: 0 16px;
     }
-    .reader-text {
-      max-width: 72ch;
-      margin: 0 auto;
-      font: 18px/1.85 Georgia, "Times New Roman", serif;
+    .reader-header {
+      margin: 0 0 32px;
+    }
+    .reader-back {
+      display: inline-block;
+      margin-bottom: 18px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .reader-back:hover { color: var(--accent-strong); }
+    .reader-title {
+      margin: 0 0 4px;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+    .reader-chapter {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      font-weight: 400;
+    }
+    .reader-para {
+      margin: 0 0 1.2em;
+      color: #1a1a1a;
+      font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
+      font-size: 18px;
+      line-height: 1.75;
     }
     .reader-sentence {
       cursor: text;
       text-underline-offset: 0.22em;
+    }
+    [data-sentence-id].marked {
+      background: linear-gradient(transparent 60%, #ffe58a 60%);
+    }
+    [data-sentence-id].analyzed,
+    [data-sentence-id].analyzed-stale {
+      border-left: 1px solid #2563eb;
+      padding-left: 4px;
+    }
+    [data-sentence-id].analyzed-stale {
+      border-left-style: dashed;
+    }
+    [data-sentence-id].analysis-highlight-fallback {
+      outline: 2px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 2px;
+    }
+    .analysis-highlight {
+      background: #bfdbfe;
+      box-shadow: 0 0 0 2px #bfdbfe;
+    }
+    [data-word-card] {
+      text-decoration: underline dotted #f59e0b;
+      text-underline-offset: 3px;
+    }
+    .reader-page.analysis-open .reader {
+      max-width: 520px;
+      margin-left: max(16px, calc((100vw - 940px) / 2));
+      margin-right: 400px;
+      transition: margin 140ms ease, max-width 140ms ease;
     }
     .selection-toolbar {
       position: absolute;
@@ -1166,6 +1958,116 @@ def _css() -> str:
       color: #e5e7eb;
       font-size: 14px;
       white-space: nowrap;
+    }
+    .translation-editor {
+      display: grid;
+      gap: 6px;
+      width: min(520px, calc(92vw - 16px));
+    }
+    .translation-editor[hidden] { display: none; }
+    .translation-editor label {
+      color: #e5e7eb;
+      font-size: 13px;
+    }
+    .translation-editor textarea {
+      min-height: 92px;
+      min-width: 100%;
+      resize: vertical;
+      background: #f9fafb;
+      color: #111827;
+    }
+    .translation-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .analysis-panel {
+      position: fixed;
+      z-index: 15;
+      top: 49px;
+      right: 0;
+      bottom: 0;
+      width: 360px;
+      overflow-y: auto;
+      border-left: 1px solid var(--line);
+      background: #ffffff;
+      box-shadow: -14px 0 32px rgba(15, 23, 42, 0.14);
+      padding: 18px;
+    }
+    .analysis-panel[hidden] { display: none; }
+    .analysis-panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .analysis-panel-header h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+    .panel-kicker {
+      margin: 0 0 2px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .analysis-status {
+      min-height: 20px;
+      margin: 8px 0 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .analysis-status.error {
+      color: #b91c1c;
+    }
+    .analysis-section {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+    .analysis-section h3 {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .analysis-text {
+      margin: 0;
+      line-height: 1.55;
+    }
+    .analysis-codes {
+      display: inline-block;
+      margin: 2px 0 8px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: #1d4ed8;
+      background: #eff6ff;
+      font-size: 13px;
+    }
+    .evidence-item {
+      width: 100%;
+      margin: 6px 0 0;
+      border-color: var(--line);
+      background: #f8fafc;
+      color: var(--text);
+      text-align: left;
+      white-space: normal;
+    }
+    .evidence-item:hover {
+      border-color: #2563eb;
+      color: #1d4ed8;
+    }
+    .analysis-panel-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
     }
     .badge {
       color: var(--ok);
@@ -1208,11 +2110,25 @@ def _css() -> str:
     @media (max-width: 780px) {
       nav { overflow-x: auto; padding: 10px; }
       main { width: min(100vw - 20px, 1180px); margin-top: 16px; }
+      .reader-page main {
+        width: 100%;
+        margin: 0;
+      }
       .toolbar, .split { display: block; }
       table { font-size: 14px; }
       th, td { padding: 8px; }
-      .reader { padding: 22px 14px; }
-      .reader-text { font-size: 17px; line-height: 1.75; }
+      .reader {
+        margin: 24px auto 80px;
+        padding: 0 20px;
+      }
+      .reader-para {
+        font-size: 17px;
+        line-height: 1.7;
+      }
+      .reader-page.analysis-open .reader {
+        max-width: 680px;
+        margin: 24px auto 80px;
+      }
       .selection-toolbar {
         position: fixed;
         left: 10px !important;
@@ -1220,6 +2136,19 @@ def _css() -> str:
         bottom: 10px;
         top: auto !important;
         max-width: none;
+      }
+      .translation-editor {
+        width: 100%;
+      }
+      .analysis-panel {
+        inset: 0;
+        width: 100%;
+        border-left: 0;
+        padding: 16px;
+      }
+      .analysis-panel-header {
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
       }
     }
     """
