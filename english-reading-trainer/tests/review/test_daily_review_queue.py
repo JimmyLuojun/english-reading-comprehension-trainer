@@ -290,6 +290,31 @@ class TestListDueCards:
 
         assert items[0].error_codes == ("D02",)
 
+    def test_word_cards_include_first_source_link(
+        self, db: DatabaseConnection
+    ) -> None:
+        card_id = _insert_word_card(db, surface_form="ephemeral")
+        with db.get_connection() as conn:
+            sentence_id = conn.execute(
+                "SELECT first_sentence_id FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["first_sentence_id"]
+
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+
+        assert items[0].source_book_title == "B"
+        assert items[0].source_href.endswith(f"?chapter=1#sentence-{sentence_id}")
+
+    def test_sentence_cards_do_not_include_word_source_link(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_sentence_card(db, text="A due sentence.")
+
+        items = list_due_cards(db, as_of=NOW, card_type="sentence")
+
+        assert items[0].source_book_title == ""
+        assert items[0].source_href == ""
+
 
 class TestBuildDailyReviewQueue:
     def test_zero_limit_returns_empty(self, db: DatabaseConnection) -> None:

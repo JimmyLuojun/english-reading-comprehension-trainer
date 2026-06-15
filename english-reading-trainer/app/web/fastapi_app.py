@@ -1405,7 +1405,17 @@ def _analysis_panel() -> str:
       <header class="analysis-panel-header">
         <div>
           <p id="analysis-panel-kicker" class="panel-kicker">Sentence analysis</p>
-          <h2 id="analysis-panel-title">AI Analysis</h2>
+          <div class="analysis-title-row">
+            <h2 id="analysis-panel-title">AI Analysis</h2>
+            <button
+              id="analysis-word-pronunciation"
+              class="speak-button"
+              type="button"
+              data-speak-text=""
+              title="Play pronunciation"
+              aria-label="Play pronunciation"
+              hidden>▶</button>
+          </div>
           <p id="analysis-panel-meta" class="muted"></p>
         </div>
         <button id="analysis-panel-close" type="button">Close panel</button>
@@ -1526,6 +1536,7 @@ def _selection_script() -> str:
       const panelTitle = document.getElementById("analysis-panel-title");
       const panelMeta = document.getElementById("analysis-panel-meta");
       const panelStatus = document.getElementById("analysis-panel-status");
+      const wordPronunciation = document.getElementById("analysis-word-pronunciation");
       const sentenceSections = document.getElementById("analysis-sentence-sections");
       const wordSections = document.getElementById("analysis-word-sections");
       const simplified = document.getElementById("analysis-simplified");
@@ -1918,6 +1929,10 @@ def _selection_script() -> str:
         panelMode = "sentence";
         if (panelKicker) panelKicker.textContent = "Sentence analysis";
         if (panelTitle) panelTitle.textContent = "AI Analysis";
+        if (wordPronunciation) {
+          wordPronunciation.hidden = true;
+          wordPronunciation.dataset.speakText = "";
+        }
         if (sentenceSections) sentenceSections.hidden = false;
         if (wordSections) wordSections.hidden = true;
       }
@@ -1972,6 +1987,10 @@ def _selection_script() -> str:
         if (wordPanelMeaning) wordPanelMeaning.value = "";
         if (wordPanelNote) wordPanelNote.value = "";
         if (wordPanelSaveStatus) wordPanelSaveStatus.textContent = "";
+        if (wordPronunciation) {
+          wordPronunciation.hidden = true;
+          wordPronunciation.dataset.speakText = "";
+        }
       }
 
       function renderAnalysisError(message, retryable) {
@@ -2136,6 +2155,11 @@ def _selection_script() -> str:
         if (payload.card_id) {
           const wordSpan = reader.querySelector(`[data-word-card="${payload.card_id}"]`);
           if (wordSpan) wordSpan.classList.add("word-analysis-active");
+        }
+        const speakText = (payload.surface_form || payload.lemma || "").trim();
+        if (wordPronunciation) {
+          wordPronunciation.dataset.speakText = speakText;
+          wordPronunciation.hidden = !speakText;
         }
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
         if (wordRegister) wordRegister.textContent = a.register || "—";
@@ -2369,13 +2393,13 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
     rows = "\n".join(
         "<tr>"
         f"<td>{card['id']}</td>"
-        f"<td>{_escape(card['surface_form'])}</td>"
+        f"<td>{_pronunciation_cell(card['surface_form'], href=card.get('source_href'))}</td>"
         f"<td>{_escape(card['lexical_type'])}</td>"
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{card['occurrence_count']}</td>"
         f"<td>{_def_edit_cell(card)}</td>"
         f"<td>{_ai_meaning_cell(card)}</td>"
-        f"<td>{_escape(card.get('first_book_title') or '—')}</td>"
+        f"<td>{_source_link(card.get('first_book_title') or '—', card.get('source_href'))}</td>"
         "</tr>"
         for card in cards
     )
@@ -2407,6 +2431,21 @@ def _ai_meaning_cell(card: dict[str, Any]) -> str:
     return f"<details><summary>AI ▸</summary>{_escape(ai_meaning)}</details>"
 
 
+def _source_link(label: Any, href: Any, *, class_name: str = "source-link") -> str:
+    text = str(label or "—")
+    safe_href = _safe_source_href(href)
+    if not safe_href or text == "—":
+        return _escape(text)
+    return f'<a class="{_escape(class_name)}" href="{_escape(safe_href)}">{_escape(text)}</a>'
+
+
+def _safe_source_href(href: Any) -> str:
+    value = str(href or "").strip()
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return ""
+
+
 def _due_table(items: list[Any], return_to: str) -> str:
     if not items:
         return '<p class="empty">No cards due for review.</p>'
@@ -2416,7 +2455,7 @@ def _due_table(items: list[Any], return_to: str) -> str:
         f"<td>{item.card_id}</td>"
         f"<td>{_escape(item.mastery_state.value)}</td>"
         f"<td>{_escape(_date(item.due_at.isoformat()))}</td>"
-        f"<td>{_escape(item.prompt[:120])}</td>"
+        f"<td>{_review_prompt_cell(item)}</td>"
         f"<td>{_review_answer_cell(item, return_to)}</td>"
         "</tr>"
         for item in items
@@ -2427,6 +2466,44 @@ def _due_table(items: list[Any], return_to: str) -> str:
       <tbody>{rows}</tbody>
     </table>
     """
+
+
+def _review_prompt_cell(item: Any) -> str:
+    prompt = str(getattr(item, "prompt", "") or "")
+    display = prompt[:120]
+    if item.card_type == CardType.WORD:
+        return _pronunciation_cell(
+            display,
+            speak_text=prompt,
+            href=getattr(item, "source_href", ""),
+        )
+    return _escape(display)
+
+
+def _pronunciation_cell(
+    display_text: Any,
+    *,
+    speak_text: Any | None = None,
+    href: Any = "",
+) -> str:
+    text = str(display_text)
+    return (
+        '<span class="speak-inline">'
+        f"{_speak_button(text if speak_text is None else speak_text)}"
+        f'{_source_link(text, href, class_name="speak-text source-link")}'
+        "</span>"
+    )
+
+
+def _speak_button(text: Any) -> str:
+    speak_text = str(text).strip()
+    if not speak_text:
+        return ""
+    return (
+        '<button class="speak-button" type="button" '
+        f'data-speak-text="{_escape(speak_text)}" '
+        'title="Play pronunciation" aria-label="Play pronunciation">▶</button>'
+    )
 
 
 def _review_answer_cell(item: Any, return_to: str) -> str:
@@ -2868,10 +2945,16 @@ def _css() -> str:
     }
     .reader-sentence {
       cursor: text;
+      scroll-margin-top: 72px;
       text-underline-offset: 0.22em;
     }
     [data-sentence-id].marked {
       background: linear-gradient(transparent 60%, #ffe58a 60%);
+    }
+    .reader-sentence:target {
+      background: #bfdbfe;
+      border-radius: 2px;
+      box-shadow: 0 0 0 2px #bfdbfe;
     }
     [data-sentence-id].analyzed,
     [data-sentence-id].analyzed-stale {
@@ -2890,8 +2973,23 @@ def _css() -> str:
       box-shadow: 0 0 0 2px #bfdbfe;
     }
     [data-word-card] {
-      text-decoration: underline dotted #f59e0b;
-      text-underline-offset: 3px;
+      margin: 0 -0.03em;
+      border-radius: 3px;
+      padding: 0 0.06em;
+      background: linear-gradient(transparent 54%, rgba(251, 191, 36, 0.34) 54%);
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+      cursor: pointer;
+      text-decoration-line: underline;
+      text-decoration-style: solid;
+      text-decoration-color: rgba(217, 119, 6, 0.72);
+      text-decoration-thickness: 0.12em;
+      text-underline-offset: 0.18em;
+      transition: background-color 120ms ease, text-decoration-color 120ms ease;
+    }
+    [data-word-card]:hover {
+      background: linear-gradient(transparent 42%, rgba(251, 191, 36, 0.52) 42%);
+      text-decoration-color: #b45309;
     }
     .reader-page.analysis-open .reader {
       max-width: 520px;
@@ -3015,6 +3113,12 @@ def _css() -> str:
     .analysis-panel-header h2 {
       margin: 0;
       font-size: 18px;
+    }
+    .analysis-title-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
     }
     .panel-kicker {
       margin: 0 0 2px;
@@ -3205,6 +3309,36 @@ def _css() -> str:
     .review-reveal { margin-bottom: 6px; }
     .review-reveal-text { margin: 4px 0 0; font-style: italic; color: var(--muted); max-width: 320px; }
     table details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+    .source-link {
+      color: var(--accent-strong);
+      text-decoration: none;
+    }
+    .source-link:hover {
+      text-decoration: underline;
+    }
+    .speak-inline {
+      display: inline-flex;
+      gap: 6px;
+      align-items: baseline;
+      max-width: 100%;
+    }
+    .speak-button {
+      padding: 2px 5px;
+      min-width: 26px;
+      line-height: 1.2;
+      color: var(--accent-strong);
+    }
+    .speak-button[hidden] {
+      display: none;
+    }
+    .speak-button[disabled] {
+      cursor: not-allowed;
+      color: var(--muted);
+      opacity: 0.55;
+    }
+    .speak-text {
+      overflow-wrap: anywhere;
+    }
     .def-text { cursor: pointer; }
     .def-text:hover { text-decoration: underline dotted; }
     .def-edit-btn { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0 2px; opacity: 0.5; }
@@ -3233,6 +3367,49 @@ def _escape(value: Any) -> str:
 def _def_edit_script() -> str:
     return """
 (function () {
+  var pronunciationVoice = null;
+
+  function supportsSpeech() {
+    return 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+  }
+
+  function pickPronunciationVoice() {
+    if (!supportsSpeech()) return null;
+    var voices = window.speechSynthesis.getVoices();
+    pronunciationVoice =
+      voices.find(function (voice) { return voice.name === 'Samantha'; }) ||
+      voices.find(function (voice) { return voice.name === 'Google US English'; }) ||
+      voices.find(function (voice) { return voice.lang === 'en-US'; }) ||
+      voices[0] ||
+      null;
+    return pronunciationVoice;
+  }
+
+  function disablePronunciationButtons() {
+    document.querySelectorAll('button[data-speak-text]').forEach(function (button) {
+      button.disabled = true;
+      button.title = 'Pronunciation unavailable';
+    });
+  }
+
+  function speakText(text) {
+    var value = (text || '').trim();
+    if (!value || !supportsSpeech()) return;
+    var utterance = new SpeechSynthesisUtterance(value);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9;
+    utterance.voice = pronunciationVoice || pickPronunciationVoice();
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  if (supportsSpeech()) {
+    pickPronunciationVoice();
+    window.speechSynthesis.addEventListener('voiceschanged', pickPronunciationVoice);
+  } else {
+    disablePronunciationButtons();
+  }
+
   function showInput(cardId) {
     var span = document.querySelector('.def-text[data-card-id="' + cardId + '"]');
     var btn  = document.querySelector('.def-edit-btn[data-card-id="' + cardId + '"]');
@@ -3265,6 +3442,12 @@ def _def_edit_script() -> str:
   }
   document.addEventListener('click', function (e) {
     var target = e.target;
+    var speakButton = target.closest ? target.closest('button[data-speak-text]') : null;
+    if (speakButton) {
+      e.preventDefault();
+      speakText(speakButton.dataset.speakText || '');
+      return;
+    }
     if (target.classList.contains('def-text') || target.classList.contains('def-edit-btn')) {
       showInput(target.dataset.cardId);
     }

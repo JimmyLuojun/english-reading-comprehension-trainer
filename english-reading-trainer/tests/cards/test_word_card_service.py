@@ -297,6 +297,23 @@ class TestListWordCards:
         # _seed_sentence inserts books with title 'B'
         assert cards[0]["first_book_title"] == "B"
 
+    def test_source_metadata_points_to_first_sentence(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-metadata")
+        create_or_update_word_card(db, sid, "ephemeral")
+
+        card = list_word_cards(db)[0]
+
+        assert card["source_sentence_id"] == sid
+        assert card["source_book_id"] > 0
+        assert card["source_chapter_idx"] == 1
+        assert card["source_sentence_text"] == "A sentence."
+        assert (
+            card["source_href"]
+            == f"/read/{card['source_book_id']}?chapter=1#sentence-{sid}"
+        )
+
     def test_first_book_title_none_when_sentence_missing(
         self, db: DatabaseConnection
     ) -> None:

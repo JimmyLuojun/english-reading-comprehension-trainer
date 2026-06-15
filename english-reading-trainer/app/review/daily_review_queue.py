@@ -41,6 +41,8 @@ class ReviewQueueItem:
     prompt: str
     answer: str = ""
     ai_meaning: str = ""
+    source_book_title: str = ""
+    source_href: str = ""
     error_codes: tuple[str, ...] = ()
     last_quality: int | None = None
     last_outcome: ReviewOutcome | None = None
@@ -170,6 +172,8 @@ def _sentence_due_sql() -> str:
             s.text AS prompt,
             COALESCE(sc.user_translation, '') AS answer,
             '' AS ai_meaning,
+            '' AS source_book_title,
+            '' AS source_href,
             (
                 SELECT rl.quality FROM review_logs rl
                  WHERE rl.card_type = 'sentence' AND rl.card_id = sc.id
@@ -203,6 +207,11 @@ def _word_due_sql() -> str:
             wc.surface_form AS prompt,
             wc.current_meaning AS answer,
             COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '') AS ai_meaning,
+            COALESCE(b.title, '') AS source_book_title,
+            CASE
+                WHEN s.id IS NULL OR c.idx IS NULL THEN ''
+                ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
+            END AS source_href,
             (
                 SELECT rl.quality FROM review_logs rl
                  WHERE rl.card_type = 'word' AND rl.card_id = wc.id
@@ -216,6 +225,9 @@ def _word_due_sql() -> str:
                  LIMIT 1
             ) AS last_outcome
           FROM word_cards wc
+          LEFT JOIN sentences s ON s.id = wc.first_sentence_id
+          LEFT JOIN chapters c ON c.id = s.chapter_id
+          LEFT JOIN books b ON b.id = s.book_id
           LEFT JOIN ai_cache ac ON ac.id = wc.ai_analysis_id
          WHERE wc.due_at <= ?
            AND wc.archived_at IS NULL
@@ -283,6 +295,8 @@ def _item_from_row(
         prompt=row["prompt"],
         answer=row["answer"] or "",
         ai_meaning=row["ai_meaning"] or "",
+        source_book_title=row["source_book_title"] or "",
+        source_href=row["source_href"] or "",
         error_codes=error_codes.get((card_type, card_id), ()),
         last_quality=row["last_quality"],
         last_outcome=ReviewOutcome(last_outcome) if last_outcome else None,

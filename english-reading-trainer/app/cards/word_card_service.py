@@ -141,9 +141,18 @@ def list_word_cards(
         rows = conn.execute(
             """SELECT wc.*,
                       b.title AS first_book_title,
+                      s.id AS source_sentence_id,
+                      s.book_id AS source_book_id,
+                      c.idx AS source_chapter_idx,
+                      s.text AS source_sentence_text,
+                      CASE
+                        WHEN s.id IS NULL OR c.idx IS NULL THEN ''
+                        ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
+                      END AS source_href,
                       json_extract(ac.response_json, '$.meaning_in_context') AS ai_meaning
                FROM word_cards wc
                LEFT JOIN sentences s  ON s.id  = wc.first_sentence_id
+               LEFT JOIN chapters  c  ON c.id  = s.chapter_id
                LEFT JOIN books     b  ON b.id  = s.book_id
                LEFT JOIN ai_cache  ac ON ac.id = wc.ai_analysis_id
                WHERE wc.archived_at IS NULL

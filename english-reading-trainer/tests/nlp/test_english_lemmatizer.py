@@ -1,13 +1,14 @@
 """
 Tests for app/nlp/english_lemmatizer.py.
 
-Uses real spaCy en_core_web_sm (local, no network).
-Covers: empty input, whitespace, single word, plural, verb forms, phrases,
-        punctuation stripping, case normalisation, singleton reuse.
+Uses spaCy en_core_web_sm when available and verifies the local fallback when
+the model is missing. Covers: empty input, whitespace, single word, plural,
+verb forms, phrases, punctuation stripping, case normalisation, singleton reuse.
 """
 
 import pytest
 
+import app.nlp.english_lemmatizer as english_lemmatizer
 from app.nlp.english_lemmatizer import lemmatize
 
 
@@ -137,3 +138,24 @@ class TestIdempotency:
     def test_already_lemmatized_is_stable(self):
         # lemmatize of already-base form should equal itself
         assert lemmatize(lemmatize("foxes")) == lemmatize("foxes")
+
+
+# ---------------------------------------------------------------------------
+# Missing spaCy model fallback
+# ---------------------------------------------------------------------------
+
+class TestRuleFallback:
+    def test_missing_spacy_model_uses_rule_fallback(self, monkeypatch):
+        def raise_missing_model():
+            raise OSError("model missing")
+
+        monkeypatch.setattr(english_lemmatizer, "_nlp", None)
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", False)
+        monkeypatch.setattr(
+            english_lemmatizer,
+            "_load_spacy_model",
+            raise_missing_model,
+        )
+
+        assert english_lemmatizer.lemmatize("running foxes") == "run fox"
+        assert english_lemmatizer._use_rule_fallback is True

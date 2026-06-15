@@ -343,6 +343,7 @@ class TestReadingAndMarking:
         assert "/mark/word" in response.text
         assert "selectedWordCardIds" in response.text
         assert "deleteWordCardsAndReload" in response.text
+        assert ".reader-sentence:target" in response.text
 
     def test_read_page_links_to_adjacent_chapter_boundaries(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -505,6 +506,9 @@ class TestReadingAndMarking:
         assert f'data-meaning=""' in response.text
         assert f'data-note=""' in response.text
         assert f'>cat</span>' in response.text
+        assert "box-decoration-break: clone" in response.text
+        assert "text-decoration-thickness: 0.12em" in response.text
+        assert "rgba(251, 191, 36, 0.34)" in response.text
 
     def test_explicit_chapter_does_not_restore_saved_progress(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1007,9 +1011,14 @@ class TestReadingAndMarking:
         assert 'id="analysis-word-vs-simpler"' in response.text
         assert 'id="word-panel-notes"' in response.text
         assert 'id="word-panel-save"' in response.text
+        assert 'id="analysis-word-pronunciation"' in response.text
+        assert 'data-speak-text=""' in response.text
         assert "ERROR_CODE_LABELS" in response.text
         assert "word-analysis-active" in response.text
         assert "renderVsSimpler" in response.text
+        assert "payload.surface_form || payload.lemma" in response.text
+        assert "voiceschanged" in response.text
+        assert "speechSynthesis.cancel()" in response.text
 
     def test_toolbar_defaults_to_mutually_hidden_panels(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1108,6 +1117,52 @@ class TestReadingAndMarking:
         assert "Definition" in response.text
         assert "AI Meaning" in response.text
         assert "Source" in response.text
+
+    def test_cards_page_word_phrase_and_collocation_have_pronunciation_buttons(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        for surface_form, lexical_type in (
+            ("cat", "word"),
+            ("bright cold", "phrase"),
+            ("sat on", "collocation"),
+        ):
+            client.post(
+                "/mark/word",
+                data={
+                    "sentence_id": str(sentence_ids[0]),
+                    "surface_form": surface_form,
+                    "lexical_type": lexical_type,
+                },
+            )
+
+        response = client.get("/cards")
+
+        assert response.status_code == 200
+        assert 'data-speak-text="cat"' in response.text
+        assert 'data-speak-text="bright cold"' in response.text
+        assert 'data-speak-text="sat on"' in response.text
+        assert "Play pronunciation" in response.text
+
+    def test_cards_page_links_word_and_source_to_first_sentence(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+            },
+        )
+        source_href = f"/read/{book_id}?chapter=1#sentence-{sentence_ids[0]}"
+
+        response = client.get("/cards")
+
+        assert response.status_code == 200
+        assert response.text.count(f'href="{source_href}"') >= 2
+        assert 'data-speak-text="cat"' in response.text
 
     def test_cards_page_shows_user_definition(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1357,6 +1412,67 @@ class TestReviewRoutes:
         assert "AI meaning:" in response.text
         assert "基础的且简单的" in response.text
         assert "basic and undeveloped" in response.text
+
+    def test_review_page_pronunciation_only_for_word_prompts(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/review"})
+        sentence_card_id = _sentence_card_id(db, sentence_ids[0])
+        _make_due_yesterday(db, "sentence_cards", sentence_card_id)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+            },
+        )
+        word_card_id = _word_card_id(db, "cat")
+        _make_due_yesterday(db, "word_cards", word_card_id)
+
+        response = client.get("/review")
+
+        assert response.status_code == 200
+        assert 'data-speak-text="cat"' in response.text
+        assert 'data-speak-text="The cat sat on the mat."' not in response.text
+
+    def test_review_page_word_prompt_links_to_first_source_sentence(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+            },
+        )
+        word_card_id = _word_card_id(db, "cat")
+        _make_due_yesterday(db, "word_cards", word_card_id)
+        source_href = f"/read/{book_id}?chapter=1#sentence-{sentence_ids[0]}"
+
+        response = client.get("/review")
+
+        assert response.status_code == 200
+        assert f'href="{source_href}"' in response.text
+        assert 'data-speak-text="cat"' in response.text
+
+    def test_review_page_sentence_prompt_has_no_source_link(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/review"})
+        sentence_card_id = _sentence_card_id(db, sentence_ids[0])
+        _make_due_yesterday(db, "sentence_cards", sentence_card_id)
+        source_href = f"/read/{book_id}?chapter=1#sentence-{sentence_ids[0]}"
+
+        response = client.get("/review")
+
+        assert response.status_code == 200
+        assert f'href="{source_href}"' not in response.text
+        assert "The cat sat on the mat." in response.text
 
     def test_review_post_records_answer(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
