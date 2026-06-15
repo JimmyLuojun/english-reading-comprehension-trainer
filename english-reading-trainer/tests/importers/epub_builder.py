@@ -10,6 +10,14 @@ from pathlib import Path
 from ebooklib import epub
 
 
+PNG_1X1_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe"
+    b"\x02\xfeA\xe2`\x82\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 def make_epub(
     tmp_path: Path,
     filename: str,
@@ -144,6 +152,161 @@ def make_epub_no_paragraphs(tmp_path: Path, filename: str) -> Path:
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     book.spine = ["nav", item]
+
+    out_path = tmp_path / filename
+    epub.write_epub(str(out_path), book)
+    return out_path
+
+
+def make_epub_with_html(
+    tmp_path: Path,
+    filename: str,
+    *,
+    body_html: str,
+    title: str = "HTML Fixture",
+    author: str = "Fixture Author",
+    language: str = "en",
+) -> Path:
+    """EPUB with one chapter whose body is supplied as raw HTML."""
+    book = epub.EpubBook()
+    book.set_identifier(f"html-fixture-{filename}")
+    book.set_title(title)
+    book.set_language(language)
+    book.add_author(author)
+
+    html_content = (
+        f'<?xml version="1.0" encoding="utf-8"?>'
+        f'<!DOCTYPE html>'
+        f'<html xmlns="http://www.w3.org/1999/xhtml">'
+        f'<head><title>{title}</title></head>'
+        f'<body><h1>{title}</h1>{body_html}</body></html>'
+    )
+    item = epub.EpubHtml(title=title, file_name="chap_001.xhtml", lang=language)
+    item.content = html_content.encode("utf-8")
+    book.add_item(item)
+
+    book.toc = [epub.Link("chap_001.xhtml", title, "c1")]
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", item]
+
+    out_path = tmp_path / filename
+    epub.write_epub(str(out_path), book)
+    return out_path
+
+
+def make_epub_with_image(
+    tmp_path: Path,
+    filename: str,
+    *,
+    body_html: str | None = None,
+    title: str = "Image Fixture",
+    author: str = "Fixture Author",
+    language: str = "en",
+    image_path: str = "images/diagram.png",
+    image_bytes: bytes = PNG_1X1_BYTES,
+) -> Path:
+    """EPUB with one chapter and one PNG manifest asset."""
+    book = epub.EpubBook()
+    book.set_identifier(f"image-fixture-{filename}")
+    book.set_title(title)
+    book.set_language(language)
+    book.add_author(author)
+
+    if body_html is None:
+        body_html = (
+            "<p>Before image prose with enough words to become sentences.</p>"
+            f'<figure><img src="{image_path}" alt="Network diagram"/>'
+            "<figcaption>Figure 1. Network diagram caption.</figcaption></figure>"
+            "<p>After image prose with enough words to become sentences.</p>"
+        )
+
+    html_content = (
+        f'<?xml version="1.0" encoding="utf-8"?>'
+        f'<!DOCTYPE html>'
+        f'<html xmlns="http://www.w3.org/1999/xhtml">'
+        f'<head><title>{title}</title></head>'
+        f'<body><h1>{title}</h1>{body_html}</body></html>'
+    )
+    item = epub.EpubHtml(title=title, file_name="chap_001.xhtml", lang=language)
+    item.content = html_content.encode("utf-8")
+    image = epub.EpubImage(
+        uid="diagram",
+        file_name=image_path,
+        media_type="image/png",
+        content=image_bytes,
+    )
+    book.add_item(item)
+    book.add_item(image)
+
+    book.toc = [epub.Link("chap_001.xhtml", title, "c1")]
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", item]
+
+    out_path = tmp_path / filename
+    epub.write_epub(str(out_path), book)
+    return out_path
+
+
+def make_epub_with_sections(
+    tmp_path: Path,
+    filename: str,
+    *,
+    sections: list[dict],
+    title: str = "Structured Fixture",
+    author: str = "Fixture Author",
+    language: str = "en",
+) -> Path:
+    """EPUB with raw section metadata and optional nested TOC entries."""
+    book = epub.EpubBook()
+    book.set_identifier(f"structured-fixture-{filename}")
+    book.set_title(title)
+    book.set_language(language)
+    book.add_author(author)
+
+    spine_items: list = ["nav"]
+    toc_links: list = []
+
+    for idx, section in enumerate(sections, start=1):
+        file_name = section.get("file_name", f"section_{idx:03d}.xhtml")
+        section_title = section["title"]
+        epub_type = section.get("epub_type", "chapter")
+        body_html = section["body_html"]
+        html_content = (
+            f'<?xml version="1.0" encoding="utf-8"?>'
+            f'<!DOCTYPE html>'
+            f'<html xmlns="http://www.w3.org/1999/xhtml" '
+            f'xmlns:epub="http://www.idpf.org/2007/ops">'
+            f'<head><title>{section_title}</title></head>'
+            f'<body><section epub:type="{epub_type}">'
+            f'<h1>{section_title}</h1>{body_html}'
+            f'</section></body></html>'
+        )
+        item = epub.EpubHtml(
+            title=section_title,
+            file_name=file_name,
+            lang=language,
+        )
+        item.content = html_content.encode("utf-8")
+        book.add_item(item)
+        spine_items.append(item)
+
+        toc_entry = epub.Link(
+            file_name,
+            section.get("toc_title", section_title),
+            f"section-{idx}",
+        )
+        children = [
+            epub.Link(child["href"], child["title"], f"section-{idx}-child-{child_idx}")
+            for child_idx, child in enumerate(section.get("toc_children", []), start=1)
+        ]
+        toc_links.append((toc_entry, children) if children else toc_entry)
+
+    book.toc = toc_links
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = spine_items
 
     out_path = tmp_path / filename
     epub.write_epub(str(out_path), book)

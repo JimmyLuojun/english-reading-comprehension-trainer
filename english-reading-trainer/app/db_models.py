@@ -20,6 +20,22 @@ class SourceFormat(str, Enum):
     EPUB = "epub"
 
 
+class SectionKind(str, Enum):
+    FRONTMATTER = "frontmatter"
+    CHAPTER     = "chapter"
+    APPENDIX    = "appendix"
+    BACKMATTER  = "backmatter"
+
+
+class ChapterBlockKind(str, Enum):
+    PROSE         = "prose"
+    PRE           = "pre"
+    TABLE         = "table"
+    IMAGE         = "image"
+    FIGURE        = "figure"
+    MISSING_ASSET = "missing_asset"
+
+
 class LexicalType(str, Enum):
     WORD        = "word"
     PHRASE      = "phrase"
@@ -141,6 +157,8 @@ class ChapterRecord:
     title: str
     sentence_start: int
     sentence_end: int
+    section_kind: SectionKind = SectionKind.CHAPTER
+    chapter_number: Optional[int] = None
 
 
 @dataclass
@@ -163,6 +181,32 @@ class SentenceRecord:
     text_hash: str
     char_offset_start: int
     char_offset_end: int
+
+
+@dataclass
+class BookAssetRecord:
+    id: Optional[int]
+    book_id: int
+    source_href: str
+    media_type: str
+    storage_path: str
+    sha256: str
+    byte_size: int
+    alt_text: str = ""
+    is_missing: bool = False
+
+
+@dataclass
+class ChapterBlockRecord:
+    id: Optional[int]
+    book_id: int
+    chapter_id: int
+    idx: int
+    kind: ChapterBlockKind
+    paragraph_id: Optional[int] = None
+    asset_id: Optional[int] = None
+    text: str = ""
+    payload_json: str = ""
 
 
 @dataclass

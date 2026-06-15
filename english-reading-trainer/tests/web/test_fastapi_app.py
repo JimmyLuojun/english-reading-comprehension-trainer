@@ -8,6 +8,7 @@ required for these route-level tests.
 from __future__ import annotations
 
 import json
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -17,8 +18,14 @@ from fastapi.testclient import TestClient
 
 from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
 from app.db_connection import DatabaseConnection
+from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
 from app.web.fastapi_app import create_app
+from tests.importers.epub_builder import (
+    PNG_1X1_BYTES,
+    make_epub_with_image,
+    make_epub_with_sections,
+)
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
@@ -225,6 +232,45 @@ class TestBasicPages:
         assert "Read" in response.text
         assert f"/read/{book_id}?chapter=1" in response.text
 
+    def test_epub_frontmatter_does_not_become_chapter_one(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        ep = make_epub_with_sections(
+            tmp_path,
+            "frontmatter.epub",
+            sections=[
+                {
+                    "title": "Praise for Mastering Bitcoin",
+                    "file_name": "praise.xhtml",
+                    "epub_type": "preface",
+                    "body_html": (
+                        "<p>Useful praise text with enough words to import here.</p>"
+                    ),
+                },
+                {
+                    "title": "1. Introduction",
+                    "file_name": "ch01.xhtml",
+                    "epub_type": "chapter",
+                    "body_html": (
+                        "<p>Body chapter text with enough words to import here.</p>"
+                    ),
+                },
+            ],
+        )
+        result = import_epub(db, ep)
+
+        detail = client.get(f"/books/{result.book_id}")
+        read_default = client.get(f"/read/{result.book_id}")
+
+        assert detail.status_code == 200
+        assert f"/read/{result.book_id}?chapter=2" in detail.text
+        assert "Praise for Mastering Bitcoin" in detail.text
+        assert "Chapter 1: Introduction" in detail.text
+        assert "Chapter 1: Praise" not in detail.text
+        assert read_default.status_code == 200
+        assert "Chapter 1: Introduction" in read_default.text
+        assert "Body chapter text" in read_default.text
+
     def test_missing_book_returns_404(self, client: TestClient) -> None:
         response = client.get("/books/999")
 
@@ -271,6 +317,38 @@ class TestReadingAndMarking:
         assert "/mark/word" in response.text
         assert "selectedWordCardIds" in response.text
         assert "deleteWordCardsAndReload" in response.text
+
+    def test_read_page_renders_epub_figure_blocks_and_serves_asset(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        epub_path = make_epub_with_image(tmp_path, "web-image.epub")
+        result = import_epub(db, epub_path)
+        with db.get_connection() as conn:
+            asset_id = conn.execute(
+                "SELECT id FROM book_assets WHERE book_id = ?",
+                (result.book_id,),
+            ).fetchone()["id"]
+
+        response = client.get(f"/read/{result.book_id}")
+
+        assert response.status_code == 200
+        assert '<figure class="reader-figure">' in response.text
+        assert f'src="/assets/books/{result.book_id}/{asset_id}"' in response.text
+        assert "Figure 1. Network diagram caption." in response.text
+        assert "Before image prose" in response.text
+        assert "After image prose" in response.text
+        assert response.text.index("Before image prose") < response.text.index(
+            '<figure class="reader-figure">'
+        )
+        assert response.text.index('<figure class="reader-figure">') < response.text.index(
+            "After image prose"
+        )
+
+        asset_response = client.get(f"/assets/books/{result.book_id}/{asset_id}")
+
+        assert asset_response.status_code == 200
+        assert asset_response.headers["content-type"] == "image/png"
+        assert asset_response.content == PNG_1X1_BYTES
 
     def test_read_page_dismisses_selection_without_clear_label(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1585,6 +1663,43 @@ class TestImportRoutes:
 
         assert response.status_code == 409
         assert "Already imported" in response.text
+
+    def test_import_epub_file_oversized_returns_413_and_removes_temp(
+        self,
+        client: TestClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import app.web.fastapi_app as fastapi_app
+
+        real_named_temporary_file = tempfile.NamedTemporaryFile
+
+        def named_temporary_file_in_tmp(*args, **kwargs):
+            kwargs["dir"] = tmp_path
+            return real_named_temporary_file(*args, **kwargs)
+
+        monkeypatch.setattr(fastapi_app, "_MAX_EPUB_IMPORT_BYTES", 1024 * 1024)
+        monkeypatch.setattr(
+            fastapi_app.tempfile,
+            "NamedTemporaryFile",
+            named_temporary_file_in_tmp,
+        )
+
+        response = client.post(
+            "/import/file",
+            files={
+                "file": (
+                    "big.epub",
+                    b"A" * (1024 * 1024 + 1),
+                    "application/epub+zip",
+                )
+            },
+            data={"title": "Big"},
+        )
+
+        assert response.status_code == 413
+        assert "Uploaded EPUB exceeds 1 MB limit" in response.text
+        assert list(tmp_path.glob("*.epub")) == []
 
 
 # ---------------------------------------------------------------------------

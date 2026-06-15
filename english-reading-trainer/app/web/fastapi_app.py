@@ -11,6 +11,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.analysis_saver import save_sentence_analysis
@@ -44,7 +45,7 @@ from app.cards.word_card_service import (
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
 from app.importers.epub_importer import DuplicateBookError as EpubDuplicateBookError
-from app.importers.epub_importer import import_epub
+from app.importers.epub_importer import calculate_epub_file_hash, import_epub
 from app.importers.txt_importer import DuplicateBookError, import_text
 from app.profile.learner_profile_generator import (
     ProfileInputError,
@@ -65,11 +66,21 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _DEFAULT_DB = _PROJECT_ROOT / "data" / "reading_trainer.db"
 _MIGRATIONS = _PROJECT_ROOT / "migrations"
 _DEFAULT_PAGE_LIMIT = 50
-_MAX_IMPORT_BYTES = 10 * 1024 * 1024  # 10 MB cap for both file upload and pasted text
+_MAX_TEXT_IMPORT_BYTES = 10 * 1024 * 1024
+_MAX_EPUB_IMPORT_BYTES = 100 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
 _AUTO_TITLE_MAX_LEN = 80
 _DEFAULT_SENTENCE_PROMPT_VERSION = "v1"
 _PREDICT_SENTENCE_PROMPT = "sentence_analysis_predict"
 _DIAGNOSE_SENTENCE_PROMPT = "sentence_analysis_diagnose"
+
+
+class UploadTooLargeError(ValueError):
+    """Raised when a streamed upload exceeds the configured byte cap."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max_bytes
+        super().__init__(f"Upload exceeds {_format_mb(max_bytes)} MB limit.")
 
 
 def create_app(
@@ -123,6 +134,23 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @web_app.get("/assets/books/{book_id}/{asset_id}")
+    def book_asset(book_id: int, asset_id: int) -> Any:
+        db = db_factory()
+        asset = _fetch_book_asset(db, book_id, asset_id)
+        if asset is None or asset["is_missing"]:
+            return _error_page("Asset not found", status_code=404)
+        try:
+            asset_path = _asset_storage_path(db, asset["storage_path"])
+        except ValueError:
+            return _error_page("Asset path is invalid", status_code=404)
+        if not asset_path.is_file():
+            return _error_page("Asset file is missing", status_code=404)
+        return FileResponse(
+            asset_path,
+            media_type=asset["media_type"] or None,
+        )
+
     @web_app.get("/import", response_class=HTMLResponse)
     def import_page() -> HTMLResponse:
         return _html_page("Import", _import_forms(), active="import")
@@ -133,17 +161,36 @@ def create_app(
         title: str = Form(""),
         author: str = Form(""),
     ) -> Any:
-        raw = await file.read()
-        if len(raw) > _MAX_IMPORT_BYTES:
+        filename = (file.filename or "").lower()
+        if filename.endswith(".epub"):
+            try:
+                tmp_path, size = await _save_upload_to_temp(
+                    file,
+                    suffix=".epub",
+                    max_bytes=_MAX_EPUB_IMPORT_BYTES,
+                )
+            except UploadTooLargeError as exc:
+                return _error_page(
+                    f"Uploaded EPUB exceeds {_format_mb(exc.max_bytes)} MB limit.",
+                    status_code=413,
+                )
+            if size == 0:
+                _unlink_silent(tmp_path)
+                return _error_page("Uploaded file is empty.", status_code=400)
+            try:
+                return _do_import_epub(db_factory(), tmp_path, title, author)
+            finally:
+                _unlink_silent(tmp_path)
+
+        try:
+            raw = await _read_upload_bytes(file, max_bytes=_MAX_TEXT_IMPORT_BYTES)
+        except UploadTooLargeError as exc:
             return _error_page(
-                f"Uploaded file exceeds {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+                f"Uploaded file exceeds {_format_mb(exc.max_bytes)} MB limit.",
                 status_code=413,
             )
         if not raw.strip():
             return _error_page("Uploaded file is empty.", status_code=400)
-        filename = (file.filename or "").lower()
-        if filename.endswith(".epub"):
-            return _do_import_epub(db_factory(), raw, title, author)
         return _do_import(db_factory(), raw, title, author)
 
     @web_app.post("/import/paste")
@@ -153,9 +200,9 @@ def create_app(
         title = form.get("title", "")
         author = form.get("author", "")
         raw = text.encode("utf-8")
-        if len(raw) > _MAX_IMPORT_BYTES:
+        if len(raw) > _MAX_TEXT_IMPORT_BYTES:
             return _error_page(
-                f"Pasted text exceeds {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+                f"Pasted text exceeds {_format_mb(_MAX_TEXT_IMPORT_BYTES)} MB limit.",
                 status_code=413,
             )
         if not text.strip():
@@ -180,30 +227,23 @@ def create_app(
 
     def _do_import_epub(
         db: DatabaseConnection,
-        raw: bytes,
+        file_path: str | Path,
         form_title: str,
         author: str,
     ) -> Any:
-        fd, tmp_path = tempfile.mkstemp(suffix=".epub")
         try:
-            os.write(fd, raw)
-            os.close(fd)
+            file_hash = calculate_epub_file_hash(file_path)
             result = import_epub(
                 db,
-                tmp_path,
+                file_path,
                 title=form_title.strip() or None,
                 author=author.strip() or None,
             )
         except EpubDuplicateBookError:
-            existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
+            existing_id = _lookup_book_id_by_hash(db, file_hash)
             return _duplicate_page(existing_id)
         except (ValueError, FileNotFoundError) as exc:
             return _error_page(str(exc), status_code=400)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
         return _redirect(f"/read/{result.book_id}")
 
     @web_app.get("/books", response_class=HTMLResponse)
@@ -228,13 +268,19 @@ def create_app(
         if book is None:
             return _error_page("Book not found", status_code=404)
         chapters = _fetch_chapters(db, book_id)
+        read_idx = _primary_read_idx(chapters)
+        read_href = (
+            f"/read/{book_id}?chapter={read_idx}"
+            if read_idx is not None
+            else f"/read/{book_id}"
+        )
         body = f"""
         <section class="toolbar">
           <div>
             <h1>{_escape(book["title"])}</h1>
             <p class="muted">{_escape(book["author"] or "Unknown author")}</p>
           </div>
-          <a class="button" href="/read/{book_id}">Read chapter 1</a>
+          <a class="button" href="{read_href}">Start reading</a>
         </section>
         {_chapters_table(book_id, chapters)}
         """
@@ -246,25 +292,34 @@ def create_app(
         book = _fetch_book(db, book_id)
         if book is None:
             return _error_page("Book not found", status_code=404)
-        chapter_row = _fetch_chapter_by_idx(db, book_id, chapter)
+        chapter_idx = chapter
+        if "chapter" not in request.query_params:
+            default_idx = _default_read_idx(db, book_id)
+            if default_idx is not None:
+                chapter_idx = default_idx
+        chapter_row = _fetch_chapter_by_idx(db, book_id, chapter_idx)
         if chapter_row is None:
             return _error_page("Chapter not found", status_code=404)
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
+        blocks = _fetch_chapter_blocks(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
-        return_to = f"/read/{book_id}?chapter={chapter}"
+        return_to = f"/read/{book_id}?chapter={chapter_idx}"
         restore_progress = "chapter" not in request.query_params or (
             request.query_params.get("restore") == "1"
         )
         body = f"""
         {_reader_view(
             rows=sentences,
+            blocks=blocks,
             return_to=return_to,
             chapter_id=chapter_row["id"],
             word_cards=word_cards,
             book_id=book_id,
             book_title=book["title"],
-            chapter_idx=chapter,
+            chapter_idx=chapter_idx,
             chapter_title=chapter_row["title"],
+            section_kind=chapter_row.get("section_kind") or "chapter",
+            chapter_number=chapter_row.get("chapter_number"),
             restore_progress=restore_progress,
         )}
         """
@@ -631,13 +686,37 @@ def _fetch_book(db: DatabaseConnection, book_id: int) -> dict[str, Any] | None:
 def _fetch_chapters(db: DatabaseConnection, book_id: int) -> list[dict[str, Any]]:
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT id, idx, title, sentence_start, sentence_end
+            """SELECT id, idx, title, sentence_start, sentence_end,
+                      section_kind, chapter_number
                  FROM chapters
                 WHERE book_id = ?
                 ORDER BY idx""",
             (book_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _default_read_idx(db: DatabaseConnection, book_id: int) -> int | None:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT idx
+                 FROM chapters
+                WHERE book_id = ? AND section_kind = 'chapter'
+                ORDER BY COALESCE(chapter_number, idx), idx
+                LIMIT 1""",
+            (book_id,),
+        ).fetchone()
+        if row:
+            return row["idx"]
+        row = conn.execute(
+            """SELECT idx
+                 FROM chapters
+                WHERE book_id = ?
+                ORDER BY idx
+                LIMIT 1""",
+            (book_id,),
+        ).fetchone()
+    return row["idx"] if row else None
 
 
 def _fetch_chapter_by_idx(
@@ -690,6 +769,57 @@ def _fetch_chapter_sentences(
             else 0
         )
     return result
+
+
+def _fetch_chapter_blocks(
+    db: DatabaseConnection,
+    chapter_id: int,
+) -> list[dict[str, Any]]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT cb.id, cb.book_id, cb.chapter_id, cb.idx, cb.kind,
+                      cb.paragraph_id, cb.asset_id, cb.text, cb.payload_json,
+                      COALESCE(ba.source_href, '') AS asset_source_href,
+                      COALESCE(ba.media_type, '') AS asset_media_type,
+                      COALESCE(ba.alt_text, '') AS asset_alt_text,
+                      COALESCE(ba.is_missing, 0) AS asset_is_missing
+                 FROM chapter_blocks cb
+                 LEFT JOIN book_assets ba ON ba.id = cb.asset_id
+                WHERE cb.chapter_id = ?
+                ORDER BY cb.idx""",
+            (chapter_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _fetch_book_asset(
+    db: DatabaseConnection,
+    book_id: int,
+    asset_id: int,
+) -> dict[str, Any] | None:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT id, book_id, source_href, media_type, storage_path,
+                      is_missing
+                 FROM book_assets
+                WHERE id = ? AND book_id = ?""",
+            (asset_id, book_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _asset_storage_path(db: DatabaseConnection, storage_path: str) -> Path:
+    base_dir = Path(getattr(db, "_db_path")).parent / "assets"
+    relative = Path(storage_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("Asset storage path must be relative")
+    candidate = (base_dir / relative).resolve()
+    base_resolved = base_dir.resolve()
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError as exc:
+        raise ValueError("Asset storage path escapes asset root") from exc
+    return candidate
 
 
 def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
@@ -865,8 +995,8 @@ def _chapters_table(book_id: int, rows: list[dict[str, Any]]) -> str:
         return '<p class="empty">No chapters found.</p>'
     body = "\n".join(
         "<tr>"
-        f"<td>{row['idx']}</td>"
-        f"<td>{_escape(row['title'])}</td>"
+        f"<td>{_escape(_section_label(row))}</td>"
+        f"<td>{_escape(row['section_kind'])}</td>"
         f"<td>{row['sentence_end'] - row['sentence_start']}</td>"
         f"<td><a class=\"button small\" href=\"/read/{book_id}?chapter={row['idx']}\">Read</a></td>"
         "</tr>"
@@ -874,10 +1004,54 @@ def _chapters_table(book_id: int, rows: list[dict[str, Any]]) -> str:
     )
     return f"""
     <table>
-      <thead><tr><th>#</th><th>Title</th><th>Sentences</th><th></th></tr></thead>
+      <thead><tr><th>Section</th><th>Kind</th><th>Sentences</th><th></th></tr></thead>
       <tbody>{body}</tbody>
     </table>
     """
+
+
+def _primary_read_idx(rows: list[dict[str, Any]]) -> int | None:
+    for row in rows:
+        if row.get("section_kind") == "chapter":
+            return row["idx"]
+    return rows[0]["idx"] if rows else None
+
+
+def _section_label(row: dict[str, Any]) -> str:
+    title = str(row.get("title") or "").strip()
+    kind = row.get("section_kind") or "chapter"
+    if kind == "chapter":
+        chapter_number = row.get("chapter_number") or row.get("idx")
+        clean_title = _strip_section_ordinal(title)
+        return (
+            f"Chapter {chapter_number}: {clean_title}"
+            if clean_title
+            else f"Chapter {chapter_number}"
+        )
+    if kind == "appendix":
+        clean_title = _strip_appendix_ordinal(title)
+        appendix_letter = _appendix_letter(title)
+        if appendix_letter:
+            return (
+                f"Appendix {appendix_letter}: {clean_title}"
+                if clean_title
+                else f"Appendix {appendix_letter}"
+            )
+        return f"Appendix: {title}" if title else "Appendix"
+    return title or kind.title()
+
+
+def _strip_section_ordinal(title: str) -> str:
+    return re.sub(r"^\s*(?:chapter\s+)?\d+(?:[\s.:)-]+)", "", title, flags=re.I).strip()
+
+
+def _appendix_letter(title: str) -> str:
+    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title)
+    return match.group(1) if match else ""
+
+
+def _strip_appendix_ordinal(title: str) -> str:
+    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title).strip()
 
 
 def _reader_view(
@@ -889,16 +1063,30 @@ def _reader_view(
     book_title: str,
     chapter_idx: int,
     chapter_title: str,
+    section_kind: str,
+    chapter_number: int | None,
     restore_progress: bool,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> str:
-    if not rows:
+    if not rows and not blocks:
         return '<p class="empty">No sentences in this chapter.</p>'
     cards_by_sentence = _word_cards_by_sentence(word_cards)
-    paragraphs = "\n".join(
-        _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
-        for paragraph_rows in _group_sentence_paragraphs(rows)
+    content = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks or [],
+        chapter_id=chapter_id,
+        cards_by_sentence=cards_by_sentence,
+        book_id=book_id,
     )
     restore_flag = "1" if restore_progress else "0"
+    section_label = _section_label(
+        {
+            "idx": chapter_idx,
+            "title": chapter_title,
+            "section_kind": section_kind,
+            "chapter_number": chapter_number,
+        }
+    )
     return f"""
     <article class="reader" data-reader data-book-id="{book_id}"
       data-chapter-idx="{chapter_idx}" data-return-to="{_escape(return_to)}"
@@ -906,13 +1094,47 @@ def _reader_view(
       <header class="reader-header">
         <a class="reader-back" href="/books/{book_id}">Chapters</a>
         <h1 class="reader-title">{_escape(book_title)}</h1>
-        <h2 class="reader-chapter">Chapter {chapter_idx}: {_escape(chapter_title)}</h2>
+        <h2 class="reader-chapter">{_escape(section_label)}</h2>
       </header>
-      {paragraphs}
+      {content}
     </article>
     {_analysis_panel()}
     {_selection_toolbar(return_to, word_cards)}
     """
+
+
+def _reader_content_blocks(
+    *,
+    rows: list[dict[str, Any]],
+    blocks: list[dict[str, Any]],
+    chapter_id: int,
+    cards_by_sentence: dict[int, list[dict[str, Any]]],
+    book_id: int,
+) -> str:
+    if not blocks:
+        return "\n".join(
+            _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
+            for paragraph_rows in _group_sentence_paragraphs(rows)
+        )
+
+    rows_by_paragraph = {
+        paragraph_rows[0]["paragraph_id"]: paragraph_rows
+        for paragraph_rows in _group_sentence_paragraphs(rows)
+        if paragraph_rows
+    }
+    parts: list[str] = []
+    for block in blocks:
+        paragraph_id = block.get("paragraph_id")
+        if paragraph_id:
+            paragraph_rows = rows_by_paragraph.get(paragraph_id, [])
+            if paragraph_rows:
+                parts.append(
+                    _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
+                )
+            continue
+        if block["kind"] in {"image", "figure", "missing_asset"}:
+            parts.append(_reader_media_block(block, book_id))
+    return "\n".join(parts) if parts else '<p class="empty">No sentences in this chapter.</p>'
 
 
 def _group_sentence_paragraphs(
@@ -939,6 +1161,34 @@ def _reader_paragraph(
         for row in rows
     )
     return f'<p class="reader-para">{sentence_spans}</p>'
+
+
+def _reader_media_block(block: dict[str, Any], book_id: int) -> str:
+    caption = str(block.get("text") or "")
+    alt_text = str(block.get("asset_alt_text") or caption)
+    if block["kind"] == "missing_asset" or block.get("asset_is_missing"):
+        label = caption or str(block.get("asset_source_href") or "Missing EPUB asset")
+        return (
+            '<figure class="reader-figure reader-figure-missing">'
+            f'<div class="reader-missing-asset">{_escape(label)}</div>'
+            "</figure>"
+        )
+
+    asset_id = block.get("asset_id")
+    if not asset_id:
+        return ""
+    figcaption = (
+        f"<figcaption>{_escape(caption)}</figcaption>"
+        if caption
+        else ""
+    )
+    return (
+        '<figure class="reader-figure">'
+        f'<img src="/assets/books/{book_id}/{asset_id}" alt="{_escape(alt_text)}" '
+        'loading="lazy">'
+        f"{figcaption}"
+        "</figure>"
+    )
 
 
 def _word_cards_by_sentence(
@@ -2241,6 +2491,55 @@ def _resolve_title(form_title: str, raw: bytes) -> str:
     return f"Untitled Import {datetime.now().date().isoformat()}"
 
 
+def _format_mb(byte_count: int) -> int:
+    return byte_count // (1024 * 1024)
+
+
+async def _read_upload_bytes(file: UploadFile, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise UploadTooLargeError(max_bytes)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _save_upload_to_temp(
+    file: UploadFile,
+    *,
+    suffix: str,
+    max_bytes: int,
+) -> tuple[Path, int]:
+    total = 0
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise UploadTooLargeError(max_bytes)
+                tmp.write(chunk)
+        except Exception:
+            _unlink_silent(tmp_path)
+            raise
+    return tmp_path, total
+
+
+def _unlink_silent(file_path: str | Path) -> None:
+    try:
+        Path(file_path).unlink()
+    except OSError:
+        pass
+
+
 def _lookup_book_id_by_hash(db: DatabaseConnection, file_hash: str) -> int | None:
     with db.get_connection() as conn:
         row = conn.execute(
@@ -2460,6 +2759,29 @@ def _css() -> str:
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
       font-size: 18px;
       line-height: 1.75;
+    }
+    .reader-figure {
+      margin: 28px 0;
+    }
+    .reader-figure img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+    .reader-figure figcaption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      text-align: center;
+    }
+    .reader-missing-asset {
+      border: 1px dashed var(--line);
+      color: var(--muted);
+      padding: 10px 12px;
+      font-size: 14px;
+      text-align: center;
     }
     .reader-sentence {
       cursor: text;

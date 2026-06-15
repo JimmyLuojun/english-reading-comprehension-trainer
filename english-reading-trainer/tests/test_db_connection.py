@@ -41,6 +41,7 @@ class TestMigrationRunner:
         assert "002_seed_error_types.sql" in applied
         assert "003_archive_cards.sql" in applied
         assert "004_sentence_user_translation.sql" in applied
+        assert "005_chapter_section_metadata.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -52,6 +53,7 @@ class TestMigrationRunner:
         assert "002_seed_error_types.sql" in recorded
         assert "003_archive_cards.sql" in recorded
         assert "004_sentence_user_translation.sql" in recorded
+        assert "005_chapter_section_metadata.sql" in recorded
 
     def test_migrations_dir_empty_returns_empty(self, tmp_path: Path) -> None:
         db = DatabaseConnection(tmp_path / "a.db")
@@ -112,6 +114,7 @@ EXPECTED_TABLES = [
     "sentence_card_tags", "sentence_card_errors",
     "word_card_tags", "word_card_errors",
     "ai_cache", "learner_profile_snapshots", "prompt_versions",
+    "book_assets", "chapter_blocks",
     "schema_migrations",
 ]
 
@@ -131,6 +134,11 @@ class TestColumns:
         cols = db.get_table_columns("books")
         for col in ["id", "title", "author", "language", "source_format",
                     "file_hash", "imported_at", "total_chapters", "total_sentences"]:
+            assert col in cols
+
+    def test_chapters_has_section_metadata(self, db: DatabaseConnection) -> None:
+        cols = db.get_table_columns("chapters")
+        for col in ["section_kind", "chapter_number"]:
             assert col in cols
 
     def test_sentence_cards_has_sm2_fields(self, db: DatabaseConnection) -> None:
@@ -166,6 +174,22 @@ class TestColumns:
         cols = db.get_table_columns("sentences")
         assert "text_hash" in cols
 
+    def test_book_assets_columns(self, db: DatabaseConnection) -> None:
+        cols = db.get_table_columns("book_assets")
+        for col in [
+            "book_id", "source_href", "media_type", "storage_path",
+            "sha256", "byte_size", "alt_text", "is_missing",
+        ]:
+            assert col in cols
+
+    def test_chapter_blocks_columns(self, db: DatabaseConnection) -> None:
+        cols = db.get_table_columns("chapter_blocks")
+        for col in [
+            "book_id", "chapter_id", "idx", "kind", "paragraph_id",
+            "asset_id", "text", "payload_json",
+        ]:
+            assert col in cols
+
 
 # ---------------------------------------------------------------------------
 # Constraint checks
@@ -178,6 +202,23 @@ class TestConstraints:
                 conn.execute(
                     "INSERT INTO books (title, source_format, file_hash, imported_at) "
                     "VALUES ('X', 'pdf', 'h1', '2026-01-01T00:00:00+00:00')"
+                )
+
+    def test_chapter_blocks_kind_check(self, db: DatabaseConnection) -> None:
+        with pytest.raises(sqlite3.IntegrityError):
+            with db.get_connection() as conn:
+                book_id = conn.execute(
+                    "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                    "VALUES ('X', 'txt', 'h1', '2026-01-01T00:00:00+00:00')"
+                ).lastrowid
+                chapter_id = conn.execute(
+                    "INSERT INTO chapters (book_id, idx, title) VALUES (?, 1, 'C')",
+                    (book_id,),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO chapter_blocks (book_id, chapter_id, idx, kind) "
+                    "VALUES (?, ?, 1, 'video')",
+                    (book_id, chapter_id),
                 )
 
     def test_sentence_cards_mastery_state_check(self, db: DatabaseConnection) -> None:

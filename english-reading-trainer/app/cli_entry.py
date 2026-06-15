@@ -27,6 +27,7 @@ Usage examples:
 """
 
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -219,7 +220,8 @@ def books_show(
             raise typer.Exit(1)
 
         chapters = conn.execute(
-            "SELECT idx, title, sentence_start, sentence_end "
+            "SELECT idx, title, sentence_start, sentence_end, "
+            "section_kind, chapter_number "
             "FROM chapters WHERE book_id = ? ORDER BY idx",
             (book_id,),
         ).fetchall()
@@ -229,11 +231,11 @@ def books_show(
                f"{book['total_chapters']} chapters  |  "
                f"{book['total_sentences']} sentences\n")
 
-    _print_row(["#", "Title", "Sentences"])
-    _print_row(["-" * 3, "-" * 40, "-" * 9])
+    _print_row(["Section", "Kind", "Sentences"])
+    _print_row(["-" * 40, "-" * 11, "-" * 9])
     for ch in chapters:
         sent_count = ch["sentence_end"] - ch["sentence_start"]
-        _print_row([ch["idx"], ch["title"][:40], sent_count])
+        _print_row([_section_label(ch)[:40], ch["section_kind"], sent_count])
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +259,8 @@ def read_cmd(
             raise typer.Exit(1)
 
         ch = conn.execute(
-            "SELECT id, title FROM chapters WHERE book_id = ? AND idx = ?",
+            "SELECT id, idx, title, section_kind, chapter_number "
+            "FROM chapters WHERE book_id = ? AND idx = ?",
             (book_id, chapter),
         ).fetchone()
         if not ch:
@@ -278,7 +281,7 @@ def read_cmd(
         ).fetchall()
 
     typer.echo(f"\n{'=' * width}")
-    typer.echo(f"  {book['title']}  |  Chapter {chapter}: {ch['title']}")
+    typer.echo(f"  {book['title']}  |  {_section_label(ch)}")
     typer.echo(f"{'=' * width}\n")
 
     current_para_id = None
@@ -816,6 +819,43 @@ def ai_save_word(
 
 def _print_row(cols: list) -> None:
     typer.echo("  ".join(str(c) for c in cols))
+
+
+def _section_label(row) -> str:
+    title = str(row["title"] or "").strip()
+    kind = row["section_kind"] or "chapter"
+    if kind == "chapter":
+        chapter_number = row["chapter_number"] or row["idx"]
+        clean_title = _strip_section_ordinal(title)
+        return (
+            f"Chapter {chapter_number}: {clean_title}"
+            if clean_title
+            else f"Chapter {chapter_number}"
+        )
+    if kind == "appendix":
+        clean_title = _strip_appendix_ordinal(title)
+        appendix_letter = _appendix_letter(title)
+        if appendix_letter:
+            return (
+                f"Appendix {appendix_letter}: {clean_title}"
+                if clean_title
+                else f"Appendix {appendix_letter}"
+            )
+        return f"Appendix: {title}" if title else "Appendix"
+    return title or kind.title()
+
+
+def _strip_section_ordinal(title: str) -> str:
+    return re.sub(r"^\s*(?:chapter\s+)?\d+(?:[\s.:)-]+)", "", title, flags=re.I).strip()
+
+
+def _appendix_letter(title: str) -> str:
+    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title)
+    return match.group(1) if match else ""
+
+
+def _strip_appendix_ordinal(title: str) -> str:
+    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title).strip()
 
 
 # ---------------------------------------------------------------------------

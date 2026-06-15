@@ -16,8 +16,9 @@ from typer.testing import CliRunner
 
 from app.cli_entry import app
 from app.db_connection import DatabaseConnection
+from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
-from tests.importers.epub_builder import make_epub
+from tests.importers.epub_builder import make_epub, make_epub_with_sections
 
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 runner = CliRunner()
@@ -194,6 +195,41 @@ class TestBooksShow:
         assert result.exit_code == 0
         assert "Test Book" in result.output
         assert "Chapter" in result.output
+
+    def test_epub_frontmatter_label_not_chapter_one(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        ep = make_epub_with_sections(
+            tmp_path,
+            "frontmatter.epub",
+            sections=[
+                {
+                    "title": "Praise for Mastering Bitcoin",
+                    "file_name": "praise.xhtml",
+                    "epub_type": "preface",
+                    "body_html": (
+                        "<p>Useful praise text with enough words to import here.</p>"
+                    ),
+                },
+                {
+                    "title": "1. Introduction",
+                    "file_name": "ch01.xhtml",
+                    "epub_type": "chapter",
+                    "body_html": (
+                        "<p>Body chapter text with enough words to import here.</p>"
+                    ),
+                },
+            ],
+        )
+        result = import_epub(db, ep)
+
+        cli_result = runner.invoke(app, ["books", "show", str(result.book_id)])
+
+        assert cli_result.exit_code == 0
+        assert "Praise for Mastering Bitcoin" in cli_result.output
+        assert "frontmatter" in cli_result.output
+        assert "Chapter 1: Introduction" in cli_result.output
+        assert "Chapter 1: Praise" not in cli_result.output
 
     def test_missing_book_exits_with_error(self, db: DatabaseConnection) -> None:
         result = runner.invoke(app, ["books", "show", "9999"])
