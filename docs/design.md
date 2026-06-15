@@ -1056,6 +1056,202 @@ WHERE id = ? AND archived_at IS NULL
 
 ---
 
+## 20. 浮层状态机修复与词卡详情入口统一
+
+### 20.1 背景
+
+§19 实现后回归测试发现两个用户可见 bug，已用 Playwright headless 在 `/read/4?chapter=1` 复现（无 JS Console 报错，无 HTTP 错误，纯前端状态机问题）：
+
+**Bug A — 单击已标记词，浮层瞬间消失**
+
+执行链：
+1. 用户点击带点状下划线的词（如 `ontological`）
+2. `reader.click` 处理器命中 `wordSpan && !hasSelection` → `showWordDetail()` 显示 wordDetail
+3. 浏览器随后触发 `selectionchange`（点击移动光标，即使 collapsed 也算变化）
+4. `updateToolbar()` 见 `selection.isCollapsed === true` → 调用 `hideToolbar()`
+5. `hideToolbar()` 关闭整个 `#selection-toolbar` 并隐藏 wordDetail
+6. 用户体验：点击毫无反应
+
+**Bug B — 双击已标记词，wordDetail 与 wordExisting 同时显示**
+
+执行链：
+1. 双击的第一次 click 触发：选区尚未建立，`showWordDetail()` 运行，wordDetail 可见
+2. 双击建立选区 = 词本身 → `selectionchange` → `updateToolbar()`
+3. `updateToolbar()` 走 `spans.length === 1 && activeWordCardId` 分支 → `setVisible(wordExisting, true)`
+4. **但全程不调用 `setVisible(wordDetail, false)`**，wordDetail 残留
+5. 用户体验：两个面板叠加，存在两组 "Remove from cards" 按钮，操作语义重复
+
+### 20.2 根因
+
+`#selection-toolbar` 内部有 5 个独立 group（`sentenceForm` / `wordForm` / `wordExisting` / `wordDetail` / `crossSentence`），但**没有集中互斥控制**：
+
+- `showWordDetail()` 进入时主动隐藏其他 4 个 group，行为正确。
+- `updateToolbar()` 处理选区变化时只管 `sentenceForm` / `wordForm` / `wordExisting` / `crossSentence` 四组，**从不触碰 `wordDetail`**。
+
+并且 `wordDetail` 的入口（`reader.click` 监听器）与 `wordExisting` 的入口（`updateToolbar` 中的 `activeWordCardId` 分支）**职责重叠**：前者要求 "无选区"，后者要求 "选区命中已有词卡"。两种交互路径都指向同一信息（释义/备注/移除），却使用两套不同 UI。
+
+附带小问题：`#toolbar-sentence-form` 与 `#toolbar-word-form` 在 HTML 里缺少默认 `hidden` 属性，初次渲染时若浮层被强制可见，这两个 form 会默认展示。
+
+### 20.3 修复策略：合并 wordExisting 进 wordDetail
+
+不再保留 wordExisting 这条单独的"已在卡片中"路径。**只要选区或点击命中一个已存在的 word_card，统一显示 wordDetail**。理由：
+
+- wordDetail 是 wordExisting 的超集：除"Remove from cards"按钮外，还提供释义/备注编辑。
+- 用户对"已标记词"只有两类需求：查看/编辑笔记、取消标记。一个面板足够。
+- 移除冗余 group，状态机分支减少。
+
+### 20.4 状态机统一规则
+
+`#selection-toolbar` 内最多显示一个"主面板"，互斥规则用集中函数实现：
+
+```js
+function hideAllPanels() {
+  setVisible(sentenceForm, false);
+  setVisible(wordForm, false);
+  setVisible(wordDetail, false);
+  setVisible(crossSentence, false);
+  hideTranslationEditor();
+}
+```
+
+`updateToolbar()` 与 `showWordDetail()` 在显示任何一个 group 之前**必须先调用 `hideAllPanels()`**。
+
+状态判定优先级（自顶向下）：
+
+| 条件 | 显示 |
+|------|------|
+| 选区为空 / collapsed | （隐藏整个 toolbar） |
+| `spans.length > 1`（跨句） | `crossSentence` |
+| `spans.length === 1` 且整句选中 | `sentenceForm`（含 Mark / Translation / AI） |
+| `spans.length === 1` 且命中已有词卡 | **`wordDetail`** |
+| `spans.length === 1` 且未命中词卡 | `wordForm`（Mark word/phrase/collocation） |
+
+`reader.click` 处理器对 `[data-word-card]` 的单击保持不变，仍调用 `showWordDetail()`，但需要解决 Bug A。
+
+### 20.5 修复 Bug A：抑制"刚打开 wordDetail 后立即被 selectionchange 关闭"
+
+引入一个一次性抑制标记：
+
+```js
+let suppressNextUpdate = false;
+
+function showWordDetail(span) {
+  hideAllPanels();
+  activeWordDetailCardId = span.dataset.wordCard;
+  wordDetailSurface.textContent = span.textContent;
+  wordDetailMeaning.value = span.dataset.meaning || "";
+  wordDetailNote.value = span.dataset.note || "";
+  wordDetailRemove.dataset.cardId = activeWordDetailCardId;
+  setVisible(wordDetail, true);
+  positionToolbar(span.getBoundingClientRect());
+  suppressNextUpdate = true;  // 阻挡紧跟而来的 collapsed-selection 关闭
+}
+
+function updateToolbar() {
+  if (suppressNextUpdate) { suppressNextUpdate = false; return; }
+  if (translationEditorOpen || toolbar.contains(document.activeElement)) return;
+  // ... 原有逻辑
+}
+```
+
+`suppressNextUpdate` 只在点击-显示 wordDetail 这一条路径上设置，影响范围最小。
+
+另一种实现方案：把点击 wordSpan 时的选区主动设为词的范围（`window.getSelection().selectAllChildren(span)`），让后续 `updateToolbar` 走 "选区命中已有词卡" 分支自然显示 wordDetail。**不采用此方案**，因为这会让阅读时点击词变成"选中词"，改变了用户的选区上下文，影响后续多句拖选。
+
+### 20.6 修复 Bug B：updateToolbar 在所有分支入口先 hideAllPanels
+
+```js
+function updateToolbar() {
+  if (suppressNextUpdate) { suppressNextUpdate = false; return; }
+  if (translationEditorOpen || toolbar.contains(document.activeElement)) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    hideToolbar();
+    return;
+  }
+  // ... 计算 spans / activeWordCardId / wholeSentence ...
+
+  hideAllPanels();  // ← 关键：统一收拢所有 group
+  if (spans.length > 1) {
+    configureCrossSentenceActions(spans);
+    setVisible(crossSentence, true);
+    showToolbar(range);
+    return;
+  }
+  if (activeWordCardId) {
+    // 选区命中已有词卡 → 复用 wordDetail
+    const span = reader.querySelector(`[data-word-card="${activeWordCardId}"]`);
+    if (span) {
+      activeWordDetailCardId = activeWordCardId;
+      wordDetailSurface.textContent = span.textContent;
+      wordDetailMeaning.value = span.dataset.meaning || "";
+      wordDetailNote.value = span.dataset.note || "";
+      wordDetailRemove.dataset.cardId = activeWordCardId;
+      setVisible(wordDetail, true);
+    }
+  } else if (wholeSentence) {
+    sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
+    // ... 配置 Mark / Translation / AI 按钮
+    setVisible(sentenceForm, true);
+  } else {
+    setVisible(wordForm, true);
+  }
+  showToolbar(range);
+}
+```
+
+`activeWordCardIds.length > 1`（多选区跨多个词卡）的情况退化为：在 wordDetail 中显示第一个，"Remove from cards" 按钮的 `data-card-id` 仍支持批量传入（保留现有 `wordDelete` 逻辑作为底层调用）。短期可只支持单卡，未来若有需求再扩展。
+
+### 20.7 HTML 默认状态修正
+
+`#toolbar-sentence-form` 与 `#toolbar-word-form` 加默认 `hidden` 属性，避免初始渲染或 toolbar 强制可见时短暂闪现：
+
+```html
+<form id="toolbar-sentence-form" method="post" class="toolbar-group" hidden>...</form>
+<form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>...</form>
+```
+
+JS 在显示前调用 `setVisible(form, true)` 即可，与现有惯例一致。
+
+### 20.8 删除 wordExisting
+
+移除以下元素及其所有引用：
+
+- HTML `#toolbar-word-existing` 整个 div
+- JS 变量 `wordExisting`、`wordDelete`
+- JS 中 `setVisible(wordExisting, ...)` 调用
+- `wordDelete.addEventListener("click", ...)` 事件
+
+`wordDetail` 中的 "Remove from cards" 按钮（`wordDetailRemove`）承担所有"取消词卡"操作。批量删除（来自跨词选区）若保留，可由 wordDetail 内部读取 `activeWordCardIds` 字段决定按钮文案与行为。
+
+### 20.9 测试用例
+
+新增 Playwright 集成测试 `tests/web/test_reader_toolbar_state.py`（沿用 §15.7 模式，TestClient 启服务，Playwright 驱动）：
+
+| 用例 | 期望 |
+|------|------|
+| 加载页面后立即检查 | toolbar hidden；所有 group hidden |
+| 单击 `[data-word-card]` | toolbar visible；**仅** wordDetail visible，其余 hidden |
+| 双击 `[data-word-card]` | 同上：**仅** wordDetail visible（不应有 wordExisting） |
+| 点击 wordDetail 内"Save" | PATCH 成功，span 的 `data-meaning`/`data-note` 更新，toolbar hidden |
+| 拖选跨两句 | crossSentence visible，wordDetail hidden |
+| 拖选整句 | sentenceForm visible，wordDetail hidden |
+| 拖选未标记词 | wordForm visible，wordDetail hidden |
+| wordDetail 显示后立即点击空白 | toolbar hidden（验证 `suppressNextUpdate` 不会漏关）|
+
+后端测试不变（§19 已覆盖 PATCH 端点）。
+
+### 20.10 排除项
+
+- 不引入正式状态机库（XState 等），用集中函数 + 优先级表足够。
+- 不做点击-选词联动（不调用 `selectAllChildren`），见 §20.5 拒因。
+- wordDetail 的多卡批量删除若工作量过大可降级为单卡，不阻塞本次修复。
+- 词汇 AI 按钮（解释 / 搭配 / 易混）留给 §21，本节只修状态机。
+
+`[新增 2026-06-15]`
+
+---
+
 ## 评审清单
 
 请对以下小节标 `yes` / `no` / 改：
@@ -1080,3 +1276,4 @@ WHERE id = ? AND archived_at IS NULL
 - [x] §17 阅读视图排版
 - [x] §18 端到端动线与诊断面板
 - [ ] §19 词卡悬浮提示与备注编辑
+- [ ] §20 浮层状态机修复与词卡详情入口统一
