@@ -237,7 +237,7 @@ cache_key    = (content_hash, prompt_version, model)
 
 ## 6. EPUB 重复导入的幂等性
 
-**默认：按 ************`file_hash`************ 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
+**默认：按 ****************************`file_hash`**************************** 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
 
 - 若 `file_hash` 命中：报告"已存在，是否更新结构？"；用户选更新则重新解析章节并尝试重新绑定 `sentences.text_hash`，绑不上的句子标记为 `orphaned`。
 - 若 `file_hash` 不同但 `title + author` 命中：视为新版本，提示用户手动合并。
@@ -568,12 +568,12 @@ english-reading-trainer/
 
 每个"标记"按钮在选区命中**已标记**对象时变为"取消标记"，避免误标后无法挽回。
 
-| 选区目标 | 当前状态 | 浮层显示 |
-|---|---|---|
-| 句子 | unmarked | 标为难句 / 写下我的理解 / AI 分析 |
-| 句子 | marked   | 取消标记 / 修改我的理解 / 打开分析面板 |
-| 词 / 短语 | 未收录 | 标为生词 / 标为短语 / 标为搭配 |
-| 词 / 短语 | 已收录 | 已在卡库 ✓ / 从卡库移除 |
+| 选区目标   | 当前状态     | 浮层显示                   |
+| ------ | -------- | ---------------------- |
+| 句子     | unmarked | 标为难句 / 写下我的理解 / AI 分析  |
+| 句子     | marked   | 取消标记 / 修改我的理解 / 打开分析面板 |
+| 词 / 短语 | 未收录      | 标为生词 / 标为短语 / 标为搭配     |
+| 词 / 短语 | 已收录      | 已在卡库 ✓ / 从卡库移除         |
 
 后端新增：
 
@@ -683,10 +683,10 @@ prompts/
 ```text
 OPENAI_API_KEY    — API key
 OPENAI_BASE_URL   — endpoint（DeepSeek / OpenAI / Ollama / Azure 等）
-TRAINER_MODEL     — 模型名，默认 gpt-4o-mini
+TRAINER_MODEL     — 模型名，默认 deepseek-chat
 ```
 
-**计划默认 Provider：DeepSeek。** 其 API 与 OpenAI SDK 完全兼容，只需设置：
+**默认 Provider：DeepSeek。** 其 API 与 OpenAI SDK 完全兼容，默认配置为：
 
 ```text
 OPENAI_BASE_URL=https://api.deepseek.com/v1
@@ -752,6 +752,7 @@ TRAINER_MODEL=deepseek-chat
 ```
 
 理由：
+
 - `max-width: 680px` 落在英文长文阅读舒适带（每行 60–75 字符）。
 - 衬线字体 + 1.75 行高 + 18px 是 Kindle / 微信读书的常见组合。
 - 中文衬线后备 `Source Han Serif SC`（思源宋体）/ `Songti SC`，便于将来导入中文文本时复用。
@@ -799,7 +800,7 @@ value: { "chapter_idx": N, "top_sentence_id": M, "ts": ... }
 ```
 
 - **写入**：滚动停止 300ms 后，记录当前视口顶部最近的 `data-sentence-id`。
-- **读取**：访问 `/read/<book_id>` **不带 `chapter` 参数**时回到上次 `chapter_idx`；DOM 渲染完成后用 `getElementById` + `scrollIntoView` 定位到 `top_sentence_id`。
+- **读取**：访问 `/read/<book_id>` **不带 ********************`chapter`******************** 参数**时回到上次 `chapter_idx`；DOM 渲染完成后用 `getElementById` + `scrollIntoView` 定位到 `top_sentence_id`。
 - 显式带 `chapter` 参数时不恢复，让用户能精确跳章。
 
 不做 DB 持久化的理由：跨设备同步在第一版排除（§0）；DB 写入频繁会拖慢阅读体验，`localStorage` 写入是同步零延迟。
@@ -906,6 +907,98 @@ analyzed-stale   黄色底色 + 左侧 1px 虚线蓝条（prompt 版本变了，
 
 ---
 
+## 19. 词卡悬浮提示与备注编辑
+
+### 19.1 场景
+
+用户在阅读过程中看到带点状下划线的词/短语（已标为 word_card），想**点击查看自己之前查阅过的释义或记录的备注**，而不必离开阅读页跳转到 `/cards` 列表。
+
+当前 `word_cards` 表已有 `current_meaning TEXT` 和 `user_note TEXT` 字段，但阅读视图没有读取和展示它们的入口。本节补全这条交互。
+
+### 19.2 数据传递（无额外查询）
+
+阅读视图已经在渲染时加载全章所有 `word_cards`。只需在 `_highlight_word_cards()` 把 `current_meaning` 和 `user_note` 写入 `data-*` 属性：
+
+```html
+<span data-word-card="42"
+      data-meaning="珊瑚礁"
+      data-note="重要生态系统">Coral reefs</span>
+```
+
+无新 SQL 查询；字段为空时 `data-meaning=""` / `data-note=""`。
+
+### 19.3 浮层行为（点击已标记词）
+
+点击 `[data-word-card]` span 时，浮层进入**词卡详情模式**，替代默认的"Mark word / Mark phrase"按钮组：
+
+```
+┌──────────────────────────────────────┐
+│ Coral reefs                          │  ← surface_form，只读
+│ ────────────────────────────────────  │
+│ 释义  [珊瑚礁________________]       │  ← current_meaning，可编辑
+│ 备注  [重要生态系统___________]      │  ← user_note，可编辑
+│                                      │
+│ [保存]              [从卡片移除]     │
+└──────────────────────────────────────┘
+```
+
+- 两个字段均为单行 `<input>`，可空。
+- "保存"：`PATCH /mark/word/{card_id}` → 更新 `current_meaning` + `user_note`，浮层收起。
+- "从卡片移除"：等同现有 `DELETE /mark/word/{card_id}`，移除下划线。
+- 点击词以外区域（`selectionchange` 为空）：浮层隐藏，不保存。
+
+### 19.4 后端接口
+
+新增端点：
+
+```
+PATCH /mark/word/{card_id}
+Body (form): current_meaning=..., user_note=...
+```
+
+对应服务函数 `update_word_card_note(db, card_id, current_meaning, user_note)`：
+
+```sql
+UPDATE word_cards
+SET current_meaning = ?, user_note = ?
+WHERE id = ? AND archived_at IS NULL
+```
+
+成功返回 `303 See Other` 重定向（与现有 mark 端点一致）；或 AJAX 场景返回 `204 No Content`。
+
+### 19.5 数据流全图
+
+```
+点击 [data-word-card] span
+  │
+  ├── 读 data-meaning / data-note / data-word-card
+  │
+  ▼
+浮层词卡详情模式
+  ├── 用户编辑释义/备注
+  │   └── 点"保存" → PATCH /mark/word/{card_id} → 204
+  │                  → 更新 span 的 data-* 属性（乐观更新）
+  │                  → 浮层收起
+  │
+  └── 点"从卡片移除" → DELETE /mark/word/{card_id}
+                      → 移除 span 的 data-word-card 属性及下划线样式
+                      → 浮层收起
+```
+
+### 19.6 与复习卡的关系
+
+`current_meaning` 和 `user_note` 在 SM-2 复习时已经展示于卡片正面/背面。阅读页的编辑直接写入同一行，复习页实时生效，不存在两套数据。
+
+### 19.7 排除项
+
+- 不做历史版本记录（覆盖写即可）。
+- 不做多行富文本——释义和备注都是短字符串，`<input>` 够用。
+- AI 查词（调 LLM 自动填 `current_meaning`）挪到第二版。
+
+`[新增 2026-06-15]`
+
+---
+
 ## 评审清单
 
 请对以下小节标 `yes` / `no` / 改：
@@ -927,6 +1020,6 @@ analyzed-stale   黄色底色 + 左侧 1px 虚线蓝条（prompt 版本变了，
 - [ ] §14 阅读交互：选中即操作
 - [x] §15 用户译文驱动 AI 诊断
 - [ ] §16 AI Provider 配置（DeepSeek 默认）
-- [ ] §17 阅读视图排版
-- [ ] §18 端到端动线与诊断面板
-
+- [x] §17 阅读视图排版
+- [x] §18 端到端动线与诊断面板
+- [ ] §19 词卡悬浮提示与备注编辑
