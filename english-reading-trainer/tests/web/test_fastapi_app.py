@@ -1034,6 +1034,51 @@ class TestReadingAndMarking:
         assert "AI ▸" in response.text
         assert "relating to being or existence" in response.text
 
+    def test_cards_page_word_def_cell_has_edit_elements(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+
+        response = client.get("/cards")
+
+        assert "def-text" in response.text
+        assert "def-edit-btn" in response.text
+        assert "def-input" in response.text
+        assert "data-card-id" in response.text
+
+    def test_cards_page_def_cell_shows_current_meaning(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "lasting a very short time", "user_note": ""},
+        )
+
+        response = client.get("/cards")
+
+        assert "lasting a very short time" in response.text
+
 
 class TestReviewRoutes:
     def test_review_empty_message(self, client: TestClient) -> None:
@@ -1104,6 +1149,80 @@ class TestReviewRoutes:
         response = client.get("/review")
 
         assert 'class="review-reveal"' not in response.text
+
+    def test_review_page_reveal_shows_ai_meaning(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+            cache_id = conn.execute(
+                "INSERT INTO ai_cache (content_hash, prompt_version, model, "
+                "response_json, is_valid, created_at) "
+                "VALUES ('hashR1', 'v2', 'gpt-4o-mini', ?, 1, '2026-01-01T00:00:00')",
+                (json.dumps({"meaning_in_context": "lasting a very short time"}),),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert "Reveal" in response.text
+        assert "AI meaning:" in response.text
+        assert "lasting a very short time" in response.text
+
+    def test_review_page_reveal_shows_both_user_and_ai(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "rudimentary",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'rudimentary'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "基础的且简单的", "user_note": ""},
+        )
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                "INSERT INTO ai_cache (content_hash, prompt_version, model, "
+                "response_json, is_valid, created_at) "
+                "VALUES ('hashR2', 'v2', 'gpt-4o-mini', ?, 1, '2026-01-01T00:00:00')",
+                (json.dumps({"meaning_in_context": "basic and undeveloped"}),),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert "Your definition:" in response.text
+        assert "AI meaning:" in response.text
+        assert "基础的且简单的" in response.text
+        assert "basic and undeveloped" in response.text
 
     def test_review_post_records_answer(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1201,10 +1320,11 @@ class TestImportRoutes:
         response = client.get("/import")
 
         assert response.status_code == 200
-        assert "Upload TXT file" in response.text
+        assert "Upload file" in response.text
         assert "Paste text" in response.text
         assert "/import/file" in response.text
         assert "/import/paste" in response.text
+        assert ".epub" in response.text
 
     def test_import_nav_link_present(self, client: TestClient) -> None:
         response = client.get("/")
@@ -1397,6 +1517,74 @@ class TestImportRoutes:
         )
 
         assert response.status_code == 409
+
+    # --- POST /import/file (EPUB) ---
+
+    def test_import_epub_file_success_redirects_to_read(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from tests.importers.epub_builder import make_epub
+
+        epub_path = make_epub(tmp_path, "test.epub", title="My EPUB Book")
+        epub_bytes = epub_path.read_bytes()
+
+        response = client.post(
+            "/import/file",
+            files={"file": ("test.epub", epub_bytes, "application/epub+zip")},
+            data={"title": "My EPUB Book", "author": "Author One"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/read/")
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, source_format FROM books LIMIT 1").fetchone()
+        assert row["title"] == "My EPUB Book"
+        assert row["source_format"] == "epub"
+
+    def test_import_epub_file_auto_title_from_epub_metadata(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from tests.importers.epub_builder import make_epub
+
+        epub_path = make_epub(tmp_path, "meta.epub", title="Metadata Title", author="Meta Author")
+        epub_bytes = epub_path.read_bytes()
+
+        response = client.post(
+            "/import/file",
+            files={"file": ("meta.epub", epub_bytes, "application/epub+zip")},
+            data={"title": "", "author": ""},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, author FROM books LIMIT 1").fetchone()
+        assert row["title"] == "Metadata Title"
+        assert row["author"] == "Meta Author"
+
+    def test_import_epub_file_duplicate_returns_409(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from tests.importers.epub_builder import make_epub
+
+        epub_path = make_epub(tmp_path, "dup.epub")
+        epub_bytes = epub_path.read_bytes()
+
+        client.post(
+            "/import/file",
+            files={"file": ("dup.epub", epub_bytes, "application/epub+zip")},
+            data={"title": "First", "author": ""},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/file",
+            files={"file": ("dup2.epub", epub_bytes, "application/epub+zip")},
+            data={"title": "Second", "author": ""},
+        )
+
+        assert response.status_code == 409
+        assert "Already imported" in response.text
 
 
 # ---------------------------------------------------------------------------

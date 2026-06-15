@@ -1510,6 +1510,122 @@ LIMIT ? OFFSET ?
 
 ---
 
+## §24 Cards Definition 内联编辑、Review Reveal AI 含义、EPUB 导入接入
+
+### §24.1 Cards 页 Definition 内联编辑
+
+**目标**：用户可在 Cards 表格中直接编辑 Definition 列，无需打开词卡分析面板。
+
+**方案**：JavaScript 内联编辑 + 复用已有 `PATCH /mark/word/{card_id}` 端点
+
+渲染变更（`_word_cards_table`）：
+```html
+<!-- 旧 -->
+<td>处于原始且简单的状态的事物</td>
+
+<!-- 新 -->
+<td>
+  <span class="def-text" data-card-id="7">处于原始且简单的状态的事物</span>
+  <button class="def-edit-btn" aria-label="edit">✎</button>
+  <input class="def-input hidden" data-card-id="7" value="处于原始且简单的状态的事物">
+</td>
+```
+
+JS 行为（注入到页面 `<script>` 末尾）：
+- 点击 `.def-text` 或 `.def-edit-btn` → 隐藏 span+button，显示 input 并 focus
+- `blur` 或 Enter → `PATCH /mark/word/{card_id}` with `current_meaning=<value>` → 成功后更新 span 文本，恢复显示
+- Escape → 放弃编辑，恢复原值
+
+不需要新后端端点。
+
+### §24.2 Review Queue Reveal 也展示 AI 含义
+
+**目标**：复习时 Reveal 区域除用户定义外，也显示 AI 分析出的 `meaning_in_context`（同样折叠隐藏）。
+
+**变更点**：
+
+1. `ReviewQueueItem` 增加字段：
+   ```python
+   ai_meaning: str = ""
+   ```
+
+2. `_word_due_sql()` 增加 JOIN：
+   ```sql
+   LEFT JOIN ai_cache ac ON ac.id = wc.ai_analysis_id
+   ```
+   新增列：
+   ```sql
+   COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '') AS ai_meaning
+   ```
+
+3. `_sentence_due_sql()` 补占位列：
+   ```sql
+   '' AS ai_meaning
+   ```
+
+4. `_item_from_row()` 填入：
+   ```python
+   ai_meaning=row.get("ai_meaning") or "",
+   ```
+
+5. `_review_answer_cell()` Reveal 显示两段（各有内容才显示）：
+   ```
+   ▶ Reveal
+     Your definition: 处于原始且简单的状态的事物
+     AI meaning:      existing in or relating to an early stage of development
+   ```
+
+### §24.3 EPUB 导入接入 Web 层
+
+**目标**：Import 页面支持上传 `.epub` 文件。
+
+**现状**：
+- `app/importers/epub_importer.py` 已完整实现（ebooklib → BeautifulSoup → pysbd → DB）
+- 依赖 ebooklib 0.20 / beautifulsoup4 4.15 / lxml 6.1 均已安装
+- 仅缺 Web 层接入
+
+**接入方案**（`fastapi_app.py`）：
+
+```python
+import tempfile
+
+@web_app.post("/import/file")
+async def import_file(file: UploadFile = File(...), title: str = Form(""), author: str = Form("")) -> Any:
+    raw = await file.read()
+    # size & empty checks...
+    filename = (file.filename or "").lower()
+    if filename.endswith(".epub"):
+        return _do_import_epub(db_factory(), raw, filename, title, author)
+    return _do_import(db_factory(), raw, title, author)
+
+def _do_import_epub(db, raw, filename, form_title, author) -> Any:
+    import tempfile, os
+    suffix = ".epub"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    try:
+        from app.importers.epub_importer import import_epub, DuplicateBookError as EpubDupError
+        result = import_epub(db, tmp_path,
+                             title=form_title.strip() or None,
+                             author=author.strip() or None)
+    except EpubDupError:
+        import hashlib
+        existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
+        return _duplicate_page(existing_id)
+    except (ValueError, FileNotFoundError) as exc:
+        return _error_page(str(exc), status_code=400)
+    finally:
+        os.unlink(tmp_path)
+    return _redirect(f"/read/{result.book_id}")
+```
+
+Import 表单：
+- `accept=".txt,.epub"` 
+- 说明文字增加 "TXT or EPUB"
+
+---
+
 ## 评审清单
 
 请对以下小节标 `yes` / `no` / 改：
@@ -1538,4 +1654,5 @@ LIMIT ? OFFSET ?
 - [x] §21 词汇 AI 分析面板（基础版）
 - [x] §22 词汇 AI 分析面板改进：原文高亮、错因展开、why_this_word、用户笔记区
 - [x] §23 Cards 页与 Review Queue 信息增强：Definition/AI Meaning/Source 列、复习答案 Reveal
+- [x] §24 Cards Definition 内联编辑、Review Reveal AI 含义、EPUB 导入接入
 

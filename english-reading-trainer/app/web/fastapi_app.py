@@ -11,6 +11,7 @@ import hashlib
 import html
 import json
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -42,6 +43,8 @@ from app.cards.word_card_service import (
 )
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
+from app.importers.epub_importer import DuplicateBookError as EpubDuplicateBookError
+from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import DuplicateBookError, import_text
 from app.profile.learner_profile_generator import (
     ProfileInputError,
@@ -138,6 +141,9 @@ def create_app(
             )
         if not raw.strip():
             return _error_page("Uploaded file is empty.", status_code=400)
+        filename = (file.filename or "").lower()
+        if filename.endswith(".epub"):
+            return _do_import_epub(db_factory(), raw, title, author)
         return _do_import(db_factory(), raw, title, author)
 
     @web_app.post("/import/paste")
@@ -170,6 +176,34 @@ def create_app(
             return _duplicate_page(existing_id)
         except ValueError as exc:
             return _error_page(str(exc), status_code=400)
+        return _redirect(f"/read/{result.book_id}")
+
+    def _do_import_epub(
+        db: DatabaseConnection,
+        raw: bytes,
+        form_title: str,
+        author: str,
+    ) -> Any:
+        fd, tmp_path = tempfile.mkstemp(suffix=".epub")
+        try:
+            os.write(fd, raw)
+            os.close(fd)
+            result = import_epub(
+                db,
+                tmp_path,
+                title=form_title.strip() or None,
+                author=author.strip() or None,
+            )
+        except EpubDuplicateBookError:
+            existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
+            return _duplicate_page(existing_id)
+        except (ValueError, FileNotFoundError) as exc:
+            return _error_page(str(exc), status_code=400)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         return _redirect(f"/read/{result.book_id}")
 
     @web_app.get("/books", response_class=HTMLResponse)
@@ -2025,7 +2059,7 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{_escape(card['lexical_type'])}</td>"
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{card['occurrence_count']}</td>"
-        f"<td>{_escape(card.get('current_meaning') or '—')}</td>"
+        f"<td>{_def_edit_cell(card)}</td>"
         f"<td>{_ai_meaning_cell(card)}</td>"
         f"<td>{_escape(card.get('first_book_title') or '—')}</td>"
         "</tr>"
@@ -2037,6 +2071,18 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
         "<th>Definition</th><th>AI Meaning</th><th>Source</th>"
         "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _def_edit_cell(card: dict[str, Any]) -> str:
+    card_id = card["id"]
+    value = card.get("current_meaning") or ""
+    display = _escape(value) if value else "—"
+    escaped_value = _escape(value)
+    return (
+        f'<span class="def-text" data-card-id="{card_id}">{display}</span>'
+        f'<button class="def-edit-btn" data-card-id="{card_id}" aria-label="edit definition">✎</button>'
+        f'<input class="def-input" data-card-id="{card_id}" value="{escaped_value}" style="display:none">'
     )
 
 
@@ -2071,10 +2117,19 @@ def _due_table(items: list[Any], return_to: str) -> str:
 
 def _review_answer_cell(item: Any, return_to: str) -> str:
     answer = (getattr(item, "answer", "") or "").strip()
+    ai_meaning = (getattr(item, "ai_meaning", "") or "").strip()
+    reveal_parts = []
+    if answer:
+        reveal_parts.append(
+            f'<p class="review-reveal-text"><strong>Your definition:</strong> {_escape(answer)}</p>'
+        )
+    if ai_meaning:
+        reveal_parts.append(
+            f'<p class="review-reveal-text"><strong>AI meaning:</strong> {_escape(ai_meaning)}</p>'
+        )
     reveal = (
-        f'<details class="review-reveal"><summary>Reveal</summary>'
-        f'<p class="review-reveal-text">{_escape(answer)}</p></details>'
-        if answer else ""
+        f'<details class="review-reveal"><summary>Reveal</summary>{"".join(reveal_parts)}</details>'
+        if reveal_parts else ""
     )
     options = "".join(
         f'<button type="submit" name="outcome" value="{outcome.value}">{outcome.value}</button>'
@@ -2118,18 +2173,18 @@ def _import_forms() -> str:
     <section class="toolbar">
       <div>
         <h1>Import</h1>
-        <p class="muted">Add a TXT file or paste text directly. You jump straight to the reader after import.</p>
+        <p class="muted">Add a TXT or EPUB file, or paste text directly. You jump straight to the reader after import.</p>
       </div>
     </section>
     <section class="band">
-      <h2>Upload TXT file</h2>
+      <h2>Upload file</h2>
       <form method="post" action="/import/file" enctype="multipart/form-data" class="stack-form">
         <label for="file-title">Title (optional)</label>
         <input id="file-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="file-author">Author (optional)</label>
         <input id="file-author" name="author">
-        <label for="file-input">TXT file</label>
-        <input id="file-input" type="file" name="file" accept=".txt,text/plain" required>
+        <label for="file-input">TXT or EPUB file</label>
+        <input id="file-input" type="file" name="file" accept=".txt,.epub,text/plain,application/epub+zip" required>
         <button type="submit">Import file</button>
       </form>
     </section>
@@ -2251,6 +2306,7 @@ def _html_page(
     <a class="{_active(active, "profile")}" href="/profile">Profile</a>
   </nav>
   <main>{body}</main>
+  <script>{_def_edit_script()}</script>
 </body>
 </html>""",
         status_code=status_code,
@@ -2744,6 +2800,11 @@ def _css() -> str:
     .review-reveal { margin-bottom: 6px; }
     .review-reveal-text { margin: 4px 0 0; font-style: italic; color: var(--muted); max-width: 320px; }
     table details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+    .def-text { cursor: pointer; }
+    .def-text:hover { text-decoration: underline dotted; }
+    .def-edit-btn { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0 2px; opacity: 0.5; }
+    .def-edit-btn:hover { opacity: 1; color: var(--accent); }
+    .def-input { border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; font: inherit; font-size: 13px; min-width: 140px; }
     """
 
 
@@ -2762,6 +2823,66 @@ def _active(current: str, expected: str) -> str:
 
 def _escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
+
+
+def _def_edit_script() -> str:
+    return """
+(function () {
+  function showInput(cardId) {
+    var span = document.querySelector('.def-text[data-card-id="' + cardId + '"]');
+    var btn  = document.querySelector('.def-edit-btn[data-card-id="' + cardId + '"]');
+    var inp  = document.querySelector('.def-input[data-card-id="' + cardId + '"]');
+    if (!inp) return;
+    span.style.display = 'none';
+    btn.style.display  = 'none';
+    inp.style.display  = '';
+    inp.focus();
+    inp.select();
+  }
+  function saveInput(cardId) {
+    var span = document.querySelector('.def-text[data-card-id="' + cardId + '"]');
+    var btn  = document.querySelector('.def-edit-btn[data-card-id="' + cardId + '"]');
+    var inp  = document.querySelector('.def-input[data-card-id="' + cardId + '"]');
+    if (!inp) return;
+    var newVal = inp.value.trim();
+    var body = new URLSearchParams({ current_meaning: newVal, user_note: '' });
+    fetch('/mark/word/' + cardId, { method: 'PATCH', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          span.textContent = newVal || '—';
+          inp.value = newVal;
+        }
+      });
+    span.style.display = '';
+    btn.style.display  = '';
+    inp.style.display  = 'none';
+  }
+  document.addEventListener('click', function (e) {
+    var target = e.target;
+    if (target.classList.contains('def-text') || target.classList.contains('def-edit-btn')) {
+      showInput(target.dataset.cardId);
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!e.target.classList.contains('def-input')) return;
+    if (e.key === 'Enter')  { e.preventDefault(); saveInput(e.target.dataset.cardId); }
+    if (e.key === 'Escape') {
+      var cardId = e.target.dataset.cardId;
+      var span = document.querySelector('.def-text[data-card-id="' + cardId + '"]');
+      var btn  = document.querySelector('.def-edit-btn[data-card-id="' + cardId + '"]');
+      e.target.style.display = 'none';
+      span.style.display = '';
+      btn.style.display  = '';
+    }
+  });
+  document.addEventListener('focusout', function (e) {
+    if (e.target.classList.contains('def-input')) {
+      saveInput(e.target.dataset.cardId);
+    }
+  });
+}());
+"""
 
 
 app = create_app()

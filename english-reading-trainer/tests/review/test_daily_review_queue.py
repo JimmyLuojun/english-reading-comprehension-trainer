@@ -477,3 +477,82 @@ class TestReviewQueueItemAnswer:
             prompt="ephemeral",
         )
         assert item.answer == ""
+
+
+class TestReviewQueueItemAiMeaning:
+    def test_word_card_ai_meaning_populated_from_cache(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Rudimentary tools shaped early civilizations.")
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('hash_ai_k1', '1', 'test', '{"meaning_in_context": "basic and undeveloped"}', 1, ?)""",
+                (NOW.isoformat(),),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note, ai_analysis_id)
+                   VALUES ('rudimentary', 'rudimentary', 'word', ?, '', '', ?, NULL,
+                           0, 'new', 2.5, 0, 0, ?, 1, '', ?)""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat(), cache_id),
+            )
+
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+
+        assert len(items) == 1
+        assert items[0].ai_meaning == "basic and undeveloped"
+
+    def test_word_card_ai_meaning_empty_when_no_cache(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_word_card(db, surface_form="ontological")
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+        assert items[0].ai_meaning == ""
+
+    def test_word_card_ai_meaning_empty_when_cache_missing_field(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Ephemeral art fades.")
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('hash_ai_k2', '1', 'test', '{"other_field": "value"}', 1, ?)""",
+                (NOW.isoformat(),),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note, ai_analysis_id)
+                   VALUES ('ephemeral', 'ephemeral', 'word', ?, '', '', ?, NULL,
+                           0, 'new', 2.5, 0, 0, ?, 1, '', ?)""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat(), cache_id),
+            )
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+        assert items[0].ai_meaning == ""
+
+    def test_sentence_card_ai_meaning_always_empty(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_sentence_card(db)
+        items = list_due_cards(db, as_of=NOW, card_type="sentence")
+        assert items[0].ai_meaning == ""
+
+    def test_review_queue_item_ai_meaning_defaults_to_empty(self) -> None:
+        item = ReviewQueueItem(
+            card_type=CardType.WORD,
+            card_id=1,
+            mastery_state=MasteryState.NEW,
+            ef=2.5,
+            interval_days=0,
+            repetitions=0,
+            review_count=0,
+            due_at=NOW,
+            prompt="ephemeral",
+        )
+        assert item.ai_meaning == ""
