@@ -105,7 +105,7 @@ class TestBooksList:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 4
+        assert count == 5
         assert active_count == 4
 
     def test_shows_imported_book(self, db: DatabaseConnection, tmp_path: Path) -> None:

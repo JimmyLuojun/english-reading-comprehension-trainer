@@ -16,7 +16,7 @@ from app.db_connection import DatabaseConnection
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
-_VALID_WORD_RESPONSE = json.dumps({
+_VALID_WORD_RESPONSE_V1 = json.dumps({
     "lemma": "mitigate",
     "lexical_type": "word",
     "pos": "verb",
@@ -24,6 +24,21 @@ _VALID_WORD_RESPONSE = json.dumps({
     "common_collocations": ["mitigate risks"],
     "near_synonyms": ["alleviate"],
     "confusable_with": [],
+    "morphology": {"root": "mitis", "family": ["mitigation"]},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+})
+
+_VALID_WORD_RESPONSE = json.dumps({
+    "lemma": "mitigate",
+    "lexical_type": "word",
+    "pos": "verb",
+    "meaning_in_context": "to make the harmful effects of something less severe",
+    "register": "formal",
+    "why_this_word": "Mitigate is formal register and targets a specific harm; reduce is vaguer. Writing 'reduce the effects' loses the connotation of purposeful countermeasure.",
+    "vs_simpler": [
+        {"simpler": "reduce", "difference": "Reduce is neutral; mitigate implies deliberate remediation."},
+    ],
     "morphology": {"root": "mitis", "family": ["mitigation"]},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
@@ -60,7 +75,7 @@ class TestAnalyzeWordCacheHit:
         assert result.from_cache is True
 
     def test_stale_returned_for_different_version(self, db: DatabaseConnection) -> None:
-        with _mock_llm([_VALID_WORD_RESPONSE]):
+        with _mock_llm([_VALID_WORD_RESPONSE_V1]):
             analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL, prompt_version="v1")
         with _mock_llm([]) as mock:
             result = analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL, prompt_version="v2")

@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.ai.ai_json_schemas import WORD_ANALYSIS_SCHEMA
+from app.ai.ai_json_schemas import WORD_ANALYSIS_SCHEMA, WORD_ANALYSIS_SCHEMA_V2
 from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
@@ -18,7 +18,12 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PROMPT_NAME = "word_analysis"
-_PROMPT_VERSION = "v1"
+_PROMPT_VERSION = "v2"
+
+_SCHEMAS = {
+    "v1": WORD_ANALYSIS_SCHEMA,
+    "v2": WORD_ANALYSIS_SCHEMA_V2,
+}
 
 _RETRY_SUFFIX = (
     "\n\n[CORRECTION NEEDED] Your previous response was not valid JSON or "
@@ -83,12 +88,13 @@ def analyze_word(
         "learner_profile": learner_profile or "(none)",
     })
 
+    schema = _SCHEMAS.get(prompt_version, WORD_ANALYSIS_SCHEMA_V2)
     raw = _call_llm(prompt, model)
-    data, is_valid = _validate_attempt(raw, WORD_ANALYSIS_SCHEMA)
+    data, is_valid = _validate_attempt(raw, schema)
 
     if not is_valid:
         raw = _call_llm(prompt + _RETRY_SUFFIX, model)
-        data, is_valid = _validate_attempt(raw, WORD_ANALYSIS_SCHEMA)
+        data, is_valid = _validate_attempt(raw, schema)
 
     response_json = json.dumps(data) if is_valid else raw
 

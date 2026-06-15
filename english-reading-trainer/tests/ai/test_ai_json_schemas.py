@@ -8,7 +8,11 @@ the expected fields, constraints, and closed enumerations.
 import pytest
 import jsonschema
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA, WORD_ANALYSIS_SCHEMA
+from app.ai.ai_json_schemas import (
+    SENTENCE_ANALYSIS_SCHEMA,
+    WORD_ANALYSIS_SCHEMA,
+    WORD_ANALYSIS_SCHEMA_V2,
+)
 from app.db_models import VALID_ERROR_CODES
 
 
@@ -56,6 +60,22 @@ VALID_WORD = {
     "confusable_with": ["militate"],
     "morphology": {"root": "mitis", "family": ["mitigation"]},
     "predicted_error_types": ["L01"],
+    "confidence": 0.95,
+}
+
+VALID_WORD_V2 = {
+    "lemma": "mitigate",
+    "lexical_type": "word",
+    "pos": "verb",
+    "meaning_in_context": "to make the harmful effects of something less severe",
+    "register": "formal",
+    "why_this_word": "Mitigate is formal register and implies targeted action on a specific harmful effect. Reduce would be vaguer and lacks the connotation of deliberate countermeasure. Writing 'reduce the effects' would lose the sense of purposeful intervention.",
+    "vs_simpler": [
+        {"simpler": "reduce", "difference": "Reduce is neutral and general; mitigate implies intentional action to counteract a specific harm."},
+        {"simpler": "lessen", "difference": "Lessen describes magnitude only; mitigate carries connotations of professional or policy-driven remediation."},
+    ],
+    "morphology": {"root": "mitis (Latin: soft, mild)", "family": ["mitigation", "mitigating", "unmitigated"]},
+    "predicted_error_types": ["L02", "L04"],
     "confidence": 0.95,
 }
 
@@ -278,3 +298,92 @@ class TestInvalidInstances:
         bad = {**VALID_WORD, "morphology": {"family": []}}
         with pytest.raises(jsonschema.ValidationError):
             _validate(bad, WORD_ANALYSIS_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# WORD_ANALYSIS_SCHEMA_V2
+# ---------------------------------------------------------------------------
+
+class TestWordSchemaV2Structure:
+    def test_v2_schema_is_dict(self) -> None:
+        assert isinstance(WORD_ANALYSIS_SCHEMA_V2, dict)
+
+    def test_v2_required_fields(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V2["required"]
+        for field in ["lemma", "lexical_type", "pos", "meaning_in_context",
+                      "register", "why_this_word", "vs_simpler",
+                      "morphology", "predicted_error_types", "confidence"]:
+            assert field in required
+
+    def test_v2_no_v1_fields(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V2["required"]
+        for old_field in ["common_collocations", "near_synonyms", "confusable_with"]:
+            assert old_field not in required
+        assert "common_collocations" not in WORD_ANALYSIS_SCHEMA_V2["properties"]
+
+    def test_v2_register_enum(self) -> None:
+        enum = set(WORD_ANALYSIS_SCHEMA_V2["properties"]["register"]["enum"])
+        assert enum == {"academic", "formal", "literary", "neutral", "colloquial", "technical"}
+
+    def test_v2_error_codes_match_db(self) -> None:
+        enum = set(
+            WORD_ANALYSIS_SCHEMA_V2["properties"]["predicted_error_types"]["items"]["enum"]
+        )
+        assert enum == VALID_ERROR_CODES
+
+    def test_v2_vs_simpler_item_schema(self) -> None:
+        item_props = (WORD_ANALYSIS_SCHEMA_V2["properties"]["vs_simpler"]
+                      ["items"]["properties"])
+        assert "simpler" in item_props
+        assert "difference" in item_props
+
+
+class TestWordSchemaV2ValidInstances:
+    def test_valid_v2_word_passes(self) -> None:
+        _validate(VALID_WORD_V2, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_empty_vs_simpler_passes(self) -> None:
+        _validate({**VALID_WORD_V2, "vs_simpler": []}, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_multiple_vs_simpler_entries(self) -> None:
+        data = {**VALID_WORD_V2, "vs_simpler": [
+            {"simpler": "reduce", "difference": "more general"},
+            {"simpler": "lessen", "difference": "magnitude only"},
+            {"simpler": "lower", "difference": "informal"},
+        ]}
+        _validate(data, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_all_register_values_accepted(self) -> None:
+        for reg in ["academic", "formal", "literary", "neutral", "colloquial", "technical"]:
+            _validate({**VALID_WORD_V2, "register": reg}, WORD_ANALYSIS_SCHEMA_V2)
+
+
+class TestWordSchemaV2InvalidInstances:
+    def test_v1_fields_rejected(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate({**VALID_WORD_V2, "common_collocations": ["x"]}, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_missing_register_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_WORD_V2.items() if k != "register"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_invalid_register_value_rejected(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate({**VALID_WORD_V2, "register": "slang"}, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_missing_why_this_word_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_WORD_V2.items() if k != "why_this_word"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_vs_simpler_extra_field_rejected(self) -> None:
+        bad = {**VALID_WORD_V2, "vs_simpler": [
+            {"simpler": "reduce", "difference": "more general", "surprise": True}
+        ]}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V2)
+
+    def test_v1_word_rejected_by_v2_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_WORD, WORD_ANALYSIS_SCHEMA_V2)

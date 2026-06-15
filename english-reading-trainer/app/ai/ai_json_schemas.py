@@ -1,9 +1,12 @@
 """
-JSON Schema definitions for AI output validation (§9 of design.md).
+JSON Schema definitions for AI output validation (§9 + §22 of design.md).
 
 Both schemas use `additionalProperties: false` to prevent prompt-injection
 via unexpected extra fields. Error codes are validated against the closed
 enumeration from db_models.VALID_ERROR_CODES.
+
+WORD_ANALYSIS_SCHEMA    — v1 prompt, dictionary-view fields
+WORD_ANALYSIS_SCHEMA_V2 — v2 prompt, writer-perspective fields (§22)
 """
 
 from app.db_models import VALID_ERROR_CODES
@@ -177,6 +180,68 @@ WORD_ANALYSIS_SCHEMA: dict = {
         "confusable_with": {
             "type": "array",
             "items": {"type": "string"},
+        },
+        "morphology": {
+            "type": "object",
+            "required": ["root", "family"],
+            "additionalProperties": False,
+            "properties": {
+                "root":   {"type": "string"},
+                "family": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "predicted_error_types": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {"type": "string", "enum": _ERROR_CODES},
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+        },
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Word / phrase / collocation analysis schema v2  (§22)
+# Writer-perspective redesign: register + why_this_word + vs_simpler
+# replace common_collocations + near_synonyms + confusable_with
+# ---------------------------------------------------------------------------
+
+WORD_ANALYSIS_SCHEMA_V2: dict = {
+    "type": "object",
+    "required": [
+        "lemma", "lexical_type", "pos", "meaning_in_context",
+        "register", "why_this_word", "vs_simpler",
+        "morphology", "predicted_error_types", "confidence",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "lemma":              {"type": "string", "minLength": 1},
+        "lexical_type": {
+            "type": "string",
+            "enum": ["word", "phrase", "collocation"],
+        },
+        "pos":                {"type": "string"},
+        "meaning_in_context": {"type": "string", "minLength": 1},
+        "register": {
+            "type": "string",
+            "enum": ["academic", "formal", "literary", "neutral", "colloquial", "technical"],
+        },
+        "why_this_word": {"type": "string", "minLength": 1},
+        "vs_simpler": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["simpler", "difference"],
+                "additionalProperties": False,
+                "properties": {
+                    "simpler":    {"type": "string"},
+                    "difference": {"type": "string"},
+                },
+            },
         },
         "morphology": {
             "type": "object",

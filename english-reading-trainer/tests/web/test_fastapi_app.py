@@ -42,9 +42,11 @@ _VALID_WORD_ANALYSIS = {
     "lexical_type": "word",
     "pos": "noun",
     "meaning_in_context": "a small domestic feline animal",
-    "common_collocations": ["cat and mouse", "black cat"],
-    "near_synonyms": ["feline", "kitty"],
-    "confusable_with": [],
+    "register": "neutral",
+    "why_this_word": "Cat is the neutral everyday term for the animal. Feline would be more formal or literary. Writing 'a small domestic feline animal' would sound clinical rather than natural.",
+    "vs_simpler": [
+        {"simpler": "pet", "difference": "Pet is a general term for any kept animal; cat is specific to the species."},
+    ],
     "morphology": {"root": "", "family": []},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
@@ -191,7 +193,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 4
+        assert count == 5
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -865,6 +867,15 @@ class TestReadingAndMarking:
         assert 'id="analysis-word-sections"' in response.text
         assert 'id="analysis-sentence-sections"' in response.text
         assert "requestWordAnalysis" in response.text
+        # §22 elements
+        assert 'id="analysis-word-register"' in response.text
+        assert 'id="analysis-word-why"' in response.text
+        assert 'id="analysis-word-vs-simpler"' in response.text
+        assert 'id="word-panel-notes"' in response.text
+        assert 'id="word-panel-save"' in response.text
+        assert "ERROR_CODE_LABELS" in response.text
+        assert "word-analysis-active" in response.text
+        assert "renderVsSimpler" in response.text
 
     def test_toolbar_defaults_to_mutually_hidden_panels(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1259,3 +1270,120 @@ class TestImportRoutes:
         )
 
         assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# §22 — Word analysis panel v2 improvements
+# ---------------------------------------------------------------------------
+
+class TestWordAnalysisPanelV2:
+    """Tests for §22: word highlight, error code expansion, v2 schema, notes section."""
+
+    @pytest.fixture()
+    def client(self, db: DatabaseConnection) -> TestClient:
+        app = create_app(lambda: db)
+        return TestClient(app, raise_server_exceptions=True)
+
+    def test_panel_has_no_collocations_or_synonyms_sections(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert 'id="analysis-word-collocations"' not in response.text
+        assert 'id="analysis-word-synonyms"' not in response.text
+
+    def test_panel_has_register_and_why_sections(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert 'id="analysis-word-register"' in response.text
+        assert 'id="analysis-word-why"' in response.text
+        assert 'id="analysis-word-vs-simpler"' in response.text
+
+    def test_panel_has_notes_section_inputs(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert 'id="word-panel-notes"' in response.text
+        assert 'id="word-panel-meaning"' in response.text
+        assert 'id="word-panel-note"' in response.text
+        assert 'id="word-panel-save"' in response.text
+        assert 'id="word-panel-save-status"' in response.text
+
+    def test_js_has_error_code_labels_table(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert "ERROR_CODE_LABELS" in response.text
+        assert "L06" in response.text
+        assert "G01" in response.text
+
+    def test_js_has_render_vs_simpler(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert "renderVsSimpler" in response.text
+        assert "vs-simpler-item" in response.text
+
+    def test_js_has_word_highlight_logic(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert "word-analysis-active" in response.text
+
+    def test_js_has_panel_save_listener(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert "wordPanelSave" in response.text
+        assert "wordPanelSaveStatus" in response.text
+
+    def test_post_word_analysis_v2_payload_returned(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from app.ai.llm_word_analyzer import WordAnalysisResult
+
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+        card_id = _word_card_id(db, "cat")
+        mock_result = WordAnalysisResult(
+            data=_VALID_WORD_ANALYSIS, cache_id=10, from_cache=False,
+            is_stale=False, is_valid=True,
+        )
+        with patch("app.web.fastapi_app.analyze_word", return_value=mock_result), \
+             patch("app.web.fastapi_app._update_word_card_analysis_id"):
+            with db.get_connection() as conn:
+                cache_id = conn.execute(
+                    """INSERT INTO ai_cache
+                       (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                       VALUES ('hv2', 'v2', 'test', ?, 1, '2026-01-01T00:00:00+00:00')""",
+                    (json.dumps(_VALID_WORD_ANALYSIS),),
+                ).lastrowid
+                conn.execute(
+                    "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                    (cache_id, card_id),
+                )
+            response = client.post(f"/analysis/word/{card_id}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["analysis"]["register"] == "neutral"
+        assert "vs_simpler" in payload["analysis"]

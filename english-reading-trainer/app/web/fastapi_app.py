@@ -1086,12 +1086,16 @@ def _analysis_panel() -> str:
           <p id="analysis-word-meaning" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
-          <h3>Common collocations</h3>
-          <div id="analysis-word-collocations"></div>
+          <h3>Register</h3>
+          <p id="analysis-word-register" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
-          <h3>Near synonyms &amp; confusables</h3>
-          <div id="analysis-word-synonyms"></div>
+          <h3>Why this word</h3>
+          <p id="analysis-word-why" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>vs. simpler alternatives</h3>
+          <div id="analysis-word-vs-simpler"></div>
         </section>
         <section class="analysis-section">
           <h3>Morphology</h3>
@@ -1100,6 +1104,21 @@ def _analysis_panel() -> str:
         <section class="analysis-section">
           <h3>Predicted error types</h3>
           <p id="analysis-word-errors" class="analysis-text analysis-codes"></p>
+        </section>
+        <section id="word-panel-notes" class="analysis-section">
+          <h3>My notes</h3>
+          <div class="word-notes-fields">
+            <label class="word-notes-label">Definition
+              <input id="word-panel-meaning" type="text" placeholder="My definition…">
+            </label>
+            <label class="word-notes-label">Notes
+              <input id="word-panel-note" type="text" placeholder="My understanding…">
+            </label>
+          </div>
+          <div class="word-notes-actions">
+            <button id="word-panel-save" type="button">Save</button>
+            <span id="word-panel-save-status" class="toolbar-status" aria-live="polite"></span>
+          </div>
         </section>
       </div>
       <footer class="analysis-panel-actions">
@@ -1165,13 +1184,40 @@ def _selection_script() -> str:
       const skeleton = document.getElementById("analysis-skeleton");
       const diagnosis = document.getElementById("analysis-diagnosis");
       const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
-      const wordAnalysisCollocations = document.getElementById("analysis-word-collocations");
-      const wordAnalysisSynonyms = document.getElementById("analysis-word-synonyms");
+      const wordRegister = document.getElementById("analysis-word-register");
+      const wordWhy = document.getElementById("analysis-word-why");
+      const wordVsSimpler = document.getElementById("analysis-word-vs-simpler");
       const wordAnalysisMorphology = document.getElementById("analysis-word-morphology");
       const wordAnalysisErrors = document.getElementById("analysis-word-errors");
+      const wordPanelMeaning = document.getElementById("word-panel-meaning");
+      const wordPanelNote = document.getElementById("word-panel-note");
+      const wordPanelSave = document.getElementById("word-panel-save");
+      const wordPanelSaveStatus = document.getElementById("word-panel-save-status");
       const bookId = reader.dataset.bookId || "";
       const chapterIdx = Number.parseInt(reader.dataset.chapterIdx || "1", 10);
       const progressKey = bookId ? `reader:progress:book:${bookId}` : "";
+
+      const ERROR_CODE_LABELS = {
+        G01: "G01 长主语识别失败",
+        G02: "G02 后置定语修饰对象判断错",
+        G03: "G03 嵌套从句边界混乱",
+        G04: "G04 倒装 / 强调结构",
+        G05: "G05 非谓语动词作用判断错",
+        G06: "G06 省略 / 替代识别失败",
+        G07: "G07 平行结构对应失败",
+        L01: "L01 多义词义项判断错",
+        L02: "L02 假朋友 / 形近词混淆",
+        L03: "L03 搭配不熟（动名 / 形名 / 介词）",
+        L04: "L04 词根 / 词族联想不足",
+        L05: "L05 习语 / 固定短语未识别",
+        L06: "L06 学术词汇陌生",
+        D01: "D01 代词指代对象判断错",
+        D02: "D02 让步 / 对比逻辑误读",
+        D03: "D03 因果 / 推论连词误读",
+        D04: "D04 信息焦点判断错",
+        D05: "D05 篇章衔接回指失败",
+        X00: "X00 其他",
+      };
 
       let activeSentenceId = null;
       let activeSentenceTranslation = "";
@@ -1544,6 +1590,9 @@ def _selection_script() -> str:
         panel.hidden = true;
         document.body.classList.remove("analysis-open");
         clearEvidenceHighlight();
+        reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
+          el.classList.remove("word-analysis-active");
+        });
       }
 
       function setPanelLoading(message) {
@@ -1566,10 +1615,14 @@ def _selection_script() -> str:
         panelMeta.textContent = "";
         panelRetry.hidden = true;
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = "";
-        if (wordAnalysisCollocations) wordAnalysisCollocations.replaceChildren();
-        if (wordAnalysisSynonyms) wordAnalysisSynonyms.replaceChildren();
+        if (wordRegister) wordRegister.textContent = "";
+        if (wordWhy) wordWhy.textContent = "";
+        if (wordVsSimpler) wordVsSimpler.replaceChildren();
         if (wordAnalysisMorphology) wordAnalysisMorphology.textContent = "";
         if (wordAnalysisErrors) wordAnalysisErrors.textContent = "";
+        if (wordPanelMeaning) wordPanelMeaning.value = "";
+        if (wordPanelNote) wordPanelNote.value = "";
+        if (wordPanelSaveStatus) wordPanelSaveStatus.textContent = "";
       }
 
       function renderAnalysisError(message, retryable) {
@@ -1622,7 +1675,7 @@ def _selection_script() -> str:
         if (codes.length) {
           const codeLine = document.createElement("p");
           codeLine.className = "analysis-codes";
-          codeLine.textContent = codes.join(", ");
+          codeLine.textContent = codes.map((c) => ERROR_CODE_LABELS[c] || c).join("  ·  ");
           diagnosis.append(codeLine);
         }
 
@@ -1641,7 +1694,8 @@ def _selection_script() -> str:
           button.className = "evidence-item";
           const code = item.error_type || "OK";
           const text = item.evidence || "";
-          button.textContent = `${code}: ${text}`;
+          const codeLabel = ERROR_CODE_LABELS[code] || code;
+          button.textContent = `${codeLabel}: ${text}`;
           button.addEventListener("mouseenter", () => highlightEvidence(text));
           button.addEventListener("mouseleave", clearEvidenceHighlight);
           button.addEventListener("click", () => highlightEvidence(text));
@@ -1701,17 +1755,18 @@ def _selection_script() -> str:
         }
       }
 
-      function renderWordList(container, items) {
+      function renderVsSimpler(container, items) {
         container.replaceChildren();
         if (!items.length) { container.textContent = "—"; return; }
-        const ul = document.createElement("ul");
-        ul.className = "word-analysis-list";
         for (const item of items) {
-          const li = document.createElement("li");
-          li.textContent = item;
-          ul.append(li);
+          const p = document.createElement("p");
+          p.className = "vs-simpler-item analysis-text";
+          const strong = document.createElement("strong");
+          strong.textContent = item.simpler || "";
+          p.append(strong);
+          p.append(document.createTextNode(": " + (item.difference || "")));
+          container.append(p);
         }
-        container.append(ul);
       }
 
       function renderWordAnalysis(payload) {
@@ -1726,11 +1781,17 @@ def _selection_script() -> str:
           `prompt ${payload.prompt_version || "unknown"}`,
           payload.from_cache ? "cache" : "fresh",
         ].join(" · ");
+        reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
+          el.classList.remove("word-analysis-active");
+        });
+        if (payload.card_id) {
+          const wordSpan = reader.querySelector(`[data-word-card="${payload.card_id}"]`);
+          if (wordSpan) wordSpan.classList.add("word-analysis-active");
+        }
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
-        if (wordAnalysisCollocations) renderWordList(wordAnalysisCollocations, a.common_collocations || []);
-        const synItems = (a.near_synonyms || []).map((s) => `${s} (近义)`);
-        const confItems = (a.confusable_with || []).map((s) => `${s} (易混)`);
-        if (wordAnalysisSynonyms) renderWordList(wordAnalysisSynonyms, [...synItems, ...confItems]);
+        if (wordRegister) wordRegister.textContent = a.register || "—";
+        if (wordWhy) wordWhy.textContent = a.why_this_word || "—";
+        if (wordVsSimpler) renderVsSimpler(wordVsSimpler, a.vs_simpler || []);
         const root = a.morphology?.root || "";
         const family = (a.morphology?.family || []).join(", ");
         if (wordAnalysisMorphology) {
@@ -1738,7 +1799,17 @@ def _selection_script() -> str:
             ? (family ? `${root} → ${family}` : root)
             : (family || "—");
         }
-        if (wordAnalysisErrors) wordAnalysisErrors.textContent = (a.predicted_error_types || []).join(", ") || "—";
+        if (wordAnalysisErrors) {
+          const codes = a.predicted_error_types || [];
+          wordAnalysisErrors.textContent = codes.length
+            ? codes.map((c) => ERROR_CODE_LABELS[c] || c).join("  ·  ")
+            : "—";
+        }
+        const cardId = String(payload.card_id || "");
+        const noteSpan = cardId ? reader.querySelector(`[data-word-card="${cardId}"]`) : null;
+        if (wordPanelMeaning) wordPanelMeaning.value = noteSpan?.dataset.meaning || "";
+        if (wordPanelNote) wordPanelNote.value = noteSpan?.dataset.note || "";
+        if (wordPanelSaveStatus) wordPanelSaveStatus.textContent = "";
       }
 
       async function requestWordAnalysis(cardId) {
@@ -1870,6 +1941,28 @@ def _selection_script() -> str:
       if (wordDetailExplain) {
         wordDetailExplain.addEventListener("click", () => {
           if (activeWordDetailCardId) requestWordAnalysis(activeWordDetailCardId);
+        });
+      }
+      if (wordPanelSave) {
+        wordPanelSave.addEventListener("click", async () => {
+          if (!activeAnalysisWordCardId) return;
+          const cardId = activeAnalysisWordCardId;
+          const meaning = wordPanelMeaning?.value || "";
+          const note = wordPanelNote?.value || "";
+          const body = new URLSearchParams({ current_meaning: meaning, user_note: note });
+          const resp = await fetch(`/mark/word/${cardId}`, { method: "PATCH", body });
+          if (resp.ok) {
+            reader.querySelectorAll(`[data-word-card="${cardId}"]`).forEach((span) => {
+              span.dataset.meaning = meaning;
+              span.dataset.note = note;
+            });
+            if (wordPanelSaveStatus) {
+              wordPanelSaveStatus.textContent = "Saved ✓";
+              window.setTimeout(() => {
+                if (wordPanelSaveStatus) wordPanelSaveStatus.textContent = "";
+              }, 1500);
+            }
+          }
         });
       }
       reader.addEventListener("click", (event) => {
@@ -2487,6 +2580,40 @@ def _css() -> str:
     .word-analysis-list li {
       margin: 2px 0;
       line-height: 1.45;
+    }
+    [data-word-card].word-analysis-active {
+      background: #fef9c3;
+      border-radius: 2px;
+      outline: 2px solid #f59e0b;
+      outline-offset: 1px;
+    }
+    .vs-simpler-item {
+      margin: 4px 0;
+    }
+    .word-notes-fields {
+      display: grid;
+      gap: 6px;
+      margin: 4px 0 8px;
+    }
+    .word-notes-label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .word-notes-label input {
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 5px 8px;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .word-notes-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .evidence-item {
       width: 100%;
