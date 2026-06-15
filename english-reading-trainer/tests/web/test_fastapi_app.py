@@ -111,6 +111,20 @@ def _seed_book(db: DatabaseConnection, tmp_path: Path) -> tuple[int, list[int]]:
     return result.book_id, sentence_ids
 
 
+def _seed_three_chapter_book(db: DatabaseConnection, tmp_path: Path) -> int:
+    path = tmp_path / "three-chapters.txt"
+    path.write_text(
+        "Chapter 1\n"
+        "First chapter sentence. Another first chapter sentence.\n\n"
+        "Chapter 2\n"
+        "Second chapter sentence. Another second chapter sentence.\n\n"
+        "Chapter 3\n"
+        "Third chapter sentence. Another third chapter sentence.",
+        encoding="utf-8",
+    )
+    return import_txt(db, path, title="Three Chapter Book", author="Author").book_id
+
+
 def _sentence_card_id(db: DatabaseConnection, sentence_id: int) -> int:
     with db.get_connection() as conn:
         return conn.execute(
@@ -261,6 +275,7 @@ class TestBasicPages:
 
         detail = client.get(f"/books/{result.book_id}")
         read_default = client.get(f"/read/{result.book_id}")
+        read_frontmatter = client.get(f"/read/{result.book_id}?chapter=1")
 
         assert detail.status_code == 200
         assert f"/read/{result.book_id}?chapter=2" in detail.text
@@ -270,6 +285,17 @@ class TestBasicPages:
         assert read_default.status_code == 200
         assert "Chapter 1: Introduction" in read_default.text
         assert "Body chapter text" in read_default.text
+        assert (
+            f'href="/read/{result.book_id}?chapter=1#chapter-end"'
+            in read_default.text
+        )
+        assert "Previous section: Praise for Mastering Bitcoin" in read_default.text
+        assert read_frontmatter.status_code == 200
+        assert (
+            f'href="/read/{result.book_id}?chapter=2#chapter-start"'
+            in read_frontmatter.text
+        )
+        assert "Next section: Chapter 1: Introduction" in read_frontmatter.text
 
     def test_missing_book_returns_404(self, client: TestClient) -> None:
         response = client.get("/books/999")
@@ -317,6 +343,36 @@ class TestReadingAndMarking:
         assert "/mark/word" in response.text
         assert "selectedWordCardIds" in response.text
         assert "deleteWordCardsAndReload" in response.text
+
+    def test_read_page_links_to_adjacent_chapter_boundaries(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id = _seed_three_chapter_book(db, tmp_path)
+
+        response = client.get(f"/read/{book_id}?chapter=2")
+
+        assert response.status_code == 200
+        assert 'id="chapter-start"' in response.text
+        assert 'id="chapter-end"' in response.text
+        assert f'href="/read/{book_id}?chapter=1#chapter-end"' in response.text
+        assert f'href="/read/{book_id}?chapter=3#chapter-start"' in response.text
+        assert "Previous section: Chapter 1" in response.text
+        assert "Next section: Chapter 3" in response.text
+
+    def test_read_page_omits_missing_boundary_links_at_book_edges(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id = _seed_three_chapter_book(db, tmp_path)
+
+        first = client.get(f"/read/{book_id}?chapter=1")
+        last = client.get(f"/read/{book_id}?chapter=3")
+
+        assert first.status_code == 200
+        assert "Previous section:" not in first.text
+        assert f'href="/read/{book_id}?chapter=2#chapter-start"' in first.text
+        assert last.status_code == 200
+        assert f'href="/read/{book_id}?chapter=2#chapter-end"' in last.text
+        assert "Next section:" not in last.text
 
     def test_read_page_renders_epub_figure_blocks_and_serves_asset(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

@@ -300,6 +300,7 @@ def create_app(
         chapter_row = _fetch_chapter_by_idx(db, book_id, chapter_idx)
         if chapter_row is None:
             return _error_page("Chapter not found", status_code=404)
+        adjacent_chapters = _fetch_adjacent_chapters(db, book_id, chapter_idx)
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
         blocks = _fetch_chapter_blocks(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
@@ -321,6 +322,8 @@ def create_app(
             section_kind=chapter_row.get("section_kind") or "chapter",
             chapter_number=chapter_row.get("chapter_number"),
             restore_progress=restore_progress,
+            previous_chapter=adjacent_chapters["previous"],
+            next_chapter=adjacent_chapters["next"],
         )}
         """
         return _html_page("Read", body, active="books", page_class="reader-page")
@@ -732,6 +735,36 @@ def _fetch_chapter_by_idx(
     return dict(row) if row else None
 
 
+def _fetch_adjacent_chapters(
+    db: DatabaseConnection,
+    book_id: int,
+    chapter_idx: int,
+) -> dict[str, dict[str, Any] | None]:
+    with db.get_connection() as conn:
+        previous_row = conn.execute(
+            """SELECT id, idx, title, sentence_start, sentence_end,
+                      section_kind, chapter_number
+                 FROM chapters
+                WHERE book_id = ? AND idx < ?
+                ORDER BY idx DESC
+                LIMIT 1""",
+            (book_id, chapter_idx),
+        ).fetchone()
+        next_row = conn.execute(
+            """SELECT id, idx, title, sentence_start, sentence_end,
+                      section_kind, chapter_number
+                 FROM chapters
+                WHERE book_id = ? AND idx > ?
+                ORDER BY idx
+                LIMIT 1""",
+            (book_id, chapter_idx),
+        ).fetchone()
+    return {
+        "previous": dict(previous_row) if previous_row else None,
+        "next": dict(next_row) if next_row else None,
+    }
+
+
 def _fetch_chapter_sentences(
     db: DatabaseConnection,
     chapter_id: int,
@@ -1066,10 +1099,10 @@ def _reader_view(
     section_kind: str,
     chapter_number: int | None,
     restore_progress: bool,
+    previous_chapter: dict[str, Any] | None = None,
+    next_chapter: dict[str, Any] | None = None,
     blocks: list[dict[str, Any]] | None = None,
 ) -> str:
-    if not rows and not blocks:
-        return '<p class="empty">No sentences in this chapter.</p>'
     cards_by_sentence = _word_cards_by_sentence(word_cards)
     content = _reader_content_blocks(
         rows=rows,
@@ -1096,7 +1129,11 @@ def _reader_view(
         <h1 class="reader-title">{_escape(book_title)}</h1>
         <h2 class="reader-chapter">{_escape(section_label)}</h2>
       </header>
+      <div id="chapter-start" class="reader-anchor" aria-hidden="true"></div>
+      {_reader_boundary_link(book_id, previous_chapter, "previous")}
       {content}
+      <div id="chapter-end" class="reader-anchor" aria-hidden="true"></div>
+      {_reader_boundary_link(book_id, next_chapter, "next")}
     </article>
     {_analysis_panel()}
     {_selection_toolbar(return_to, word_cards)}
@@ -1112,9 +1149,12 @@ def _reader_content_blocks(
     book_id: int,
 ) -> str:
     if not blocks:
+        paragraphs = _group_sentence_paragraphs(rows)
+        if not paragraphs:
+            return '<p class="empty">No sentences in this chapter.</p>'
         return "\n".join(
             _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
-            for paragraph_rows in _group_sentence_paragraphs(rows)
+            for paragraph_rows in paragraphs
         )
 
     rows_by_paragraph = {
@@ -1135,6 +1175,30 @@ def _reader_content_blocks(
         if block["kind"] in {"image", "figure", "missing_asset"}:
             parts.append(_reader_media_block(block, book_id))
     return "\n".join(parts) if parts else '<p class="empty">No sentences in this chapter.</p>'
+
+
+def _reader_boundary_link(
+    book_id: int,
+    chapter: dict[str, Any] | None,
+    direction: str,
+) -> str:
+    if chapter is None:
+        return ""
+    if direction == "previous":
+        anchor = "chapter-end"
+        label = "Previous section"
+        class_name = "reader-section-nav-prev"
+    else:
+        anchor = "chapter-start"
+        label = "Next section"
+        class_name = "reader-section-nav-next"
+    section_label = _section_label(chapter)
+    return (
+        f'<p class="reader-section-nav {class_name}" role="navigation">'
+        f'<a href="/read/{book_id}?chapter={chapter["idx"]}#{anchor}">'
+        f'{label}: {_escape(section_label)}</a>'
+        "</p>"
+    )
 
 
 def _group_sentence_paragraphs(
@@ -2752,6 +2816,25 @@ def _css() -> str:
       color: var(--muted);
       font-size: 16px;
       font-weight: 400;
+    }
+    .reader-anchor {
+      scroll-margin-top: 72px;
+    }
+    .reader-section-nav {
+      margin: 0 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .reader-section-nav a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .reader-section-nav a:hover {
+      color: var(--accent-strong);
+    }
+    .reader-section-nav-next {
+      margin: 28px 0 0;
     }
     .reader-para {
       margin: 0 0 1.2em;

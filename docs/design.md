@@ -874,6 +874,53 @@ value: { "chapter_idx": N, "top_sentence_id": M, "ts": ... }
 
 `[新增 2026-06-15]`
 
+### 17.9 章节边界连续导航
+
+**目标**：导入书籍进入阅读页后，用户不必回到书籍详情页逐章点击 `Read`。当前章节开头可以跳到上一章节结尾，当前章节结尾可以跳到下一章节开始，形成连续阅读体验。
+
+#### 17.9.1 导航规则
+
+- `/read/{book_id}?chapter={idx}` 渲染当前章节时，同时查询同一本书中 `chapters.idx` 相邻的上一节与下一节。
+- `chapters.idx` 继续作为 EPUB spine 阅读顺序和 URL key；`frontmatter` / `chapter` / `appendix` / `backmatter` 都按原书顺序自然串联，不只串联 `section_kind='chapter'` 的正文。
+- 当前章节正文顶部提供稳定锚点 `#chapter-start`，正文底部提供稳定锚点 `#chapter-end`。
+- 上一节链接指向 `/read/{book_id}?chapter={prev_idx}#chapter-end`，用于到达上一章节结尾。
+- 下一节链接指向 `/read/{book_id}?chapter={next_idx}#chapter-start`，用于到达下一章节开头。
+- 第一节不显示"上一节"，最后一节不显示"下一节"。
+
+#### 17.9.2 与阅读进度的关系
+
+上下节链接都显式携带 `chapter` 参数，因此不会触发 §17.8 的"不带 `chapter` 参数时恢复 localStorage 进度"逻辑。浏览器原生 hash 滚动负责定位到章节开头或结尾，不需要新增 JavaScript。
+
+从下一节点击"上一节"时，页面加载后会滚动到 `#chapter-end`。随后 §17.8 的滚动停止写入逻辑会把接近章末的 `top_sentence_id` 写回 `localStorage`。这是预期行为：用户下次不带 `chapter` 参数打开本书时，应回到最近实际阅读的位置，而不是回到该章节开头。后续维护时不要把这类章末进度写入当作 bug 修掉。
+
+#### 17.9.3 空章节容错
+
+第一版不跳过空章节，保持 EPUB spine 的忠实阅读顺序。如果相邻 spine 项只有标题、没有段落或 `chapter_blocks`，跳转后会显示现有空章节提示，用户可再次点击上一节 / 下一节继续前进。
+
+后续可优化为：计算 prev/next 时跳过没有 `paragraphs` 且没有 `chapter_blocks` 的章节。但这会让 UI 顺序与 EPUB spine 不完全一一对应，先不纳入本轮实现。
+
+#### 17.9.4 视觉位置
+
+- 上一节 / 下一节导航放在 `.reader` 正文容器内，不放进全局顶部 `nav`。
+- 上一节链接放在第一个内容块前；下一节链接放在最后一个内容块后。
+- 样式比正文小一号，使用 muted 灰色与轻量边距，避免抢占阅读区焦点。
+- 链接文字使用相邻章节的 `_section_label()` 展示，例如 `上一节：Preface`、`下一节：Chapter 2: How Bitcoin Works`。
+
+#### 17.9.5 不做项
+
+- 不改 schema，不新增迁移。
+- 不新增 JS 状态机；只依赖普通链接与 hash。
+- 不在本轮实现键盘章节导航。`[` 上一节、`]` 下一节这类快捷键留到第二版，与 §0 的"键盘快捷键暂缓"保持一致。
+
+#### 17.9.6 测试要求
+
+- route-level 测试用 `TestClient` 覆盖中间章节同时出现上一节与下一节链接。
+- 第一节不出现上一节链接，最后一节不出现下一节链接。
+- 上一节链接包含 `#chapter-end`，下一节链接包含 `#chapter-start`。
+- EPUB frontmatter 与正文之间按 `chapters.idx` 连续导航，验证不是只在 `section_kind='chapter'` 内跳转。
+
+`[新增 2026-06-16]`
+
 ---
 
 ## 18. 端到端动线与诊断面板
@@ -1828,4 +1875,3 @@ chapter_blocks(
 - [x] §22 词汇 AI 分析面板改进：原文高亮、错因展开、why_this_word、用户笔记区
 - [x] §23 Cards 页与 Review Queue 信息增强：Definition/AI Meaning/Source 列、复习答案 Reveal
 - [x] §24 Cards Definition 内联编辑、Review Reveal AI 含义、EPUB 导入接入
-
