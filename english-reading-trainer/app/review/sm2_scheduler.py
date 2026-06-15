@@ -120,7 +120,7 @@ def apply_review(
 
     with db.get_connection() as conn:
         row = conn.execute(
-            f"SELECT * FROM {table_name} WHERE id = ?",
+            f"SELECT * FROM {table_name} WHERE id = ? AND archived_at IS NULL",
             (card_id,),
         ).fetchone()
         if row is None:

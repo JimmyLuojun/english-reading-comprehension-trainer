@@ -256,6 +256,18 @@ class TestApplyReview:
         with pytest.raises(ReviewCardNotFoundError, match="not found"):
             apply_review(db, "sentence", 999_999, "pass", reviewed_at=REVIEWED_AT)
 
+    def test_archived_card_raises(self, db: DatabaseConnection) -> None:
+        sentence_id = _seed_sentence(db)
+        card_id = create_sentence_card(db, sentence_id)
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentence_cards SET archived_at = ? WHERE id = ?",
+                (REVIEWED_AT.isoformat(), card_id),
+            )
+
+        with pytest.raises(ReviewCardNotFoundError, match="not found"):
+            apply_review(db, "sentence", card_id, "pass", reviewed_at=REVIEWED_AT)
+
     def test_invalid_card_type_raises(self, db: DatabaseConnection) -> None:
         with pytest.raises(ReviewInputError, match="card_type"):
             apply_review(db, "phrase", 1, "pass", reviewed_at=REVIEWED_AT)

@@ -148,7 +148,7 @@ class TestBasicPages:
 
 
 class TestReadingAndMarking:
-    def test_read_page_shows_sentences_and_mark_forms(
+    def test_read_page_shows_sentences_and_selection_toolbar(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         book_id, sentence_ids = _seed_book(db, tmp_path)
@@ -157,8 +157,22 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert "The cat sat" in response.text
-        assert f"/mark/sentence/{sentence_ids[0]}" in response.text
+        assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
+        assert 'id="selection-toolbar"' in response.text
+        assert 'id="word-card-index"' in response.text
         assert "/mark/word" in response.text
+
+    def test_read_page_marks_active_sentence_in_metadata(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+
+        response = client.get(f"/read/{book_id}")
+
+        assert response.status_code == 200
+        assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
+        assert 'data-marked="1"' in response.text
 
     def test_mark_sentence_creates_card_and_redirects(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -176,6 +190,28 @@ class TestReadingAndMarking:
         with db.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM sentence_cards").fetchone()[0]
         assert count == 1
+
+    def test_unmark_sentence_archives_card_and_redirects(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+
+        response = client.request(
+            "DELETE",
+            f"/mark/sentence/{sentence_ids[0]}",
+            params={"return_to": "/cards"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/cards"
+        with db.get_connection() as conn:
+            archived_at = conn.execute(
+                "SELECT archived_at FROM sentence_cards WHERE sentence_id = ?",
+                (sentence_ids[0],),
+            ).fetchone()["archived_at"]
+        assert archived_at is not None
 
     def test_mark_sentence_missing_returns_400(self, client: TestClient) -> None:
         response = client.post("/mark/sentence/999", data={"return_to": "/cards"})
@@ -218,6 +254,36 @@ class TestReadingAndMarking:
 
         assert response.status_code == 303
         assert _word_card_id(db, "cat") > 0
+
+    def test_unmark_word_archives_word_card(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "cat")
+
+        response = client.request(
+            "DELETE",
+            f"/mark/word/{card_id}",
+            params={"return_to": "/cards"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            archived_at = conn.execute(
+                "SELECT archived_at FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["archived_at"]
+        assert archived_at is not None
 
     def test_mark_word_invalid_input_returns_400(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

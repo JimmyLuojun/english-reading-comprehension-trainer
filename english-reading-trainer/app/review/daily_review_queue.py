@@ -181,6 +181,7 @@ def _sentence_due_sql() -> str:
           FROM sentence_cards sc
           JOIN sentences s ON s.id = sc.sentence_id
          WHERE sc.due_at <= ?
+           AND sc.archived_at IS NULL
     """
 
 
@@ -210,6 +211,7 @@ def _word_due_sql() -> str:
             ) AS last_outcome
           FROM word_cards wc
          WHERE wc.due_at <= ?
+           AND wc.archived_at IS NULL
     """
 
 

@@ -269,7 +269,8 @@ def read_cmd(
             """SELECT s.id, s.idx, s.text,
                       CASE WHEN sc.id IS NOT NULL THEN 1 ELSE 0 END AS has_card
                FROM sentences s
-               LEFT JOIN sentence_cards sc ON sc.sentence_id = s.id
+               LEFT JOIN sentence_cards sc
+                 ON sc.sentence_id = s.id AND sc.archived_at IS NULL
                WHERE s.chapter_id = ?
                ORDER BY s.idx""",
             (ch["id"],),

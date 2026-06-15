@@ -22,6 +22,10 @@ from app.db_models import (
 )
 
 
+class WordCardNotFoundError(ValueError):
+    """Raised when an active word card cannot be found."""
+
+
 def _default_lemma(surface_form: str) -> str:
     """Temporary lemma: lowercased + stripped surface form."""
     return surface_form.lower().strip()
@@ -56,13 +60,16 @@ def create_or_update_word_card(
             raise ValueError(f"Sentence id={sentence_id} not found.")
 
         existing = conn.execute(
-            "SELECT id, occurrence_count FROM word_cards WHERE lemma = ?",
+            "SELECT id, occurrence_count, archived_at FROM word_cards WHERE lemma = ?",
             (lemma,),
         ).fetchone()
 
         if existing:
             conn.execute(
-                "UPDATE word_cards SET occurrence_count = occurrence_count + 1 WHERE id = ?",
+                """UPDATE word_cards
+                      SET occurrence_count = occurrence_count + 1,
+                          archived_at = NULL
+                    WHERE id = ?""",
                 (existing["id"],),
             )
             return existing["id"], False
@@ -106,7 +113,7 @@ def get_word_card(
             """SELECT wc.*, s.text AS first_sentence_text
                FROM word_cards wc
                JOIN sentences s ON wc.first_sentence_id = s.id
-               WHERE wc.id = ?""",
+               WHERE wc.id = ? AND wc.archived_at IS NULL""",
             (card_id,),
         ).fetchone()
     return dict(row) if row else None
@@ -118,7 +125,8 @@ def get_word_card_by_lemma(
     """Return the word card for a given lemma, or None."""
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM word_cards WHERE lemma = ?", (lemma,)
+            "SELECT * FROM word_cards WHERE lemma = ? AND archived_at IS NULL",
+            (lemma,),
         ).fetchone()
     return dict(row) if row else None
 
@@ -132,11 +140,35 @@ def list_word_cards(
     with db.get_connection() as conn:
         rows = conn.execute(
             """SELECT * FROM word_cards
+               WHERE archived_at IS NULL
                ORDER BY occurrence_count DESC, created_at DESC
                LIMIT ? OFFSET ?""",
             (limit, offset),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def archive_word_card(db: DatabaseConnection, card_id: int) -> int:
+    """
+    Soft-delete an active word card.
+
+    Returns the archived card id. Review logs and SM-2 state are preserved.
+    Raises WordCardNotFoundError if no active card exists.
+    """
+    now = _utcnow()
+    with db.get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM word_cards WHERE id = ? AND archived_at IS NULL",
+            (card_id,),
+        ).fetchone()
+        if existing is None:
+            raise WordCardNotFoundError(f"Active word card id={card_id} not found.")
+
+        conn.execute(
+            "UPDATE word_cards SET archived_at = ? WHERE id = ?",
+            (now, existing["id"]),
+        )
+    return existing["id"]
 
 
 def _utcnow() -> str:

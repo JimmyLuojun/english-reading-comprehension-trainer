@@ -181,7 +181,10 @@ def _upsert_sentence_card(
 
         if existing:
             conn.execute(
-                "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+                """UPDATE sentence_cards
+                      SET ai_analysis_id = ?,
+                          archived_at = NULL
+                    WHERE id = ?""",
                 (cache_id, existing["id"]),
             )
             return existing["id"], False
@@ -230,7 +233,8 @@ def _upsert_word_card(
                    SET current_meaning   = ?,
                        pos               = ?,
                        ai_analysis_id    = ?,
-                       occurrence_count  = occurrence_count + 1
+                       occurrence_count  = occurrence_count + 1,
+                       archived_at       = NULL
                    WHERE id = ?""",
                 (meaning, pos, cache_id, existing["id"]),
             )

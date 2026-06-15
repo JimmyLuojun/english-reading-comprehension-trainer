@@ -39,6 +39,7 @@ class TestMigrationRunner:
         applied = db.apply_migrations(MIGRATIONS_DIR)
         assert "001_initial_schema.sql" in applied
         assert "002_seed_error_types.sql" in applied
+        assert "003_archive_cards.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -48,6 +49,7 @@ class TestMigrationRunner:
         recorded = db.get_applied_migrations()
         assert "001_initial_schema.sql" in recorded
         assert "002_seed_error_types.sql" in recorded
+        assert "003_archive_cards.sql" in recorded
 
     def test_migrations_dir_empty_returns_empty(self, tmp_path: Path) -> None:
         db = DatabaseConnection(tmp_path / "a.db")
@@ -131,13 +133,17 @@ class TestColumns:
 
     def test_sentence_cards_has_sm2_fields(self, db: DatabaseConnection) -> None:
         cols = db.get_table_columns("sentence_cards")
-        for col in ["ef", "interval_days", "repetitions", "due_at", "mastery_state"]:
+        for col in [
+            "ef", "interval_days", "repetitions", "due_at",
+            "mastery_state", "archived_at",
+        ]:
             assert col in cols, f"SM-2 field '{col}' missing from sentence_cards"
 
     def test_word_cards_has_sm2_fields(self, db: DatabaseConnection) -> None:
         cols = db.get_table_columns("word_cards")
         for col in ["ef", "interval_days", "repetitions", "due_at",
-                    "mastery_state", "lexical_type", "lemma", "surface_form"]:
+                    "mastery_state", "lexical_type", "lemma", "surface_form",
+                    "archived_at"]:
             assert col in cols
 
     def test_review_logs_has_sm2_before_after_fields(self, db: DatabaseConnection) -> None:

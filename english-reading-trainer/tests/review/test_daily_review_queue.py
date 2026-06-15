@@ -214,6 +214,21 @@ class TestListDueCards:
 
         assert [item.card_id for item in items] == [due_id]
 
+    def test_archived_cards_are_excluded(self, db: DatabaseConnection) -> None:
+        archived_id = _insert_sentence_card(db, text="Archived.", due_at=NOW)
+        word_id = _insert_word_card(db, surface_form="active", due_at=NOW)
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentence_cards SET archived_at = ? WHERE id = ?",
+                (NOW.isoformat(), archived_id),
+            )
+
+        items = list_due_cards(db, as_of=NOW)
+
+        assert [(item.card_type, item.card_id) for item in items] == [
+            (CardType.WORD, word_id)
+        ]
+
     def test_can_filter_to_word_cards(self, db: DatabaseConnection) -> None:
         _insert_sentence_card(db)
         word_id = _insert_word_card(db, surface_form="mitigate")

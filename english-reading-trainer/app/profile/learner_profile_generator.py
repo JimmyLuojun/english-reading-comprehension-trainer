@@ -287,7 +287,10 @@ def _fetch_mastery_counts(conn: Any) -> dict[MasteryState, int]:
     counts = {state: 0 for state in MasteryState}
     for table_name in ("sentence_cards", "word_cards"):
         rows = conn.execute(
-            f"SELECT mastery_state, COUNT(*) AS state_count FROM {table_name} GROUP BY mastery_state"
+            f"""SELECT mastery_state, COUNT(*) AS state_count
+                  FROM {table_name}
+                 WHERE archived_at IS NULL
+                 GROUP BY mastery_state"""
         ).fetchall()
         for row in rows:
             counts[MasteryState(row["mastery_state"])] += row["state_count"]
@@ -308,8 +311,10 @@ def _fetch_error_type_stats(
              FROM review_logs rl
              JOIN sentence_card_errors sce
                ON rl.card_type = 'sentence' AND sce.card_id = rl.card_id
+             JOIN sentence_cards sc ON sc.id = rl.card_id
              JOIN error_types et ON et.id = sce.error_type_id
             WHERE rl.reviewed_at >= ? AND rl.reviewed_at <= ?
+              AND sc.archived_at IS NULL
             GROUP BY et.code, et.name
             UNION ALL
            SELECT et.code, et.name,
@@ -320,8 +325,10 @@ def _fetch_error_type_stats(
              FROM review_logs rl
              JOIN word_card_errors wce
                ON rl.card_type = 'word' AND wce.card_id = rl.card_id
+             JOIN word_cards wc ON wc.id = rl.card_id
              JOIN error_types et ON et.id = wce.error_type_id
             WHERE rl.reviewed_at >= ? AND rl.reviewed_at <= ?
+              AND wc.archived_at IS NULL
             GROUP BY et.code, et.name""",
         (
             period_start.isoformat(),
@@ -373,9 +380,10 @@ def _fetch_lapsed_cards(
     rows = conn.execute(
         """SELECT 'sentence' AS card_type, s.text AS content, rl.reviewed_at
              FROM sentence_cards sc
-             JOIN sentences s ON s.id = sc.sentence_id
-             JOIN review_logs rl ON rl.card_type = 'sentence' AND rl.card_id = sc.id
+            JOIN sentences s ON s.id = sc.sentence_id
+            JOIN review_logs rl ON rl.card_type = 'sentence' AND rl.card_id = sc.id
             WHERE sc.mastery_state = 'lapsed'
+              AND sc.archived_at IS NULL
               AND rl.quality < 3
               AND rl.reviewed_at >= ? AND rl.reviewed_at <= ?
             UNION ALL
@@ -383,6 +391,7 @@ def _fetch_lapsed_cards(
              FROM word_cards wc
              JOIN review_logs rl ON rl.card_type = 'word' AND rl.card_id = wc.id
             WHERE wc.mastery_state = 'lapsed'
+              AND wc.archived_at IS NULL
               AND rl.quality < 3
               AND rl.reviewed_at >= ? AND rl.reviewed_at <= ?
             ORDER BY reviewed_at DESC
@@ -414,9 +423,10 @@ def _fetch_mastered_cards(
     rows = conn.execute(
         """SELECT 'sentence' AS card_type, s.text AS content, rl.reviewed_at
              FROM sentence_cards sc
-             JOIN sentences s ON s.id = sc.sentence_id
-             JOIN review_logs rl ON rl.card_type = 'sentence' AND rl.card_id = sc.id
+            JOIN sentences s ON s.id = sc.sentence_id
+            JOIN review_logs rl ON rl.card_type = 'sentence' AND rl.card_id = sc.id
             WHERE sc.mastery_state = 'mature'
+              AND sc.archived_at IS NULL
               AND rl.quality >= 3
               AND rl.reviewed_at >= ? AND rl.reviewed_at <= ?
             UNION ALL
@@ -424,6 +434,7 @@ def _fetch_mastered_cards(
              FROM word_cards wc
              JOIN review_logs rl ON rl.card_type = 'word' AND rl.card_id = wc.id
             WHERE wc.mastery_state = 'mature'
+              AND wc.archived_at IS NULL
               AND rl.quality >= 3
               AND rl.reviewed_at >= ? AND rl.reviewed_at <= ?
             ORDER BY reviewed_at DESC
@@ -527,8 +538,12 @@ def _count_reviews_since(
 
 def _snapshot_counts(db: DatabaseConnection) -> tuple[int, int]:
     with db.get_connection() as conn:
-        sentence_cards = conn.execute("SELECT COUNT(*) FROM sentence_cards").fetchone()[0]
-        word_cards = conn.execute("SELECT COUNT(*) FROM word_cards").fetchone()[0]
+        sentence_cards = conn.execute(
+            "SELECT COUNT(*) FROM sentence_cards WHERE archived_at IS NULL"
+        ).fetchone()[0]
+        word_cards = conn.execute(
+            "SELECT COUNT(*) FROM word_cards WHERE archived_at IS NULL"
+        ).fetchone()[0]
         sentences = conn.execute("SELECT COUNT(*) FROM sentences").fetchone()[0]
     return sentence_cards + word_cards, sentences
 

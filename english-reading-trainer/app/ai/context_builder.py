@@ -119,6 +119,7 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
                JOIN sentences s  ON sc.sentence_id    = s.id
                LEFT JOIN ai_cache ac ON sc.ai_analysis_id = ac.id
                WHERE s.book_id = ? AND s.id != ?
+                 AND sc.archived_at IS NULL
                  AND ac.id IS NOT NULL AND ac.is_valid = 1
                ORDER BY sc.created_at DESC LIMIT ?""",
             (sent["book_id"], sentence_id, _MAX_RELATED),
@@ -128,6 +129,7 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
         related_wc = conn.execute(
             """SELECT lemma, surface_form, current_meaning
                FROM word_cards
+               WHERE archived_at IS NULL
                ORDER BY occurrence_count DESC, created_at DESC
                LIMIT ?""",
             (_MAX_RELATED,),

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from app.cards.word_card_service import (
+    WordCardNotFoundError,
+    archive_word_card,
     create_or_update_word_card,
     get_word_card,
     get_word_card_by_lemma,
@@ -286,3 +288,49 @@ class TestListWordCards:
         create_or_update_word_card(db, sid, "rare")
         cards = list_word_cards(db)
         assert cards[0]["lemma"] == "frequent"
+
+
+class TestArchiveWordCard:
+    def test_archive_sets_archived_at(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "archive-a")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        archived_id = archive_word_card(db, card_id)
+
+        assert archived_id == card_id
+        with db.get_connection() as conn:
+            archived_at = conn.execute(
+                "SELECT archived_at FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["archived_at"]
+        assert archived_at is not None
+
+    def test_archived_card_is_excluded_from_public_reads(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "archive-b")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+        archive_word_card(db, card_id)
+
+        assert get_word_card(db, card_id) is None
+        assert get_word_card_by_lemma(db, "mitigate") is None
+        assert list_word_cards(db) == []
+
+    def test_recreate_reactivates_same_archived_card(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "archive-c")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+        archive_word_card(db, card_id)
+
+        restored_id, created = create_or_update_word_card(db, sid, "mitigate")
+
+        assert restored_id == card_id
+        assert created is False
+        card = get_word_card(db, card_id)
+        assert card is not None
+        assert card["archived_at"] is None
+
+    def test_archive_missing_active_card_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(WordCardNotFoundError):
+            archive_word_card(db, 99999)

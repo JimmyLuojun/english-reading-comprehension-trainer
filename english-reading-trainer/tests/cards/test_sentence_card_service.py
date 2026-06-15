@@ -11,6 +11,8 @@ import pytest
 
 from app.cards.sentence_card_service import (
     SentenceCardAlreadyExistsError,
+    SentenceCardNotFoundError,
+    archive_sentence_card,
     create_sentence_card,
     get_sentence_card,
     get_sentence_card_by_sentence,
@@ -240,3 +242,51 @@ class TestListSentenceCards:
         cards = list_sentence_cards(db, book_id=book_id)
         assert len(cards) == 1
         assert cards[0]["sentence_text"] == "Book one sentence here."
+
+
+class TestArchiveSentenceCard:
+    def test_archive_sets_archived_at(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db)
+        card_id = create_sentence_card(db, sid)
+
+        archived_id = archive_sentence_card(db, sid)
+
+        assert archived_id == card_id
+        with db.get_connection() as conn:
+            archived_at = conn.execute(
+                "SELECT archived_at FROM sentence_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["archived_at"]
+        assert archived_at is not None
+
+    def test_archived_card_is_excluded_from_public_reads(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = create_sentence_card(db, sid)
+        archive_sentence_card(db, sid)
+
+        assert get_sentence_card(db, card_id) is None
+        assert get_sentence_card_by_sentence(db, sid) is None
+        assert list_sentence_cards(db) == []
+
+    def test_recreate_reactivates_same_archived_card(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = create_sentence_card(db, sid, user_note="keep me")
+        archive_sentence_card(db, sid)
+
+        restored_id = create_sentence_card(db, sid)
+
+        assert restored_id == card_id
+        card = get_sentence_card(db, card_id)
+        assert card is not None
+        assert card["archived_at"] is None
+        assert card["user_note"] == "keep me"
+
+    def test_archive_missing_active_card_raises(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db)
+
+        with pytest.raises(SentenceCardNotFoundError):
+            archive_sentence_card(db, sid)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -21,10 +22,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.ai.prompt_version_registry import sync_prompt_versions
 from app.cards.sentence_card_service import (
     SentenceCardAlreadyExistsError,
+    SentenceCardNotFoundError,
+    archive_sentence_card,
     create_sentence_card,
     list_sentence_cards,
 )
-from app.cards.word_card_service import create_or_update_word_card, list_word_cards
+from app.cards.word_card_service import (
+    WordCardNotFoundError,
+    archive_word_card,
+    create_or_update_word_card,
+    list_word_cards,
+)
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
 from app.importers.txt_importer import DuplicateBookError, import_text
@@ -198,6 +206,7 @@ def create_app(
         if chapter_row is None:
             return _error_page("Chapter not found", status_code=404)
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
+        word_cards = _fetch_active_word_cards(db)
         return_to = f"/read/{book_id}?chapter={chapter}"
         body = f"""
         <section class="toolbar">
@@ -207,7 +216,7 @@ def create_app(
           </div>
           <a class="button" href="/books/{book_id}">Chapters</a>
         </section>
-        {_sentences_list(sentences, return_to)}
+        {_reader_view(sentences, return_to, chapter_row["id"], word_cards)}
         """
         return _html_page("Read", body, active="books")
 
@@ -221,6 +230,16 @@ def create_app(
         except SentenceCardAlreadyExistsError:
             pass
         except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(return_to)
+
+    @web_app.delete("/mark/sentence/{sentence_id}")
+    async def unmark_sentence(sentence_id: int, request: Request) -> Any:
+        return_to = _safe_return_to(request.query_params.get("return_to", "/cards"))
+        db = db_factory()
+        try:
+            archive_sentence_card(db, sentence_id)
+        except (SentenceCardNotFoundError, ValueError) as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
 
@@ -239,6 +258,16 @@ def create_app(
         try:
             create_or_update_word_card(db, sentence_id, surface_form, lexical_type)
         except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(return_to)
+
+    @web_app.delete("/mark/word/{card_id}")
+    async def unmark_word(card_id: int, request: Request) -> Any:
+        return_to = _safe_return_to(request.query_params.get("return_to", "/cards"))
+        db = db_factory()
+        try:
+            archive_word_card(db, card_id)
+        except WordCardNotFoundError as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
 
@@ -365,8 +394,12 @@ def _dashboard_stats(db: DatabaseConnection) -> dict[str, int]:
     with db.get_connection() as conn:
         books = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
         sentences = conn.execute("SELECT COUNT(*) FROM sentences").fetchone()[0]
-        sentence_cards = conn.execute("SELECT COUNT(*) FROM sentence_cards").fetchone()[0]
-        word_cards = conn.execute("SELECT COUNT(*) FROM word_cards").fetchone()[0]
+        sentence_cards = conn.execute(
+            "SELECT COUNT(*) FROM sentence_cards WHERE archived_at IS NULL"
+        ).fetchone()[0]
+        word_cards = conn.execute(
+            "SELECT COUNT(*) FROM word_cards WHERE archived_at IS NULL"
+        ).fetchone()[0]
     return {
         "books": books,
         "sentences": sentences,
@@ -427,10 +460,22 @@ def _fetch_chapter_sentences(
             """SELECT s.id, s.idx, s.text,
                       CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card
                  FROM sentences s
-                 LEFT JOIN sentence_cards sc ON sc.sentence_id = s.id
+                 LEFT JOIN sentence_cards sc
+                   ON sc.sentence_id = s.id AND sc.archived_at IS NULL
                 WHERE s.chapter_id = ?
                 ORDER BY s.idx""",
             (chapter_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT id, lemma, surface_form, lexical_type
+                 FROM word_cards
+                WHERE archived_at IS NULL
+                ORDER BY created_at DESC"""
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -477,36 +522,216 @@ def _chapters_table(book_id: int, rows: list[dict[str, Any]]) -> str:
     """
 
 
-def _sentences_list(rows: list[dict[str, Any]], return_to: str) -> str:
+def _reader_view(
+    rows: list[dict[str, Any]],
+    return_to: str,
+    chapter_id: int,
+    word_cards: list[dict[str, Any]],
+) -> str:
     if not rows:
         return '<p class="empty">No sentences in this chapter.</p>'
-    return "\n".join(_sentence_item(row, return_to) for row in rows)
-
-
-def _sentence_item(row: dict[str, Any], return_to: str) -> str:
-    marker = '<span class="badge">marked</span>' if row["has_card"] else ""
+    sentence_spans = " ".join(
+        _reader_sentence_span(row, chapter_id) for row in rows
+    )
     return f"""
-    <article class="sentence">
-      <div class="sentence-meta">#{row['id']} {marker}</div>
-      <p>{_escape(row['text'])}</p>
-      <div class="actions">
-        <form method="post" action="/mark/sentence/{row['id']}">
-          <input type="hidden" name="return_to" value="{_escape(return_to)}">
-          <button type="submit">Mark sentence</button>
-        </form>
-        <form method="post" action="/mark/word" class="inline-form">
-          <input type="hidden" name="sentence_id" value="{row['id']}">
-          <input type="hidden" name="return_to" value="{_escape(return_to)}">
-          <input name="surface_form" placeholder="word or phrase" aria-label="word or phrase">
-          <select name="lexical_type" aria-label="lexical type">
-            <option value="word">word</option>
-            <option value="phrase">phrase</option>
-            <option value="collocation">collocation</option>
-          </select>
-          <button type="submit">Mark word</button>
-        </form>
+    <section class="reader" data-reader data-return-to="{_escape(return_to)}">
+      <p class="reader-text">{sentence_spans}</p>
+    </section>
+    {_selection_toolbar(return_to, word_cards)}
+    """
+
+
+def _reader_sentence_span(row: dict[str, Any], chapter_id: int) -> str:
+    marked = "1" if row["has_card"] else "0"
+    return (
+        f'<span class="reader-sentence" data-sentence-id="{row["id"]}" '
+        f'data-chapter-id="{chapter_id}" data-marked="{marked}">'
+        f'{_escape(row["text"])}</span>'
+    )
+
+
+def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
+    word_index = {
+        card["lemma"]: {"id": card["id"], "surface_form": card["surface_form"]}
+        for card in word_cards
+    }
+    return f"""
+    <div id="selection-toolbar" class="selection-toolbar" hidden>
+      <form id="toolbar-sentence-form" method="post" class="toolbar-group">
+        <input type="hidden" name="return_to" value="{_escape(return_to)}">
+        <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
+        <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
+      </form>
+      <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group">
+        <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
+        <input id="toolbar-word-surface-form" type="hidden" name="surface_form">
+        <input type="hidden" name="return_to" value="{_escape(return_to)}">
+        <button type="submit" name="lexical_type" value="word">Mark word</button>
+        <button type="submit" name="lexical_type" value="phrase">Mark phrase</button>
+        <button type="submit" name="lexical_type" value="collocation">Mark collocation</button>
+      </form>
+      <div id="toolbar-word-existing" class="toolbar-group" hidden>
+        <span class="toolbar-status">In cards</span>
+        <button id="toolbar-word-delete" type="button" class="danger">Remove from cards</button>
       </div>
-    </article>
+      <div id="toolbar-cross-sentence" class="toolbar-group" hidden>
+        <span class="toolbar-status">Selection spans sentences</span>
+        <button id="toolbar-clear" type="button">Clear</button>
+      </div>
+    </div>
+    <script id="word-card-index" type="application/json">{_json_script(word_index)}</script>
+    <script>{_selection_script()}</script>
+    """
+
+
+def _json_script(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True).replace("<", "\\u003c")
+
+
+def _selection_script() -> str:
+    return r"""
+    (() => {
+      const reader = document.querySelector("[data-reader]");
+      const toolbar = document.getElementById("selection-toolbar");
+      if (!reader || !toolbar) return;
+
+      const returnTo = reader.dataset.returnTo || window.location.pathname;
+      const wordIndexElement = document.getElementById("word-card-index");
+      const wordCards = JSON.parse(wordIndexElement?.textContent || "{}");
+      const sentenceForm = document.getElementById("toolbar-sentence-form");
+      const sentenceSubmit = document.getElementById("toolbar-sentence-submit");
+      const sentenceDelete = document.getElementById("toolbar-sentence-delete");
+      const wordForm = document.getElementById("toolbar-word-form");
+      const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
+      const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
+      const wordExisting = document.getElementById("toolbar-word-existing");
+      const wordDelete = document.getElementById("toolbar-word-delete");
+      const crossSentence = document.getElementById("toolbar-cross-sentence");
+      const clearButton = document.getElementById("toolbar-clear");
+
+      let activeSentenceId = null;
+      let activeWordCardId = null;
+
+      const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
+      const lemmaKey = (value) => value.toLowerCase().trim();
+
+      function hideToolbar() {
+        toolbar.hidden = true;
+        activeSentenceId = null;
+        activeWordCardId = null;
+      }
+
+      function setVisible(element, visible) {
+        element.hidden = !visible;
+      }
+
+      function selectedSentenceSpans(range) {
+        return Array.from(reader.querySelectorAll("[data-sentence-id]")).filter((span) => {
+          try {
+            return range.intersectsNode(span);
+          } catch {
+            return false;
+          }
+        });
+      }
+
+      function showToolbar(range) {
+        const rect = range.getBoundingClientRect();
+        const fallbackRect = range.getClientRects()[0];
+        const anchor = rect.width || rect.height ? rect : fallbackRect;
+        if (!anchor) {
+          hideToolbar();
+          return;
+        }
+
+        toolbar.hidden = false;
+        requestAnimationFrame(() => {
+          const toolbarRect = toolbar.getBoundingClientRect();
+          const viewportPadding = 8;
+          let top = window.scrollY + anchor.top - toolbarRect.height - 10;
+          if (top < window.scrollY + viewportPadding) {
+            top = window.scrollY + anchor.bottom + 10;
+          }
+          const centeredLeft = window.scrollX + anchor.left + (anchor.width / 2) - (toolbarRect.width / 2);
+          const maxLeft = window.scrollX + window.innerWidth - toolbarRect.width - viewportPadding;
+          const left = Math.max(window.scrollX + viewportPadding, Math.min(centeredLeft, maxLeft));
+          toolbar.style.top = `${top}px`;
+          toolbar.style.left = `${left}px`;
+        });
+      }
+
+      function updateToolbar() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          hideToolbar();
+          return;
+        }
+
+        const range = selection.getRangeAt(0);
+        const selectedText = selection.toString().trim();
+        const normalizedSelection = normalizeText(selectedText);
+        if (!normalizedSelection) {
+          hideToolbar();
+          return;
+        }
+
+        const spans = selectedSentenceSpans(range);
+        if (spans.length !== 1) {
+          setVisible(sentenceForm, false);
+          setVisible(wordForm, false);
+          setVisible(wordExisting, false);
+          setVisible(crossSentence, spans.length > 1);
+          if (spans.length > 1) showToolbar(range);
+          else hideToolbar();
+          return;
+        }
+
+        const sentence = spans[0];
+        activeSentenceId = sentence.dataset.sentenceId;
+        const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
+        const markedSentence = sentence.dataset.marked === "1";
+        const existingWord = wordCards[lemmaKey(selectedText)];
+        activeWordCardId = existingWord ? existingWord.id : null;
+
+        sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
+        sentenceSubmit.hidden = !wholeSentence || markedSentence;
+        sentenceDelete.hidden = !wholeSentence || !markedSentence;
+        setVisible(sentenceForm, wholeSentence);
+
+        wordSentenceId.value = activeSentenceId;
+        wordSurfaceForm.value = selectedText;
+        setVisible(wordForm, !wholeSentence && !activeWordCardId);
+        setVisible(wordExisting, !wholeSentence && Boolean(activeWordCardId));
+        setVisible(crossSentence, false);
+        showToolbar(range);
+      }
+
+      async function deleteAndReload(url) {
+        const separator = url.includes("?") ? "&" : "?";
+        const response = await fetch(`${url}${separator}return_to=${encodeURIComponent(returnTo)}`, {
+          method: "DELETE",
+        });
+        if (response.ok) {
+          window.location.assign(returnTo);
+        } else {
+          window.location.assign(response.url || returnTo);
+        }
+      }
+
+      toolbar.addEventListener("mousedown", (event) => event.preventDefault());
+      sentenceDelete.addEventListener("click", () => {
+        if (activeSentenceId) deleteAndReload(`/mark/sentence/${activeSentenceId}`);
+      });
+      wordDelete.addEventListener("click", () => {
+        if (activeWordCardId) deleteAndReload(`/mark/word/${activeWordCardId}`);
+      });
+      clearButton.addEventListener("click", () => {
+        window.getSelection()?.removeAllRanges();
+        hideToolbar();
+      });
+      document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
+      window.addEventListener("scroll", hideToolbar, { passive: true });
+    })();
     """
 
 
@@ -818,7 +1043,7 @@ def _css() -> str:
     }
     .metric span { display: block; color: var(--muted); font-size: 13px; }
     .metric strong { font-size: 24px; }
-    .band, .sentence {
+    .band {
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -847,6 +1072,57 @@ def _css() -> str:
     th { color: var(--muted); font-weight: 600; background: #f2f4f7; }
     tr:last-child td { border-bottom: 0; }
     .sentence-meta { color: var(--muted); font-size: 13px; }
+    .reader {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 34px 18px;
+    }
+    .reader-text {
+      max-width: 72ch;
+      margin: 0 auto;
+      font: 18px/1.85 Georgia, "Times New Roman", serif;
+    }
+    .reader-sentence {
+      cursor: text;
+      text-underline-offset: 0.22em;
+    }
+    .selection-toolbar {
+      position: absolute;
+      z-index: 20;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      max-width: min(92vw, 760px);
+      padding: 8px;
+      border-radius: 8px;
+      background: #111827;
+      color: #f9fafb;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+    }
+    .selection-toolbar[hidden] { display: none; }
+    .toolbar-group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .selection-toolbar button {
+      border-color: #374151;
+      background: #f9fafb;
+      color: #111827;
+    }
+    .selection-toolbar button.danger {
+      border-color: #fecaca;
+      color: #991b1b;
+    }
+    .toolbar-status {
+      padding: 5px 4px;
+      color: #e5e7eb;
+      font-size: 14px;
+      white-space: nowrap;
+    }
     .badge {
       color: var(--ok);
       border: 1px solid #9bd4bd;
@@ -891,6 +1167,16 @@ def _css() -> str:
       .toolbar, .split { display: block; }
       table { font-size: 14px; }
       th, td { padding: 8px; }
+      .reader { padding: 22px 14px; }
+      .reader-text { font-size: 17px; line-height: 1.75; }
+      .selection-toolbar {
+        position: fixed;
+        left: 10px !important;
+        right: 10px;
+        bottom: 10px;
+        top: auto !important;
+        max-width: none;
+      }
     }
     """
 

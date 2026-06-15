@@ -75,7 +75,10 @@ def find_similar_cards_for_word_card(
     """
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT surface_form, lemma FROM word_cards WHERE id = ?", (card_id,)
+            """SELECT surface_form, lemma
+                 FROM word_cards
+                WHERE id = ? AND archived_at IS NULL""",
+            (card_id,),
         ).fetchone()
     if row is None:
         raise ValueError(f"Word card id={card_id} not found.")
@@ -99,7 +102,7 @@ def _collect_surface(
 ) -> None:
     sql = (
         "SELECT id, surface_form, lemma, current_meaning FROM word_cards"
-        " WHERE LOWER(surface_form) = LOWER(?)"
+        " WHERE LOWER(surface_form) = LOWER(?) AND archived_at IS NULL"
     )
     params: list = [surface_form]
     if exclude_lemma is not None:
@@ -119,7 +122,7 @@ def _collect_lemma(
 ) -> None:
     sql = (
         "SELECT id, surface_form, lemma, current_meaning FROM word_cards"
-        " WHERE lemma = ?"
+        " WHERE lemma = ? AND archived_at IS NULL"
     )
     params: list = [query_lemma]
     if exclude_lemma is not None:
@@ -141,7 +144,8 @@ def _collect_error_tag(
     with db.get_connection() as conn:
         query_card = conn.execute(
             "SELECT id FROM word_cards"
-            " WHERE lemma = ? OR LOWER(surface_form) = LOWER(?)"
+            " WHERE (lemma = ? OR LOWER(surface_form) = LOWER(?))"
+            " AND archived_at IS NULL"
             " LIMIT 1",
             (query_lemma, surface_form),
         ).fetchone()
@@ -164,6 +168,7 @@ def _collect_error_tag(
             f" JOIN word_card_errors wce ON wce.card_id = wc.id"
             f" WHERE wce.error_type_id IN ({placeholders})"
             f" AND wc.id != ?"
+            f" AND wc.archived_at IS NULL"
         )
         params: list = eid_list + [qid]
         if exclude_lemma is not None:
