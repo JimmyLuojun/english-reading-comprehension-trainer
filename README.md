@@ -17,6 +17,27 @@ The default SQLite database is `english-reading-trainer/data/reading_trainer.db`
 Set `TRAINER_DB=/path/to/reading_trainer.db` to use a different database.
 Migrations are applied automatically by the CLI and web app.
 
+## AI Provider
+
+DeepSeek is the default OpenAI-compatible provider. Put your API key in a local
+file that is not committed:
+
+```bash
+cd english-reading-trainer
+cp .env.example .env
+```
+
+Then edit `english-reading-trainer/.env`:
+
+```text
+OPENAI_API_KEY=sk-your-real-deepseek-api-key
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+TRAINER_MODEL=deepseek-chat
+```
+
+The code also accepts real environment variables with the same names; exported
+environment variables take priority over `.env` values.
+
 ## CLI Workflow
 
 Run commands from `english-reading-trainer/`:
@@ -100,4 +121,3 @@ english-reading-trainer/
   prompts/       Versioned prompt templates
   tests/         Pytest suite mirroring source modules
 ```
-

@@ -25,7 +25,8 @@ CLAUDE.local.md
 # Environment files often contain API keys, database credentials, etc.
 .env
 .env.*
-!.env.example              # Keep example files for documentation
+# Keep example files for documentation
+!.env.example
 
 # Private keys and certificates
 *.pem

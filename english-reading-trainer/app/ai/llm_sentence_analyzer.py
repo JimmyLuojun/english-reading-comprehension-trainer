@@ -12,22 +12,21 @@ Pipeline per call:
 
 Environment variables:
   OPENAI_API_KEY   — API key (required unless using a local base_url)
-  OPENAI_BASE_URL  — override endpoint (e.g. Ollama, Azure, Claude-compatible)
-  TRAINER_MODEL    — default model name (falls back to "gpt-4o-mini")
+  OPENAI_BASE_URL  — override endpoint (defaults to DeepSeek)
+  TRAINER_MODEL    — default model name (defaults to "deepseek-chat")
 """
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA
+from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import CachedEntry, compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
 from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
-_DEFAULT_MODEL = "gpt-4o-mini"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
 _PROMPT_VERSION = "v1"
@@ -71,7 +70,7 @@ def analyze_sentence(
         FileNotFoundError  — prompt template not found on disk
         RuntimeError       — LLM call failed (non-validation error)
     """
-    model = model or os.environ.get("TRAINER_MODEL", _DEFAULT_MODEL)
+    model = get_ai_provider_settings(model).model
     cleaned_translation = _clean_optional_translation(user_translation)
     content_hash = compute_content_hash(sentence_text, context, cleaned_translation)
 
@@ -167,12 +166,13 @@ def _call_llm(prompt: str, model: str) -> str:
     """Call the LLM and return raw text. Raises RuntimeError on API failure."""
     try:
         import openai
+        settings = get_ai_provider_settings(model)
         client = openai.OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            base_url=os.environ.get("OPENAI_BASE_URL") or None,
+            api_key=settings.api_key,
+            base_url=settings.base_url or None,
         )
         response = client.chat.completions.create(
-            model=model,
+            model=settings.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )

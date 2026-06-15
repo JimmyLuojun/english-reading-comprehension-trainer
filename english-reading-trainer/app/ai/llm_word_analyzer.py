@@ -7,17 +7,16 @@ can produce different cached entries.
 """
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.ai.ai_json_schemas import WORD_ANALYSIS_SCHEMA
+from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
 from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
-_DEFAULT_MODEL = "gpt-4o-mini"
 _PROMPT_NAME = "word_analysis"
 _PROMPT_VERSION = "v1"
 
@@ -58,7 +57,7 @@ def analyze_word(
         FileNotFoundError — prompt template not found
         RuntimeError      — LLM call failed
     """
-    model = model or os.environ.get("TRAINER_MODEL", _DEFAULT_MODEL)
+    model = get_ai_provider_settings(model).model
     # Include surface_form in hash so same word in different sentences
     # can share a cache entry, but explicit context changes produce new ones.
     content_hash = compute_content_hash(
@@ -135,12 +134,13 @@ def _render(template: str, variables: dict[str, str]) -> str:
 def _call_llm(prompt: str, model: str) -> str:
     try:
         import openai
+        settings = get_ai_provider_settings(model)
         client = openai.OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            base_url=os.environ.get("OPENAI_BASE_URL") or None,
+            api_key=settings.api_key,
+            base_url=settings.base_url or None,
         )
         response = client.chat.completions.create(
-            model=model,
+            model=settings.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )
