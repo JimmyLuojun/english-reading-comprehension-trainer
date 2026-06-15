@@ -27,7 +27,23 @@ VALID_SENTENCE = {
     "simplified_en": "The board dismissed the report.",
     "chinese_gloss": "委员会的报告被董事会否决了。",
     "predicted_error_types": ["G02"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
     "confidence": 0.9,
+}
+
+VALID_DIAGNOSED_SENTENCE = {
+    **VALID_SENTENCE,
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": ["G02"],
+    "diagnosis_evidence": [
+        {
+            "error_type": "G02",
+            "evidence": "The translation attaches the modifier to the wrong noun.",
+        }
+    ],
 }
 
 VALID_WORD = {
@@ -67,7 +83,8 @@ class TestSchemaStructure:
         required = SENTENCE_ANALYSIS_SCHEMA["required"]
         for field in ["subject_skeleton", "clauses", "modifiers", "logic_markers",
                       "anaphora", "simplified_en", "chinese_gloss",
-                      "predicted_error_types", "confidence"]:
+                      "predicted_error_types", "diagnosis_basis",
+                      "diagnosed_error_types", "diagnosis_evidence", "confidence"]:
             assert field in required
 
     def test_word_schema_has_all_required_fields(self) -> None:
@@ -82,6 +99,19 @@ class TestSchemaStructure:
             SENTENCE_ANALYSIS_SCHEMA["properties"]["predicted_error_types"]["items"]["enum"]
         )
         assert enum == VALID_ERROR_CODES
+
+    def test_diagnosed_error_codes_in_sentence_schema_match_db(self) -> None:
+        enum = set(
+            SENTENCE_ANALYSIS_SCHEMA["properties"]["diagnosed_error_types"]["items"]["enum"]
+        )
+        assert enum == VALID_ERROR_CODES
+
+    def test_diagnosis_evidence_allows_ok_signal(self) -> None:
+        enum = set(
+            SENTENCE_ANALYSIS_SCHEMA["properties"]["diagnosis_evidence"]
+            ["items"]["properties"]["error_type"]["enum"]
+        )
+        assert enum == VALID_ERROR_CODES | {"OK"}
 
     def test_error_codes_in_word_schema_match_db(self) -> None:
         enum = set(
@@ -128,6 +158,19 @@ class TestValidInstances:
 
     def test_sentence_max_three_error_codes(self) -> None:
         data = {**VALID_SENTENCE, "predicted_error_types": ["G01", "L01", "D01"]}
+        _validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_diagnosed_sentence_with_evidence(self) -> None:
+        _validate(VALID_DIAGNOSED_SENTENCE, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_correct_translation_uses_ok_evidence(self) -> None:
+        data = {
+            **VALID_DIAGNOSED_SENTENCE,
+            "diagnosed_error_types": [],
+            "diagnosis_evidence": [
+                {"error_type": "OK", "evidence": "The translation preserves the meaning."}
+            ],
+        }
         _validate(data, SENTENCE_ANALYSIS_SCHEMA)
 
     def test_word_empty_optional_lists(self) -> None:
@@ -182,6 +225,25 @@ class TestInvalidInstances:
         with pytest.raises(jsonschema.ValidationError):
             _validate(
                 {**VALID_SENTENCE, "predicted_error_types": []},
+                SENTENCE_ANALYSIS_SCHEMA,
+            )
+
+    def test_predicted_mode_rejects_diagnosed_error_types(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {**VALID_SENTENCE, "diagnosed_error_types": ["G02"]},
+                SENTENCE_ANALYSIS_SCHEMA,
+            )
+
+    def test_diagnosis_evidence_requires_known_code_or_ok(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {
+                    **VALID_DIAGNOSED_SENTENCE,
+                    "diagnosis_evidence": [
+                        {"error_type": "Z99", "evidence": "bad"}
+                    ],
+                },
                 SENTENCE_ANALYSIS_SCHEMA,
             )
 

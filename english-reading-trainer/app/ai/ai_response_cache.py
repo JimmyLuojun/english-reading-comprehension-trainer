@@ -2,7 +2,8 @@
 AI response cache backed by the ai_cache SQLite table (§5 of design.md).
 
 Cache key: (content_hash, prompt_version, model)
-  content_hash = SHA256(normalize(sentence_text) + "|" + context)
+  content_hash = SHA256(normalize(sentence_text) + "|" + context + "|" +
+                        normalize(user_translation or ""))
 
 Staleness: if an exact (content_hash, prompt_version, model) hit is not
 found, the cache falls back to any entry sharing content_hash + model
@@ -35,12 +36,25 @@ class CachedEntry:
 # Public API
 # ---------------------------------------------------------------------------
 
-def compute_content_hash(sentence_text: str, context: str = "") -> str:
+def compute_content_hash(
+    sentence_text: str,
+    context: str = "",
+    user_translation: str | None = None,
+) -> str:
     """
-    SHA256 of the normalised sentence text concatenated with context.
-    Matches the cache-key spec in §5.1 of design.md.
+    SHA256 of the normalised sentence text, context, and user translation.
+
+    The translation segment is intentionally part of the key: sentence
+    diagnosis depends on the user's concrete understanding, not just the
+    source sentence.
     """
-    normalised = normalize_for_hash(sentence_text) + "|" + context.strip()
+    normalised = (
+        normalize_for_hash(sentence_text)
+        + "|"
+        + context.strip()
+        + "|"
+        + normalize_for_hash(user_translation or "")
+    )
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 

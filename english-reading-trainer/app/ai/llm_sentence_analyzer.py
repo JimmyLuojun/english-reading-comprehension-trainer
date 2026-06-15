@@ -1,8 +1,8 @@
 """
-Sentence analysis pipeline (§9.1 + §5 of design.md).
+Sentence analysis pipeline (§9.1, §15 + §5 of design.md).
 
 Pipeline per call:
-  1. Compute content_hash from sentence + context.
+  1. Compute content_hash from sentence + context + optional user translation.
   2. Check ai_response_cache → return CachedEntry if hit.
   3. Load prompt template, fill variables, call LLM.
   4. Validate JSON response (jsonschema + semantic checks).
@@ -28,7 +28,8 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _DEFAULT_MODEL = "gpt-4o-mini"
-_PROMPT_NAME = "sentence_analysis"
+_PREDICT_PROMPT_NAME = "sentence_analysis_predict"
+_DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
 _PROMPT_VERSION = "v1"
 
 # Correction suffix appended on retry to guide the LLM back on track
@@ -59,6 +60,7 @@ def analyze_sentence(
     chapter_title: str = "",
     related_cards: str = "",
     learner_profile: str = "",
+    user_translation: str | None = None,
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
 ) -> SentenceAnalysisResult:
@@ -70,7 +72,8 @@ def analyze_sentence(
         RuntimeError       — LLM call failed (non-validation error)
     """
     model = model or os.environ.get("TRAINER_MODEL", _DEFAULT_MODEL)
-    content_hash = compute_content_hash(sentence_text, context)
+    cleaned_translation = _clean_optional_translation(user_translation)
+    content_hash = compute_content_hash(sentence_text, context, cleaned_translation)
 
     # --- Cache check ---
     cached = get_cached(db, content_hash, prompt_version, model)
@@ -84,13 +87,15 @@ def analyze_sentence(
         )
 
     # --- Build prompt ---
-    template = _load_prompt(_PROMPT_NAME, prompt_version)
+    prompt_name = _prompt_name_for_translation(cleaned_translation)
+    template = _load_prompt(prompt_name, prompt_version)
     prompt = _render(template, {
         "sentence":       sentence_text,
         "context":        context or "(none)",
         "chapter_title":  chapter_title or "(none)",
         "related_cards":  related_cards or "(none)",
         "learner_profile": learner_profile or "(none)",
+        "user_translation": cleaned_translation or "(none)",
     })
 
     # --- First attempt ---
@@ -126,6 +131,19 @@ def _load_prompt(name: str, version: str) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Prompt template not found: {path}")
     return _strip_frontmatter(path.read_text(encoding="utf-8"))
+
+
+def _prompt_name_for_translation(user_translation: str | None) -> str:
+    if user_translation:
+        return _DIAGNOSE_PROMPT_NAME
+    return _PREDICT_PROMPT_NAME
+
+
+def _clean_optional_translation(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _strip_frontmatter(text: str) -> str:

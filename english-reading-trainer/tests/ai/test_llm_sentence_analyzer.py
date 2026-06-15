@@ -34,6 +34,26 @@ _VALID_RESPONSE = json.dumps({
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
+    "confidence": 0.9,
+})
+
+_VALID_DIAGNOSED_RESPONSE = json.dumps({
+    "subject_skeleton": "The cat sat",
+    "clauses": [{"type": "main", "text": "The cat sat", "role": "main pred"}],
+    "modifiers": [],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The cat sat.",
+    "chinese_gloss": "猫坐着。",
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": ["G02"],
+    "diagnosis_evidence": [
+        {"error_type": "G02", "evidence": "The translation misses the modifier."}
+    ],
     "confidence": 0.9,
 })
 
@@ -157,6 +177,41 @@ class TestAnalyzeSentenceLLMSuccess:
         with _mock_llm([_VALID_RESPONSE]) as mock:
             analyze_sentence(db, _SENTENCE, model=_MODEL)
         assert mock.call_count == 1
+
+    def test_user_translation_uses_diagnosis_prompt(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_DIAGNOSED_RESPONSE]) as mock:
+            result = analyze_sentence(
+                db,
+                _SENTENCE,
+                user_translation="猫坐在垫子上。",
+                model=_MODEL,
+            )
+
+        assert result.data["diagnosis_basis"] == "user_translation"
+        assert "USER TRANSLATION" in mock.call_args.args[0]
+
+    def test_different_translations_do_not_share_cache(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_DIAGNOSED_RESPONSE]):
+            first = analyze_sentence(
+                db,
+                _SENTENCE,
+                user_translation="译文一。",
+                model=_MODEL,
+            )
+        with _mock_llm([_VALID_DIAGNOSED_RESPONSE]):
+            second = analyze_sentence(
+                db,
+                _SENTENCE,
+                user_translation="译文二。",
+                model=_MODEL,
+            )
+
+        assert second.from_cache is False
+        assert second.cache_id != first.cache_id
 
 
 # ---------------------------------------------------------------------------

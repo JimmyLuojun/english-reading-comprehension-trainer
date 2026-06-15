@@ -26,6 +26,7 @@ from app.cards.sentence_card_service import (
     archive_sentence_card,
     create_sentence_card,
     list_sentence_cards,
+    save_sentence_translation,
 )
 from app.cards.word_card_service import (
     WordCardNotFoundError,
@@ -229,6 +230,21 @@ def create_app(
             create_sentence_card(db, sentence_id)
         except SentenceCardAlreadyExistsError:
             pass
+        except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(return_to)
+
+    @web_app.post("/mark/sentence/{sentence_id}/translation")
+    async def mark_sentence_translation(sentence_id: int, request: Request) -> Any:
+        form = await _read_form(request)
+        return_to = _safe_return_to(form.get("return_to", "/cards"))
+        db = db_factory()
+        try:
+            save_sentence_translation(
+                db,
+                sentence_id,
+                form.get("user_translation", ""),
+            )
         except ValueError as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
@@ -458,7 +474,8 @@ def _fetch_chapter_sentences(
     with db.get_connection() as conn:
         rows = conn.execute(
             """SELECT s.id, s.idx, s.text,
-                      CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card
+                      CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card,
+                      COALESCE(sc.user_translation, '') AS user_translation
                  FROM sentences s
                  LEFT JOIN sentence_cards sc
                    ON sc.sentence_id = s.id AND sc.archived_at IS NULL
@@ -545,7 +562,8 @@ def _reader_sentence_span(row: dict[str, Any], chapter_id: int) -> str:
     marked = "1" if row["has_card"] else "0"
     return (
         f'<span class="reader-sentence" data-sentence-id="{row["id"]}" '
-        f'data-chapter-id="{chapter_id}" data-marked="{marked}">'
+        f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
+        f'data-translation="{_escape(row.get("user_translation", ""))}">'
         f'{_escape(row["text"])}</span>'
     )
 
@@ -561,6 +579,11 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
+        <button id="toolbar-translation-open" type="button">Write translation</button>
+      </form>
+      <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
+        <input id="toolbar-translation-value" type="hidden" name="user_translation">
+        <input type="hidden" name="return_to" value="{_escape(return_to)}">
       </form>
       <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group">
         <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
@@ -601,6 +624,9 @@ def _selection_script() -> str:
       const sentenceForm = document.getElementById("toolbar-sentence-form");
       const sentenceSubmit = document.getElementById("toolbar-sentence-submit");
       const sentenceDelete = document.getElementById("toolbar-sentence-delete");
+      const translationOpen = document.getElementById("toolbar-translation-open");
+      const translationForm = document.getElementById("toolbar-translation-form");
+      const translationValue = document.getElementById("toolbar-translation-value");
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
@@ -610,6 +636,7 @@ def _selection_script() -> str:
       const clearButton = document.getElementById("toolbar-clear");
 
       let activeSentenceId = null;
+      let activeSentenceTranslation = "";
       let activeWordCardId = null;
 
       const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
@@ -618,6 +645,7 @@ def _selection_script() -> str:
       function hideToolbar() {
         toolbar.hidden = true;
         activeSentenceId = null;
+        activeSentenceTranslation = "";
         activeWordCardId = null;
       }
 
@@ -688,14 +716,18 @@ def _selection_script() -> str:
 
         const sentence = spans[0];
         activeSentenceId = sentence.dataset.sentenceId;
+        activeSentenceTranslation = sentence.dataset.translation || "";
         const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
         const markedSentence = sentence.dataset.marked === "1";
         const existingWord = wordCards[lemmaKey(selectedText)];
         activeWordCardId = existingWord ? existingWord.id : null;
 
         sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
+        translationForm.action = `/mark/sentence/${activeSentenceId}/translation`;
         sentenceSubmit.hidden = !wholeSentence || markedSentence;
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
+        translationOpen.hidden = !wholeSentence;
+        translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         setVisible(sentenceForm, wholeSentence);
 
         wordSentenceId.value = activeSentenceId;
@@ -722,6 +754,17 @@ def _selection_script() -> str:
       sentenceDelete.addEventListener("click", () => {
         if (activeSentenceId) deleteAndReload(`/mark/sentence/${activeSentenceId}`);
       });
+      translationOpen.addEventListener("click", () => {
+        if (!activeSentenceId) return;
+        const value = window.prompt(
+          "Write your understanding or Chinese translation:",
+          activeSentenceTranslation,
+        );
+        if (value && value.trim()) {
+          translationValue.value = value.trim();
+          translationForm.submit();
+        }
+      });
       wordDelete.addEventListener("click", () => {
         if (activeWordCardId) deleteAndReload(`/mark/word/${activeWordCardId}`);
       });
@@ -743,11 +786,12 @@ def _sentence_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{card['id']}</td>"
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{_escape(_date(card['due_at']))}</td>"
+        f"<td>{_escape((card.get('user_translation') or '')[:80])}</td>"
         f"<td>{_escape(card['sentence_text'][:100])}</td>"
         "</tr>"
         for card in cards
     )
-    return f"<table><thead><tr><th>ID</th><th>State</th><th>Due</th><th>Text</th></tr></thead><tbody>{rows}</tbody></table>"
+    return f"<table><thead><tr><th>ID</th><th>State</th><th>Due</th><th>Translation</th><th>Text</th></tr></thead><tbody>{rows}</tbody></table>"
 
 
 def _word_cards_table(cards: list[dict[str, Any]]) -> str:

@@ -40,6 +40,7 @@ class TestMigrationRunner:
         assert "001_initial_schema.sql" in applied
         assert "002_seed_error_types.sql" in applied
         assert "003_archive_cards.sql" in applied
+        assert "004_sentence_user_translation.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -50,6 +51,7 @@ class TestMigrationRunner:
         assert "001_initial_schema.sql" in recorded
         assert "002_seed_error_types.sql" in recorded
         assert "003_archive_cards.sql" in recorded
+        assert "004_sentence_user_translation.sql" in recorded
 
     def test_migrations_dir_empty_returns_empty(self, tmp_path: Path) -> None:
         db = DatabaseConnection(tmp_path / "a.db")
@@ -135,7 +137,8 @@ class TestColumns:
         cols = db.get_table_columns("sentence_cards")
         for col in [
             "ef", "interval_days", "repetitions", "due_at",
-            "mastery_state", "archived_at",
+            "mastery_state", "archived_at", "user_translation",
+            "translation_created_at",
         ]:
             assert col in cols, f"SM-2 field '{col}' missing from sentence_cards"
 

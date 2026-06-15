@@ -96,3 +96,25 @@ def _semantic_validate(data: object, schema: dict) -> None:
                 "Semantic check failed: 'clauses' must contain at least one "
                 "entry with type='main'."
             )
+
+    if data.get("diagnosis_basis") == "user_translation":
+        diagnosed = data.get("diagnosed_error_types", [])
+        evidence = data.get("diagnosis_evidence", [])
+        evidence_codes = [
+            item.get("error_type")
+            for item in evidence
+            if isinstance(item, dict)
+        ]
+        if not diagnosed and "OK" not in evidence_codes:
+            raise ValidationError(
+                "Semantic check failed: no-error translation diagnoses must "
+                "include one diagnosis_evidence item with error_type='OK'."
+            )
+        missing_evidence = [
+            code for code in diagnosed if code not in evidence_codes
+        ]
+        if missing_evidence:
+            raise ValidationError(
+                "Semantic check failed: every diagnosed_error_types code must "
+                f"have matching diagnosis_evidence. Missing: {missing_evidence}."
+            )

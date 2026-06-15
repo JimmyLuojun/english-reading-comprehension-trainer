@@ -29,6 +29,7 @@ def create_sentence_card(
     db: DatabaseConnection,
     sentence_id: int,
     user_note: str = "",
+    user_translation: str | None = None,
 ) -> int:
     """
     Create a new sentence card for *sentence_id* with SM-2 defaults.
@@ -37,6 +38,7 @@ def create_sentence_card(
     Raises SentenceCardAlreadyExistsError if a card already exists.
     Raises ValueError if sentence_id does not exist.
     """
+    cleaned_translation = _clean_optional_translation(user_translation)
     with db.get_connection() as conn:
         if not conn.execute(
             "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
@@ -50,37 +52,92 @@ def create_sentence_card(
         if existing:
             if existing["archived_at"] is not None:
                 note = user_note if user_note else existing["user_note"]
-                conn.execute(
-                    """UPDATE sentence_cards
-                          SET archived_at = NULL,
-                              user_note = ?
-                        WHERE id = ?""",
-                    (note, existing["id"]),
-                )
+                if cleaned_translation is None:
+                    conn.execute(
+                        """UPDATE sentence_cards
+                              SET archived_at = NULL,
+                                  user_note = ?
+                            WHERE id = ?""",
+                        (note, existing["id"]),
+                    )
+                else:
+                    now = _utcnow()
+                    conn.execute(
+                        """UPDATE sentence_cards
+                              SET archived_at = NULL,
+                                  user_note = ?,
+                                  user_translation = ?,
+                                  translation_created_at = ?,
+                                  ai_analysis_id = NULL
+                            WHERE id = ?""",
+                        (note, cleaned_translation, now, existing["id"]),
+                    )
+                    _clear_sentence_card_errors(conn, existing["id"])
                 return existing["id"]
             raise SentenceCardAlreadyExistsError(
                 f"A card already exists for sentence id={sentence_id} "
                 f"(card id={existing['id']})."
             )
 
-        now = _utcnow()
-        card_id: int = conn.execute(
-            """INSERT INTO sentence_cards
-               (sentence_id, created_at, last_reviewed_at, review_count,
-                mastery_state, ef, interval_days, repetitions, due_at, user_note)
-               VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?)""",
-            (
-                sentence_id, now,
-                MasteryState.NEW.value,
-                SM2_DEFAULT_EF,
-                SM2_INITIAL_INTERVAL_DAYS,
-                SM2_INITIAL_REPETITIONS,
-                now,
-                user_note,
-            ),
-        ).lastrowid
+        card_id = _insert_sentence_card(
+            conn,
+            sentence_id=sentence_id,
+            user_note=user_note,
+            user_translation=cleaned_translation,
+        )
 
     return card_id
+
+
+def save_sentence_translation(
+    db: DatabaseConnection,
+    sentence_id: int,
+    user_translation: str,
+    user_note: str = "",
+) -> int:
+    """
+    Store the latest user translation for *sentence_id* and return the card id.
+
+    Creates the sentence card if needed. Re-submission overwrites the previous
+    translation and clears stale AI analysis/error links so the next analysis
+    uses a cache key that includes the latest translation.
+    """
+    cleaned_translation = user_translation.strip()
+    if not cleaned_translation:
+        raise ValueError("user_translation must not be empty.")
+
+    now = _utcnow()
+    with db.get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
+        ).fetchone():
+            raise ValueError(f"Sentence id={sentence_id} not found.")
+
+        existing = conn.execute(
+            "SELECT id, user_note FROM sentence_cards WHERE sentence_id = ?",
+            (sentence_id,),
+        ).fetchone()
+        if existing:
+            note = user_note if user_note else existing["user_note"]
+            conn.execute(
+                """UPDATE sentence_cards
+                      SET archived_at = NULL,
+                          user_note = ?,
+                          user_translation = ?,
+                          translation_created_at = ?,
+                          ai_analysis_id = NULL
+                    WHERE id = ?""",
+                (note, cleaned_translation, now, existing["id"]),
+            )
+            _clear_sentence_card_errors(conn, existing["id"])
+            return existing["id"]
+
+        return _insert_sentence_card(
+            conn,
+            sentence_id=sentence_id,
+            user_note=user_note,
+            user_translation=cleaned_translation,
+        )
 
 
 def get_sentence_card(
@@ -177,6 +234,46 @@ def archive_sentence_card(db: DatabaseConnection, sentence_id: int) -> int:
             (now, existing["id"]),
         )
     return existing["id"]
+
+
+def _insert_sentence_card(
+    conn: Any,
+    *,
+    sentence_id: int,
+    user_note: str,
+    user_translation: str | None,
+) -> int:
+    now = _utcnow()
+    translation_created_at = now if user_translation is not None else None
+    return conn.execute(
+        """INSERT INTO sentence_cards
+           (sentence_id, created_at, last_reviewed_at, review_count,
+            mastery_state, ef, interval_days, repetitions, due_at, user_note,
+            user_translation, translation_created_at)
+           VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            sentence_id, now,
+            MasteryState.NEW.value,
+            SM2_DEFAULT_EF,
+            SM2_INITIAL_INTERVAL_DAYS,
+            SM2_INITIAL_REPETITIONS,
+            now,
+            user_note,
+            user_translation,
+            translation_created_at,
+        ),
+    ).lastrowid
+
+
+def _clear_sentence_card_errors(conn: Any, card_id: int) -> None:
+    conn.execute("DELETE FROM sentence_card_errors WHERE card_id = ?", (card_id,))
+
+
+def _clean_optional_translation(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _utcnow() -> str:

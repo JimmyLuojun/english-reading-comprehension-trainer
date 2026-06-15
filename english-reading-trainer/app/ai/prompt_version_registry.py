@@ -154,6 +154,15 @@ def sync_prompt_versions(
                     "create a new versioned prompt file instead"
                 )
 
+        if active_versions:
+            placeholders = ", ".join("?" * len(active_versions))
+            conn.execute(
+                f"""UPDATE prompt_versions
+                    SET is_active = 0
+                    WHERE name NOT IN ({placeholders})""",
+                tuple(active_versions),
+            )
+
         for name, active_version in active_versions.items():
             conn.execute(
                 """UPDATE prompt_versions

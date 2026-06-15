@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from app.ai.analysis_saver import SaveResult, save_sentence_analysis, save_word_analysis
+from app.cards.sentence_card_service import save_sentence_translation
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 
@@ -47,7 +48,51 @@ _VALID_SENTENCE_JSON = json.dumps({
     "simplified_en": "The fox jumped over the dog",
     "chinese_gloss": "那只狐狸跳过了狗",
     "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
     "confidence": 0.95,
+})
+
+_VALID_DIAGNOSED_SENTENCE_JSON = json.dumps({
+    "subject_skeleton": "fox jumps",
+    "clauses": [
+        {"type": "main", "text": "The quick brown fox jumps over the lazy dog", "role": "statement"}
+    ],
+    "modifiers": [{"target": "fox", "modifier": "quick brown", "type": "adjective"}],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The fox jumped over the dog",
+    "chinese_gloss": "那只狐狸跳过了狗",
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": ["G02"],
+    "diagnosis_evidence": [
+        {
+            "error_type": "G02",
+            "evidence": "The user translation attaches the modifier to the wrong noun.",
+        }
+    ],
+    "confidence": 0.9,
+})
+
+_VALID_OK_DIAGNOSED_SENTENCE_JSON = json.dumps({
+    "subject_skeleton": "fox jumps",
+    "clauses": [
+        {"type": "main", "text": "The quick brown fox jumps over the lazy dog", "role": "statement"}
+    ],
+    "modifiers": [{"target": "fox", "modifier": "quick brown", "type": "adjective"}],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The fox jumped over the dog",
+    "chinese_gloss": "那只狐狸跳过了狗",
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [
+        {"error_type": "OK", "evidence": "The translation preserves the main meaning."}
+    ],
+    "confidence": 0.9,
 })
 
 _VALID_WORD_JSON = json.dumps({
@@ -74,6 +119,9 @@ _INVALID_SCHEMA_JSON = json.dumps({
     "simplified_en": "Fox jumped",
     "chinese_gloss": "狐狸跳",
     "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
     "confidence": 0.9,
 })
 
@@ -103,6 +151,18 @@ def sid(db: DatabaseConnection, tmp_path: Path) -> int:
             "SELECT id FROM sentences WHERE book_id = ? ORDER BY id LIMIT 1",
             (result.book_id,),
         ).fetchone()["id"]
+
+
+def _sentence_error_codes(db: DatabaseConnection, card_id: int) -> set[str]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT et.code
+                 FROM sentence_card_errors sce
+                 JOIN error_types et ON et.id = sce.error_type_id
+                WHERE sce.card_id = ?""",
+            (card_id,),
+        ).fetchall()
+    return {row["code"] for row in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +227,12 @@ class TestSaveSentenceAnalysisHappyPath:
             ).fetchone()
         assert row["is_valid"] == 1
 
+    def test_predicted_error_codes_synced_to_card_errors(
+        self, db: DatabaseConnection, sid: int
+    ):
+        r = save_sentence_analysis(db, sid, _VALID_SENTENCE_JSON)
+        assert _sentence_error_codes(db, r.card_id) == {"G01"}
+
     def test_accepts_json_with_markdown_fences(self, db: DatabaseConnection, sid: int):
         fenced = "```json\n" + _VALID_SENTENCE_JSON + "\n```"
         r = save_sentence_analysis(db, sid, fenced)
@@ -205,6 +271,38 @@ class TestSaveSentenceAnalysisUpdate:
                 (r2.card_id,),
             ).fetchone()
         assert row["ai_analysis_id"] == r2.cache_id
+
+    def test_diagnosed_error_codes_replace_predicted_codes(
+        self, db: DatabaseConnection, sid: int
+    ):
+        first = save_sentence_analysis(db, sid, _VALID_SENTENCE_JSON)
+        save_sentence_translation(db, sid, "我把修饰语理解错了。")
+
+        second = save_sentence_analysis(db, sid, _VALID_DIAGNOSED_SENTENCE_JSON)
+
+        assert second.card_id == first.card_id
+        assert _sentence_error_codes(db, second.card_id) == {"G02"}
+
+    def test_ok_diagnosis_clears_sentence_error_codes(
+        self, db: DatabaseConnection, sid: int
+    ):
+        first = save_sentence_analysis(db, sid, _VALID_SENTENCE_JSON)
+        save_sentence_translation(db, sid, "那只敏捷的棕色狐狸跳过了懒狗。")
+
+        second = save_sentence_analysis(db, sid, _VALID_OK_DIAGNOSED_SENTENCE_JSON)
+
+        assert second.card_id == first.card_id
+        assert _sentence_error_codes(db, second.card_id) == set()
+
+    def test_translation_changes_sentence_cache_hash(
+        self, db: DatabaseConnection, sid: int
+    ):
+        first = save_sentence_analysis(db, sid, _VALID_SENTENCE_JSON)
+        save_sentence_translation(db, sid, "那只狐狸跳过了狗。")
+
+        second = save_sentence_analysis(db, sid, _VALID_DIAGNOSED_SENTENCE_JSON)
+
+        assert second.cache_id != first.cache_id
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from app.ai.context_builder import (
     build_word_prompt,
     get_sentence_info,
 )
+from app.cards.sentence_card_service import save_sentence_translation
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 
@@ -167,6 +168,25 @@ class TestBuildSentencePrompt:
         # chapter_title placeholder must be gone; some title text should appear
         assert "{{ chapter_title }}" not in prompt
 
+    def test_without_translation_uses_prediction_prompt(self, seeded):
+        db, book_id, sid = seeded
+        prompt = build_sentence_prompt(db, sid)
+        assert "Prediction Mode" in prompt
+        assert '"diagnosis_basis": "predicted"' in prompt
+
+    def test_explicit_translation_uses_diagnosis_prompt(self, seeded):
+        db, book_id, sid = seeded
+        prompt = build_sentence_prompt(db, sid, user_translation="狐狸跳过狗。")
+        assert "Diagnosis Mode" in prompt
+        assert "狐狸跳过狗。" in prompt
+
+    def test_stored_translation_uses_diagnosis_prompt(self, seeded):
+        db, book_id, sid = seeded
+        save_sentence_translation(db, sid, "狐狸跳过狗。")
+        prompt = build_sentence_prompt(db, sid)
+        assert "Diagnosis Mode" in prompt
+        assert "狐狸跳过狗。" in prompt
+
 
 # ---------------------------------------------------------------------------
 # build_word_prompt — happy path & error
@@ -210,7 +230,8 @@ class TestGetSentenceInfo:
         info = get_sentence_info(db, sid)
         expected_keys = {
             "sentence_id", "sentence_text", "book_title",
-            "chapter_title", "context", "related_cards_text", "learner_profile",
+            "chapter_title", "context", "related_cards_text",
+            "learner_profile", "user_translation",
         }
         assert set(info.keys()) >= expected_keys
 

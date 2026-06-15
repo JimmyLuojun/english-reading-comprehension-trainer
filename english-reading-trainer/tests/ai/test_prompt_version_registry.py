@@ -52,11 +52,12 @@ class TestSyncPromptVersions:
     ) -> None:
         result = sync_prompt_versions(db, REAL_PROMPTS_DIR)
 
-        assert result.inserted == 3
-        assert result.total_files == 3
+        assert result.inserted == 4
+        assert result.total_files == 4
         assert result.active_versions == {
             "profile_summary": "v1",
-            "sentence_analysis": "v1",
+            "sentence_analysis_diagnose": "v1",
+            "sentence_analysis_predict": "v1",
             "word_analysis": "v1",
         }
         with db.get_connection() as conn:
@@ -64,8 +65,8 @@ class TestSyncPromptVersions:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 3
-        assert active_count == 3
+        assert count == 4
+        assert active_count == 4
 
     def test_sync_is_idempotent(
         self, db: DatabaseConnection, tmp_path: Path
@@ -104,6 +105,29 @@ class TestSyncPromptVersions:
         assert [(row["version"], row["is_active"]) for row in rows] == [
             ("v1", 0),
             ("v2", 1),
+        ]
+
+    def test_removed_prompt_name_is_deactivated(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        old_path = _write_prompt(prompts_dir, "sentence_analysis", "v1")
+        sync_prompt_versions(db, prompts_dir)
+        old_path.unlink()
+        _write_prompt(prompts_dir, "sentence_analysis_predict", "v1")
+
+        sync_prompt_versions(db, prompts_dir)
+
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT name, is_active
+                   FROM prompt_versions
+                   ORDER BY name"""
+            ).fetchall()
+        assert [(row["name"], row["is_active"]) for row in rows] == [
+            ("sentence_analysis", 0),
+            ("sentence_analysis_predict", 1),
         ]
 
     def test_version_sort_uses_numeric_order(

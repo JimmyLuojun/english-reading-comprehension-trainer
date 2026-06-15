@@ -98,8 +98,8 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 3
-        assert active_count == 3
+        assert count == 4
+        assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
         response = client.get("/")
@@ -160,6 +160,7 @@ class TestReadingAndMarking:
         assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
         assert 'id="selection-toolbar"' in response.text
         assert 'id="word-card-index"' in response.text
+        assert 'id="toolbar-translation-open"' in response.text
         assert "/mark/word" in response.text
 
     def test_read_page_marks_active_sentence_in_metadata(
@@ -190,6 +191,63 @@ class TestReadingAndMarking:
         with db.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM sentence_cards").fetchone()[0]
         assert count == 1
+
+    def test_save_sentence_translation_creates_card_and_redirects(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "猫坐在垫子上。", "return_to": "/cards"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/cards"
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_translation, translation_created_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_translation"] == "猫坐在垫子上。"
+        assert row["translation_created_at"] is not None
+
+    def test_save_sentence_translation_overwrites_previous_value(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "旧译文", "return_to": "/cards"},
+        )
+
+        client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "新译文", "return_to": "/cards"},
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_translation FROM sentence_cards WHERE sentence_id = ?",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_translation"] == "新译文"
+
+    def test_empty_sentence_translation_returns_400(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "  ", "return_to": "/cards"},
+        )
+
+        assert response.status_code == 400
+        assert "user_translation" in response.text
 
     def test_unmark_sentence_archives_card_and_redirects(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

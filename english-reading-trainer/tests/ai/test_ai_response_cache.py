@@ -71,6 +71,18 @@ class TestComputeContentHash:
             != compute_content_hash("Hello.", "context B")
         )
 
+    def test_different_user_translation_different_hash(self) -> None:
+        assert (
+            compute_content_hash("Hello.", "context", "你好。")
+            != compute_content_hash("Hello.", "context", "您好。")
+        )
+
+    def test_translation_is_normalized(self) -> None:
+        assert (
+            compute_content_hash("Hello.", "", "  你好   世界  ")
+            == compute_content_hash("Hello.", "", "你好 世界")
+        )
+
     def test_case_insensitive_sentence(self) -> None:
         # normalize_for_hash lowercases, so these should be equal
         assert (
@@ -89,10 +101,16 @@ class TestComputeContentHash:
         )
 
     def test_hash_matches_manual_sha256(self) -> None:
-        sentence, context = "The cat sat.", "prev sentence"
-        normalised = normalize_for_hash(sentence) + "|" + context.strip()
+        sentence, context, translation = "The cat sat.", "prev sentence", "猫坐着。"
+        normalised = (
+            normalize_for_hash(sentence)
+            + "|"
+            + context.strip()
+            + "|"
+            + normalize_for_hash(translation)
+        )
         expected = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
-        assert compute_content_hash(sentence, context) == expected
+        assert compute_content_hash(sentence, context, translation) == expected
 
 
 # ---------------------------------------------------------------------------

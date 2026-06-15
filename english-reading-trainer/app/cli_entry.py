@@ -37,6 +37,7 @@ from app.cards.sentence_card_service import (
     SentenceCardAlreadyExistsError,
     create_sentence_card,
     list_sentence_cards,
+    save_sentence_translation,
 )
 from app.cards.word_card_service import (
     create_or_update_word_card,
@@ -316,6 +317,12 @@ def read_cmd(
 def mark_sentence(
     sentence_id: int = typer.Argument(..., help="Sentence ID (from 'trainer read')"),
     note: str = typer.Option("", "--note", "-n", help="Personal note for this card"),
+    translation: str = typer.Option(
+        "",
+        "--translation",
+        "-t",
+        help="Your Chinese translation or understanding of this sentence",
+    ),
 ) -> None:
     """Create a sentence card for a difficult sentence."""
     db = _get_db()
@@ -333,14 +340,26 @@ def mark_sentence(
         typer.echo(f"Sentence id={sentence_id} not found.", err=True)
         raise typer.Exit(1)
 
-    try:
-        card_id = create_sentence_card(db, sentence_id, user_note=note)
-    except SentenceCardAlreadyExistsError as e:
-        typer.echo(f"Already marked: {e}")
-        raise typer.Exit(0)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+    if translation.strip():
+        try:
+            card_id = save_sentence_translation(
+                db,
+                sentence_id,
+                translation,
+                user_note=note,
+            )
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+    else:
+        try:
+            card_id = create_sentence_card(db, sentence_id, user_note=note)
+        except SentenceCardAlreadyExistsError as e:
+            typer.echo(f"Already marked: {e}")
+            raise typer.Exit(0)
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
 
     typer.echo(f"Sentence card created (id={card_id})")
     typer.echo(f"  Book:    {row['book_title']}")
@@ -646,12 +665,22 @@ def profile_latest() -> None:
 @ai_app.command("prompt-sentence")
 def ai_prompt_sentence(
     sentence_id: int = typer.Argument(..., help="Sentence ID from 'trainer read'"),
+    translation: str = typer.Option(
+        "",
+        "--translation",
+        "-t",
+        help="Temporary user translation for diagnosis prompt",
+    ),
 ) -> None:
     """Print the filled analysis prompt — paste it into Claude / Gemini / Codex chat."""
     from app.ai.context_builder import build_sentence_prompt
     db = _get_db()
     try:
-        prompt = build_sentence_prompt(db, sentence_id)
+        prompt = build_sentence_prompt(
+            db,
+            sentence_id,
+            user_translation=translation if translation.strip() else None,
+        )
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

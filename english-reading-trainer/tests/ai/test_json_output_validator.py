@@ -32,7 +32,20 @@ VALID_SENTENCE_DATA = {
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
     "confidence": 0.9,
+}
+
+VALID_DIAGNOSED_SENTENCE_DATA = {
+    **VALID_SENTENCE_DATA,
+    "predicted_error_types": [],
+    "diagnosis_basis": "user_translation",
+    "diagnosed_error_types": ["G02"],
+    "diagnosis_evidence": [
+        {"error_type": "G02", "evidence": "The modifier target is mistranslated."}
+    ],
 }
 
 VALID_WORD_DATA = {
@@ -156,6 +169,13 @@ class TestParseAndValidate:
         result = parse_and_validate(json.dumps(VALID_SENTENCE_DATA), SENTENCE_ANALYSIS_SCHEMA)
         assert isinstance(result, dict)
 
+    def test_valid_diagnosed_sentence_json_string(self) -> None:
+        result = parse_and_validate(
+            json.dumps(VALID_DIAGNOSED_SENTENCE_DATA),
+            SENTENCE_ANALYSIS_SCHEMA,
+        )
+        assert result["diagnosis_basis"] == "user_translation"
+
 
 # ---------------------------------------------------------------------------
 # _semantic_validate — 100% branch coverage
@@ -200,6 +220,37 @@ class TestSemanticValidate:
             "clauses": [
                 {"type": "relative", "text": "which...", "role": "mod"},
                 {"type": "main", "text": "He left", "role": "main"},
+            ],
+        }
+        _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_diagnosed_sentence_without_matching_evidence_raises(self) -> None:
+        bad = {
+            **VALID_DIAGNOSED_SENTENCE_DATA,
+            "diagnosis_evidence": [
+                {"error_type": "D01", "evidence": "Different issue."}
+            ],
+        }
+        with pytest.raises(ValidationError, match="matching"):
+            _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_correct_translation_requires_ok_evidence(self) -> None:
+        bad = {
+            **VALID_DIAGNOSED_SENTENCE_DATA,
+            "diagnosed_error_types": [],
+            "diagnosis_evidence": [
+                {"error_type": "G02", "evidence": "No actual error."}
+            ],
+        }
+        with pytest.raises(ValidationError, match="OK"):
+            _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_correct_translation_with_ok_evidence_passes(self) -> None:
+        data = {
+            **VALID_DIAGNOSED_SENTENCE_DATA,
+            "diagnosed_error_types": [],
+            "diagnosis_evidence": [
+                {"error_type": "OK", "evidence": "Meaning is preserved."}
             ],
         }
         _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)

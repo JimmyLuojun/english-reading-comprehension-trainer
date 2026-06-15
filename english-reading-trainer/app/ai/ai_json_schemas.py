@@ -10,6 +10,7 @@ from app.db_models import VALID_ERROR_CODES
 
 # Sorted for determinism in error messages and test assertions
 _ERROR_CODES = sorted(VALID_ERROR_CODES)
+_DIAGNOSIS_EVIDENCE_CODES = _ERROR_CODES + ["OK"]
 
 # ---------------------------------------------------------------------------
 # Sentence analysis schema  (§9.1)
@@ -20,9 +21,36 @@ SENTENCE_ANALYSIS_SCHEMA: dict = {
     "required": [
         "subject_skeleton", "clauses", "modifiers", "logic_markers",
         "anaphora", "simplified_en", "chinese_gloss",
-        "predicted_error_types", "confidence",
+        "predicted_error_types", "diagnosis_basis",
+        "diagnosed_error_types", "diagnosis_evidence", "confidence",
     ],
     "additionalProperties": False,
+    "allOf": [
+        {
+            "if": {
+                "properties": {"diagnosis_basis": {"const": "predicted"}},
+                "required": ["diagnosis_basis"],
+            },
+            "then": {
+                "properties": {
+                    "predicted_error_types": {"minItems": 1},
+                    "diagnosed_error_types": {"maxItems": 0},
+                    "diagnosis_evidence": {"maxItems": 0},
+                },
+            },
+        },
+        {
+            "if": {
+                "properties": {"diagnosis_basis": {"const": "user_translation"}},
+                "required": ["diagnosis_basis"],
+            },
+            "then": {
+                "properties": {
+                    "diagnosis_evidence": {"minItems": 1},
+                },
+            },
+        },
+    ],
     "properties": {
         "subject_skeleton": {"type": "string", "minLength": 1},
         "clauses": {
@@ -83,9 +111,32 @@ SENTENCE_ANALYSIS_SCHEMA: dict = {
         "chinese_gloss":  {"type": "string", "minLength": 1},
         "predicted_error_types": {
             "type": "array",
-            "minItems": 1,
             "maxItems": 3,
             "items": {"type": "string", "enum": _ERROR_CODES},
+        },
+        "diagnosis_basis": {
+            "type": "string",
+            "enum": ["predicted", "user_translation"],
+        },
+        "diagnosed_error_types": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {"type": "string", "enum": _ERROR_CODES},
+        },
+        "diagnosis_evidence": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["error_type", "evidence"],
+                "additionalProperties": False,
+                "properties": {
+                    "error_type": {
+                        "type": "string",
+                        "enum": _DIAGNOSIS_EVIDENCE_CODES,
+                    },
+                    "evidence": {"type": "string", "minLength": 1},
+                },
+            },
         },
         "confidence": {
             "type": "number",

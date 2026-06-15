@@ -179,6 +179,8 @@ class SentenceCardRecord:
     due_at: datetime
     user_note: str = ""
     ai_analysis_id: Optional[int] = None
+    user_translation: Optional[str] = None
+    translation_created_at: Optional[datetime] = None
 
 
 @dataclass

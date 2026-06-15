@@ -105,8 +105,8 @@ class TestBooksList:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 3
-        assert active_count == 3
+        assert count == 4
+        assert active_count == 4
 
     def test_shows_imported_book(self, db: DatabaseConnection, tmp_path: Path) -> None:
         _seed_book_and_sentence(db, tmp_path)
@@ -283,6 +283,26 @@ class TestMarkSentence:
                 "SELECT user_note FROM sentence_cards WHERE sentence_id = ?", (sid,)
             ).fetchone()
         assert row["user_note"] == "hard clause"
+
+    def test_translation_option_stores_user_translation(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        result = runner.invoke(
+            app,
+            ["mark", "sentence", str(sid), "--translation", "猫坐在垫子上。"],
+        )
+
+        assert result.exit_code == 0
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_translation, translation_created_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sid,),
+            ).fetchone()
+        assert row["user_translation"] == "猫坐在垫子上。"
+        assert row["translation_created_at"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +664,9 @@ _VALID_SENTENCE_JSON = json.dumps({
     "simplified_en": "The cat sat on the mat",
     "chinese_gloss": "猫坐在垫子上",
     "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
     "confidence": 0.9,
 })
 

@@ -29,19 +29,34 @@ _MAX_RELATED    = 5   # max related cards to include in prompt
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_sentence_prompt(db: DatabaseConnection, sentence_id: int) -> str:
+def build_sentence_prompt(
+    db: DatabaseConnection,
+    sentence_id: int,
+    user_translation: str | None = None,
+) -> str:
     """
-    Return a fully rendered sentence_analysis prompt for *sentence_id*.
+    Return a fully rendered sentence-analysis prompt for *sentence_id*.
+
+    If a user translation is supplied or already stored on the active
+    sentence card, the diagnosis prompt is used. Otherwise the prediction
+    prompt is used.
     Raises ValueError if sentence not found.
     """
     ctx = _fetch_sentence_context(db, sentence_id)
-    template = _load_prompt("sentence_analysis", "v1")
+    cleaned_translation = _resolve_user_translation(user_translation, ctx)
+    prompt_name = (
+        "sentence_analysis_diagnose"
+        if cleaned_translation
+        else "sentence_analysis_predict"
+    )
+    template = _load_prompt(prompt_name, "v1")
     return _render(template, {
         "sentence":        ctx["sentence_text"],
         "context":         ctx["context"],
         "chapter_title":   ctx["chapter_title"],
         "related_cards":   ctx["related_cards_text"],
         "learner_profile": ctx["learner_profile"],
+        "user_translation": cleaned_translation or "(none)",
     })
 
 
@@ -79,10 +94,13 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
         sent = conn.execute(
             """SELECT s.id, s.text, s.idx, s.book_id, s.chapter_id,
                       b.title AS book_title,
-                      c.title AS chapter_title
+                      c.title AS chapter_title,
+                      sc.user_translation
                FROM sentences s
                JOIN books    b ON s.book_id    = b.id
                JOIN chapters c ON s.chapter_id = c.id
+               LEFT JOIN sentence_cards sc
+                 ON sc.sentence_id = s.id AND sc.archived_at IS NULL
                WHERE s.id = ?""",
             (sentence_id,),
         ).fetchone()
@@ -162,6 +180,7 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
         "context":           context,
         "related_cards_text": related_cards_text,
         "learner_profile":   learner_profile,
+        "user_translation":   sent["user_translation"] or "",
     }
 
 
@@ -175,6 +194,15 @@ def _load_prompt(name: str, version: str) -> str:
         raise FileNotFoundError(f"Prompt not found: {path}")
     text = path.read_text(encoding="utf-8")
     return _strip_frontmatter(text)
+
+
+def _resolve_user_translation(
+    explicit_translation: str | None,
+    ctx: dict,
+) -> str:
+    if explicit_translation is not None:
+        return explicit_translation.strip()
+    return str(ctx.get("user_translation") or "").strip()
 
 
 def _strip_frontmatter(text: str) -> str:

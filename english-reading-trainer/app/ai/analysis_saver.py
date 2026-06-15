@@ -19,6 +19,7 @@ from app.db_models import (
     SM2_DEFAULT_EF,
     SM2_INITIAL_INTERVAL_DAYS,
     SM2_INITIAL_REPETITIONS,
+    VALID_ERROR_CODES,
 )
 from jsonschema import ValidationError
 
@@ -62,6 +63,11 @@ def save_sentence_analysis(
         sent_text = conn.execute(
             "SELECT text FROM sentences WHERE id = ?", (sentence_id,)
         ).fetchone()["text"]
+        card_row = conn.execute(
+            "SELECT user_translation FROM sentence_cards WHERE sentence_id = ?",
+            (sentence_id,),
+        ).fetchone()
+        user_translation = card_row["user_translation"] if card_row else None
 
     is_valid = True
     error = ""
@@ -75,7 +81,7 @@ def save_sentence_analysis(
         error = str(exc)
         response_json = raw_json
 
-    content_hash = compute_content_hash(sent_text, "")
+    content_hash = compute_content_hash(sent_text, "", user_translation)
     cache_id = save_to_cache(
         db, content_hash, prompt_version, model, response_json, is_valid
     )
@@ -85,6 +91,7 @@ def save_sentence_analysis(
 
     if is_valid:
         card_id, card_created = _upsert_sentence_card(db, sentence_id, cache_id)
+        _sync_sentence_card_errors(db, card_id, _sentence_error_codes(data))
 
     return SaveResult(
         cache_id=cache_id,
@@ -264,6 +271,43 @@ def _upsert_word_card(
             ),
         ).lastrowid
     return card_id, True
+
+
+def _sentence_error_codes(data: dict) -> tuple[str, ...]:
+    if data.get("diagnosis_basis") == "user_translation":
+        return tuple(
+            code for code in data.get("diagnosed_error_types", [])
+            if code in VALID_ERROR_CODES
+        )
+    return tuple(
+        code for code in data.get("predicted_error_types", [])
+        if code in VALID_ERROR_CODES
+    )
+
+
+def _sync_sentence_card_errors(
+    db: DatabaseConnection,
+    card_id: int,
+    error_codes: tuple[str, ...],
+) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "DELETE FROM sentence_card_errors WHERE card_id = ?",
+            (card_id,),
+        )
+        for code in error_codes:
+            row = conn.execute(
+                "SELECT id FROM error_types WHERE code = ?",
+                (code,),
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                """INSERT OR IGNORE INTO sentence_card_errors
+                   (card_id, error_type_id)
+                   VALUES (?, ?)""",
+                (card_id, row["id"]),
+            )
 
 
 def _utcnow() -> str:

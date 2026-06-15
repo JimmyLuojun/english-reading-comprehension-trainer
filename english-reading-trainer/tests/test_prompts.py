@@ -2,7 +2,7 @@
 Tests for prompt v1 files in prompts/.
 
 Validates:
-- All three prompt files exist
+- All current prompt files exist
 - Frontmatter is present and contains required fields (name, version, reason)
 - Version string matches filename
 - JSON schema embedded in sentence/word prompts references only valid error codes
@@ -23,20 +23,24 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis": PROMPTS_DIR / "sentence_analysis.v1.md",
-    "word_analysis":     PROMPTS_DIR / "word_analysis.v1.md",
-    "profile_summary":   PROMPTS_DIR / "profile_summary.v1.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v1.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v1.md",
+    "word_analysis":              PROMPTS_DIR / "word_analysis.v1.md",
+    "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
 
 # Required template variables per prompt
 REQUIRED_VARS = {
-    "sentence_analysis": ["sentence", "context", "chapter_title",
-                          "related_cards", "learner_profile"],
-    "word_analysis":     ["surface_form", "sentence", "context",
-                          "related_cards", "learner_profile"],
-    "profile_summary":   ["lookback_days", "total_reviews",
-                          "sentence_card_count", "word_card_count",
-                          "error_type_stats"],
+    "sentence_analysis_predict": ["sentence", "context", "chapter_title",
+                                  "related_cards", "learner_profile"],
+    "sentence_analysis_diagnose": ["sentence", "user_translation", "context",
+                                   "chapter_title", "related_cards",
+                                   "learner_profile"],
+    "word_analysis": ["surface_form", "sentence", "context",
+                      "related_cards", "learner_profile"],
+    "profile_summary": ["lookback_days", "total_reviews",
+                        "sentence_card_count", "word_card_count",
+                        "error_type_stats"],
 }
 
 # Profile prompt must contain these four headings
@@ -135,9 +139,10 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis", "v1"),
-        ("word_analysis",     "v1"),
-        ("profile_summary",   "v1"),
+        ("sentence_analysis_predict", "v1"),
+        ("sentence_analysis_diagnose", "v1"),
+        ("word_analysis", "v1"),
+        ("profile_summary", "v1"),
     ])
     def test_version_matches_filename(self, name: str, expected_version: str) -> None:
         fm = _parse_frontmatter(_read(name))
@@ -159,7 +164,7 @@ class TestFrontmatter:
 # ---------------------------------------------------------------------------
 
 class TestTemplateVariables:
-    @pytest.mark.parametrize("name", ["sentence_analysis", "word_analysis", "profile_summary"])
+    @pytest.mark.parametrize("name", list(PROMPT_FILES))
     def test_required_vars_present(self, name: str) -> None:
         found = _extract_template_vars(_read(name))
         for var in REQUIRED_VARS[name]:
@@ -171,28 +176,30 @@ class TestTemplateVariables:
 # ---------------------------------------------------------------------------
 
 class TestErrorCodesInPrompts:
-    def test_sentence_prompt_references_only_valid_codes(self) -> None:
-        codes = _extract_error_codes_in_prompt(_read("sentence_analysis"))
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
+    def test_sentence_prompt_references_only_valid_codes(self, name: str) -> None:
+        codes = _extract_error_codes_in_prompt(_read(name))
         invalid = codes - VALID_ERROR_CODES
-        assert not invalid, f"sentence_analysis references unknown error codes: {invalid}"
+        assert not invalid, f"{name} references unknown error codes: {invalid}"
 
     def test_word_prompt_references_only_valid_codes(self) -> None:
         codes = _extract_error_codes_in_prompt(_read("word_analysis"))
         invalid = codes - VALID_ERROR_CODES
         assert not invalid, f"word_analysis references unknown error codes: {invalid}"
 
-    def test_sentence_prompt_covers_all_layers(self) -> None:
-        codes = _extract_error_codes_in_prompt(_read("sentence_analysis"))
-        assert any(c.startswith("G") for c in codes), "sentence_analysis missing grammar codes"
-        assert any(c.startswith("L") for c in codes), "sentence_analysis missing lexical codes"
-        assert any(c.startswith("D") for c in codes), "sentence_analysis missing discourse codes"
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
+    def test_sentence_prompt_covers_all_layers(self, name: str) -> None:
+        codes = _extract_error_codes_in_prompt(_read(name))
+        assert any(c.startswith("G") for c in codes), f"{name} missing grammar codes"
+        assert any(c.startswith("L") for c in codes), f"{name} missing lexical codes"
+        assert any(c.startswith("D") for c in codes), f"{name} missing discourse codes"
 
     def test_word_prompt_covers_lexical_layer(self) -> None:
         codes = _extract_error_codes_in_prompt(_read("word_analysis"))
         assert any(c.startswith("L") for c in codes), "word_analysis must reference lexical codes"
 
     def test_few_shot_example_codes_are_valid(self) -> None:
-        for name in ("sentence_analysis", "word_analysis"):
+        for name in ("sentence_analysis_predict", "sentence_analysis_diagnose", "word_analysis"):
             codes = _extract_error_codes_in_prompt(_read(name))
             invalid = codes - VALID_ERROR_CODES
             assert not invalid, f"{name} few-shot uses invalid codes: {invalid}"
@@ -206,7 +213,8 @@ class TestJSONSchemaFieldsInPrompts:
     SENTENCE_FIELDS = [
         "subject_skeleton", "clauses", "modifiers", "logic_markers",
         "anaphora", "simplified_en", "chinese_gloss",
-        "predicted_error_types", "confidence",
+        "predicted_error_types", "diagnosis_basis",
+        "diagnosed_error_types", "diagnosis_evidence", "confidence",
     ]
     WORD_FIELDS = [
         "lemma", "lexical_type", "pos", "meaning_in_context",
@@ -214,10 +222,11 @@ class TestJSONSchemaFieldsInPrompts:
         "morphology", "predicted_error_types", "confidence",
     ]
 
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
     @pytest.mark.parametrize("field", SENTENCE_FIELDS)
-    def test_sentence_prompt_contains_field(self, field: str) -> None:
-        assert field in _read("sentence_analysis"), (
-            f"sentence_analysis missing JSON field '{field}'"
+    def test_sentence_prompt_contains_field(self, name: str, field: str) -> None:
+        assert field in _read(name), (
+            f"{name} missing JSON field '{field}'"
         )
 
     @pytest.mark.parametrize("field", WORD_FIELDS)
@@ -260,11 +269,12 @@ class TestProfilePromptStructure:
 # ---------------------------------------------------------------------------
 
 class TestPromptInstructionSanity:
-    def test_sentence_prompt_forbids_output_outside_json(self) -> None:
-        text = _read("sentence_analysis")
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
+    def test_sentence_prompt_forbids_output_outside_json(self, name: str) -> None:
+        text = _read(name)
         assert "no markdown fences" in text.lower() or "nothing outside" in text.lower() or \
                "do not output anything outside" in text.lower(), \
-            "sentence_analysis should instruct model not to wrap output in markdown fences"
+            f"{name} should instruct model not to wrap output in markdown fences"
 
     def test_word_prompt_forbids_output_outside_json(self) -> None:
         text = _read("word_analysis")
@@ -272,19 +282,21 @@ class TestPromptInstructionSanity:
                "no markdown fences" in text.lower(), \
             "word_analysis should instruct model not to output outside JSON"
 
-    def test_sentence_prompt_requires_one_main_clause(self) -> None:
-        assert "main" in _read("sentence_analysis"), \
-            "sentence_analysis should require exactly one main clause"
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
+    def test_sentence_prompt_requires_one_main_clause(self, name: str) -> None:
+        assert "main" in _read(name), \
+            f"{name} should require exactly one main clause"
 
     def test_word_prompt_specifies_lexical_type_choices(self) -> None:
         text = _read("word_analysis")
         for lt in ("word", "phrase", "collocation"):
             assert lt in text, f"word_analysis missing lexical_type value '{lt}'"
 
-    def test_sentence_prompt_has_few_shot_example(self) -> None:
-        assert "Few-shot Example" in _read("sentence_analysis") or \
-               "few-shot" in _read("sentence_analysis").lower(), \
-            "sentence_analysis should contain a few-shot example"
+    @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
+    def test_sentence_prompt_has_few_shot_example(self, name: str) -> None:
+        assert "Few-shot Example" in _read(name) or \
+               "few-shot" in _read(name).lower(), \
+            f"{name} should contain a few-shot example"
 
     def test_word_prompt_has_few_shot_example(self) -> None:
         assert "Few-shot Example" in _read("word_analysis") or \
@@ -292,7 +304,7 @@ class TestPromptInstructionSanity:
             "word_analysis should contain a few-shot example"
 
     def test_confidence_field_range_specified(self) -> None:
-        for name in ("sentence_analysis", "word_analysis"):
+        for name in ("sentence_analysis_predict", "sentence_analysis_diagnose", "word_analysis"):
             text = _read(name)
             assert "[0.0, 1.0]" in text or "0.0, 1.0" in text, \
                 f"{name} should specify confidence range [0.0, 1.0]"
