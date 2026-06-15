@@ -1537,5 +1537,5 @@ LIMIT ? OFFSET ?
 - [x] §20 浮层状态机修复与词卡详情入口统一
 - [x] §21 词汇 AI 分析面板（基础版）
 - [x] §22 词汇 AI 分析面板改进：原文高亮、错因展开、why_this_word、用户笔记区
-- [ ] §23 Cards 页与 Review Queue 信息增强：Definition/AI Meaning/Source 列、复习答案 Reveal
+- [x] §23 Cards 页与 Review Queue 信息增强：Definition/AI Meaning/Source 列、复习答案 Reveal
 
