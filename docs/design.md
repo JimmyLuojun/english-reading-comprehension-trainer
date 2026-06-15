@@ -500,6 +500,248 @@ english-reading-trainer/
 
 ---
 
+## 14. 阅读交互：选中即操作（取代每句挂表单）
+
+### 14.1 痛点
+
+第一版 Web UI 把每个句子下方挂"Mark sentence / Mark word"两个表单，视觉嘈杂，打断连贯阅读，且强迫用户对每个句子做决策。这与"阅读为主、卡点为辅"的产品定位相反。
+
+### 14.2 目标交互
+
+参考微信读书：阅读页只渲染干净正文。用户操作由**文本选中**触发——选中即弹出紧贴选区的浮层工具条，未选中时完全无干扰。
+
+### 14.3 行为映射
+
+```text
+选中文本与某个完整句子匹配   → 浮层显示：
+  · 标为难句           POST /mark/sentence/<id>
+  · 写下我的理解        → 弹出译文输入框，与难句一起入库（见 §15）
+  · AI 分析            POST /analyze/sentence/<id>
+  · 查词              （第二版）
+
+选中文本是句中片段        → 浮层显示：
+  · 标为生词           POST /mark/word（surface_form=选中文本）
+  · 标为短语            ↑ 同上，lexical_type=phrase
+  · 标为搭配            ↑ 同上，lexical_type=collocation
+  · 查词              （第二版）
+
+未选中                  → 浮层隐藏
+```
+
+### 14.4 DOM 与定位
+
+- 每个句子在 HTML 中包一层 `<span data-sentence-id="N" data-chapter-id="M">...</span>`。
+- 前端用原生 `selectionchange` 事件监听选区变化。
+- 通过 `Range.getBoundingClientRect()` 定位浮层位置（贴近选区上方或下方）。
+- 通过 `Range.commonAncestorContainer` 反查所在的 `data-sentence-id`，作为后端调用的目标。
+- 当选区跨越多个句子时，浮层禁用所有"句级"操作，只允许取消选区。
+
+### 14.5 实现范围
+
+- 不引入前端框架，仅用原生 JavaScript（约 80 行）。
+- 浮层中的"提交"行为复用现有 POST 端点；后端无需为浮层新增控制层。
+- 面向单用户场景，不做 IE / 极旧浏览器兼容。
+
+`[新增 2026-06-15]`
+
+---
+
+## 15. 用户译文驱动 AI 诊断（取代纯预测）
+
+### 15.1 痛点
+
+§9.1 的 `predicted_error_types` 是 AI 看着句子结构"猜"普通学习者可能犯什么错，与具体用户的真实理解偏差脱钩。这种"拍脑袋预测"既不准，也无法反映用户的实际薄弱点。
+
+### 15.2 设计原则
+
+**有证据时做诊断，无证据时做预测，二者不混用。**
+
+- 用户提供译文 → AI 根据"原文 vs 用户译文"定位理解偏差，给出**诊断错因**。
+- 用户未提供译文 → AI 退回当前预测模式，但结果在 UI 上明确标注为"预测"，仅作为弱信号。
+
+### 15.3 数据模型变更（修订 §1.2）
+
+`sentence_cards` 表新增字段：
+
+```sql
+user_translation         -- 用户译文，可空
+translation_created_at   -- 译文写入时间，可空
+```
+
+不破坏现有数据：旧卡 `user_translation` 为 NULL，AI 分析自动走预测分支。
+
+第一版只存"最新一次"译文，不做历史版本。用户重新提交译文即覆盖旧值，并触发缓存重算（见 §15.4）。
+
+### 15.4 缓存键变更（修订 §5.1）
+
+```text
+content_hash = SHA256(
+    normalize(sentence_text)
+    + context_window_text
+    + normalize(user_translation or "")
+)
+```
+
+同一句话配不同译文 → 不同 `content_hash` → 不共享缓存。这是必须的：诊断结果依赖于译文。
+
+### 15.5 AI 输出 Schema 变更（修订 §9.1）
+
+句子分析输出新增一组字段，与原字段并存：
+
+```json
+{
+  "...": "（§9.1 原有字段保留）",
+
+  "diagnosis_basis": "predicted | user_translation",
+
+  "diagnosed_error_types": ["G02", "D01"],
+  "diagnosis_evidence": [
+    {
+      "error_type": "G02",
+      "evidence": "原文 'the orthodox consensus underpinning evolutionary psychology' 中 underpinning 是后置定语修饰 consensus；用户译文未体现修饰方向。"
+    }
+  ]
+}
+```
+
+- `diagnosis_basis = "user_translation"` 时，`diagnosed_error_types` 与 `diagnosis_evidence` 必填，`predicted_error_types` 可空。
+- `diagnosis_basis = "predicted"` 时，反之。
+
+`diagnosed_error_types` 是后续画像（§11）与队列优先级（§7.5 错因覆盖度）的**首选信号源**；`predicted_error_types` 只作为退化补充，权重显著低于诊断结果。
+
+### 15.6 Prompt 分版（修订 §10）
+
+按交互模式拆为两套 Prompt，各自独立版本号管理：
+
+```text
+prompts/
+  sentence_analysis_predict.v1.md    -- 无译文，预测模式
+  sentence_analysis_diagnose.v1.md   -- 有译文，诊断模式
+```
+
+诊断版的核心指令是"找出译文与原文之间的具体偏差，归类到 §2 错因封闭枚举；不得编造未在译文中体现的错误"。
+
+`[新增 2026-06-15]`
+
+---
+
+## 16. AI Provider 配置
+
+第一版与未来均使用 OpenAI 兼容接口，通过环境变量切换：
+
+```text
+OPENAI_API_KEY    — API key
+OPENAI_BASE_URL   — endpoint（DeepSeek / OpenAI / Ollama / Azure 等）
+TRAINER_MODEL     — 模型名，默认 gpt-4o-mini
+```
+
+**计划默认 Provider：DeepSeek。** 其 API 与 OpenAI SDK 完全兼容，只需设置：
+
+```text
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+TRAINER_MODEL=deepseek-chat
+```
+
+现有 `llm_sentence_analyzer.py` / `llm_word_analyzer.py` 无需改动代码即可切换。
+
+`[新增 2026-06-15]`
+
+---
+
+## 17. 阅读视图排版（取代数据表样式）
+
+### 17.1 痛点
+
+现行 `/read/<book_id>` 把每个句子渲染为带边框的 `<article class="sentence">` 卡片，前缀显示 `#ID`，主区域宽 1180px，15px 系统无衬线字体、1.5 行高。这是给"数据表 / 管理后台"用的样式，不适合长时间英文阅读。
+
+§14 解决"操作干扰"，本节解决"排版根本不是给人读的"。两节合并才构成 WeChat 读书式体验。
+
+### 17.2 段落渲染（启用既有 paragraphs 表）
+
+`txt_importer` / `epub_importer` 已经把段落写入 `paragraphs` 表，每个 sentence 持有 `paragraph_id`。阅读视图按 `paragraph_id` 分组渲染：
+
+```html
+<article class="reader">
+  <h1 class="reader-title">{book.title}</h1>
+  <h2 class="reader-chapter">Chapter {idx}: {chapter.title}</h2>
+
+  <p class="reader-para">
+    <span data-sentence-id="17">Far from being mere ephemeral manifestations...</span>
+    <span data-sentence-id="18">Recent neuroimaging paradigm shifts...</span>
+  </p>
+
+  <p class="reader-para">
+    <span data-sentence-id="19">In this intricate biological milieu...</span>
+    ...
+  </p>
+</article>
+```
+
+- 句子边界对用户**不可见**，仅作为 §14 选区映射用。
+- 句子 ID 只存在于 `data-sentence-id` 属性，不渲染到正文。
+- 句间用一个空格连接，不换行。
+
+### 17.3 排版与字体
+
+```css
+.reader {
+  max-width: 680px;
+  margin: 32px auto 96px;
+  padding: 0 16px;
+}
+.reader-title    { font-size: 28px; margin: 0 0 4px; }
+.reader-chapter  { font-size: 16px; color: var(--muted); margin: 0 0 32px; font-weight: 400; }
+.reader-para {
+  font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
+  font-size: 18px;
+  line-height: 1.75;
+  margin: 0 0 1.2em;
+  color: #1a1a1a;
+}
+```
+
+理由：
+- `max-width: 680px` 落在英文长文阅读舒适带（每行 60–75 字符）。
+- 衬线字体 + 1.75 行高 + 18px 是 Kindle / 微信读书的常见组合。
+- 中文衬线后备 `Source Han Serif SC`（思源宋体）/ `Songti SC`，便于将来导入中文文本时复用。
+
+### 17.4 卡片移除与标记态可视化
+
+阅读流去卡片化，已标记的内容用**纸书荧光笔风**而不是边框来提示：
+
+```css
+[data-sentence-id].marked {
+  background: linear-gradient(transparent 60%, #ffe58a 60%);
+}
+[data-word-card] {
+  text-decoration: underline dotted #f59e0b;
+  text-underline-offset: 3px;
+}
+```
+
+- 删除 `.sentence` 容器的 `background / border / padding / margin`，阅读流不再有"卡片感"。
+- 已标记为难句的句子加底色高亮。
+- 已圈出的生词/短语用橙色点状下划线。
+
+### 17.5 顶部导航与全局样式隔离
+
+- 现有顶部 `nav` 在阅读视图保留，但视觉权重降级（高度收窄、滚动时半透明）。
+- 阅读视图主区域**不继承** `main { width: min(1180px, ...) }`，独立用 `.reader { max-width: 680px }` 覆盖。
+- 其他页面（`/books` / `/cards` / `/review` / `/profile`）维持当前管理后台样式，不强行套用阅读字体。
+
+### 17.6 移动端
+
+- 阅读视图在屏宽 `<= 780px` 时改用：`padding: 0 20px`、`font-size: 17px`、`line-height: 1.7`。
+- §14 浮层在移动端贴底显示，类似 iOS 的 share sheet 样式（避免覆盖正在选中的文字）。
+
+### 17.7 主题（暂缓）
+
+夜间 / 米黄 / 高对比三主题挪到第二版。第一版只做白底黑字，避免主题切换牵动 §14 浮层与高亮色的视觉调试。
+
+`[新增 2026-06-15]`
+
+---
+
 ## 评审清单
 
 请对以下小节标 `yes` / `no` / 改：
@@ -518,4 +760,8 @@ english-reading-trainer/
 - [x] §11 画像生成时机
 - [x] §12 技术栈与目录
 - [x] §13 开工顺序
+- [ ] §14 阅读交互：选中即操作
+- [ ] §15 用户译文驱动 AI 诊断
+- [ ] §16 AI Provider 配置（DeepSeek 默认）
+- [ ] §17 阅读视图排版
 
