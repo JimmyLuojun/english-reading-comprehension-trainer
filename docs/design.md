@@ -237,7 +237,7 @@ cache_key    = (content_hash, prompt_version, model)
 
 ## 6. EPUB 重复导入的幂等性
 
-**默认：按 ****************************`file_hash`**************************** 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
+**默认：按 ****************************************`file_hash`**************************************** 识别同一本书，更新元数据与章节结构，但不动卡片和复习记录。**
 
 - 若 `file_hash` 命中：报告"已存在，是否更新结构？"；用户选更新则重新解析章节并尝试重新绑定 `sentences.text_hash`，绑不上的句子标记为 `orphaned`。
 - 若 `file_hash` 不同但 `title + author` 命中：视为新版本，提示用户手动合并。
@@ -857,7 +857,7 @@ value: { "chapter_idx": N, "top_sentence_id": M, "ts": ... }
 ```
 
 - **写入**：滚动停止 300ms 后，记录当前视口顶部最近的 `data-sentence-id`。
-- **读取**：访问 `/read/<book_id>` **不带 ********************`chapter`******************** 参数**时回到上次 `chapter_idx`；DOM 渲染完成后用 `getElementById` + `scrollIntoView` 定位到 `top_sentence_id`。
+- **读取**：访问 `/read/<book_id>` **不带 ********************************`chapter`******************************** 参数**时回到上次 `chapter_idx`；DOM 渲染完成后用 `getElementById` + `scrollIntoView` 定位到 `top_sentence_id`。
 - 显式带 `chapter` 参数时不恢复，让用户能精确跳章。
 
 不做 DB 持久化的理由：跨设备同步在第一版排除（§0）；DB 写入频繁会拖慢阅读体验，`localStorage` 写入是同步零延迟。
@@ -968,7 +968,7 @@ analyzed-stale   黄色底色 + 左侧 1px 虚线蓝条（prompt 版本变了，
 
 ### 19.1 场景
 
-用户在阅读过程中看到带点状下划线的词/短语（已标为 word_card），想**点击查看自己之前查阅过的释义或记录的备注**，而不必离开阅读页跳转到 `/cards` 列表。
+用户在阅读过程中看到带点状下划线的词/短语（已标为 word\_card），想**点击查看自己之前查阅过的释义或记录的备注**，而不必离开阅读页跳转到 `/cards` 列表。
 
 当前 `word_cards` 表已有 `current_meaning TEXT` 和 `user_note TEXT` 字段，但阅读视图没有读取和展示它们的入口。本节补全这条交互。
 
@@ -1065,6 +1065,7 @@ WHERE id = ? AND archived_at IS NULL
 **Bug A — 单击已标记词，浮层瞬间消失**
 
 执行链：
+
 1. 用户点击带点状下划线的词（如 `ontological`）
 2. `reader.click` 处理器命中 `wordSpan && !hasSelection` → `showWordDetail()` 显示 wordDetail
 3. 浏览器随后触发 `selectionchange`（点击移动光标，即使 collapsed 也算变化）
@@ -1075,10 +1076,11 @@ WHERE id = ? AND archived_at IS NULL
 **Bug B — 双击已标记词，wordDetail 与 wordExisting 同时显示**
 
 执行链：
+
 1. 双击的第一次 click 触发：选区尚未建立，`showWordDetail()` 运行，wordDetail 可见
 2. 双击建立选区 = 词本身 → `selectionchange` → `updateToolbar()`
 3. `updateToolbar()` 走 `spans.length === 1 && activeWordCardId` 分支 → `setVisible(wordExisting, true)`
-4. **但全程不调用 `setVisible(wordDetail, false)`**，wordDetail 残留
+4. **但全程不调用 \*\*\*\*\*\*\*\*****`setVisible(wordDetail, false)`**，wordDetail 残留
 5. 用户体验：两个面板叠加，存在两组 "Remove from cards" 按钮，操作语义重复
 
 ### 20.2 根因
@@ -1086,7 +1088,7 @@ WHERE id = ? AND archived_at IS NULL
 `#selection-toolbar` 内部有 5 个独立 group（`sentenceForm` / `wordForm` / `wordExisting` / `wordDetail` / `crossSentence`），但**没有集中互斥控制**：
 
 - `showWordDetail()` 进入时主动隐藏其他 4 个 group，行为正确。
-- `updateToolbar()` 处理选区变化时只管 `sentenceForm` / `wordForm` / `wordExisting` / `crossSentence` 四组，**从不触碰 `wordDetail`**。
+- `updateToolbar()` 处理选区变化时只管 `sentenceForm` / `wordForm` / `wordExisting` / `crossSentence` 四组，**从不触碰 \*\*\*\*\*\*\*\*****`wordDetail`**。
 
 并且 `wordDetail` 的入口（`reader.click` 监听器）与 `wordExisting` 的入口（`updateToolbar` 中的 `activeWordCardId` 分支）**职责重叠**：前者要求 "无选区"，后者要求 "选区命中已有词卡"。两种交互路径都指向同一信息（释义/备注/移除），却使用两套不同 UI。
 
@@ -1094,7 +1096,7 @@ WHERE id = ? AND archived_at IS NULL
 
 ### 20.3 修复策略：合并 wordExisting 进 wordDetail
 
-不再保留 wordExisting 这条单独的"已在卡片中"路径。**只要选区或点击命中一个已存在的 word_card，统一显示 wordDetail**。理由：
+不再保留 wordExisting 这条单独的"已在卡片中"路径。**只要选区或点击命中一个已存在的 word\_card，统一显示 wordDetail**。理由：
 
 - wordDetail 是 wordExisting 的超集：除"Remove from cards"按钮外，还提供释义/备注编辑。
 - 用户对"已标记词"只有两类需求：查看/编辑笔记、取消标记。一个面板足够。
@@ -1114,17 +1116,17 @@ function hideAllPanels() {
 }
 ```
 
-`updateToolbar()` 与 `showWordDetail()` 在显示任何一个 group 之前**必须先调用 `hideAllPanels()`**。
+`updateToolbar()` 与 `showWordDetail()` 在显示任何一个 group 之前**必须先调用 \*\*\*\*\*\*\*\*****`hideAllPanels()`**。
 
 状态判定优先级（自顶向下）：
 
-| 条件 | 显示 |
-|------|------|
-| 选区为空 / collapsed | （隐藏整个 toolbar） |
-| `spans.length > 1`（跨句） | `crossSentence` |
-| `spans.length === 1` 且整句选中 | `sentenceForm`（含 Mark / Translation / AI） |
-| `spans.length === 1` 且命中已有词卡 | **`wordDetail`** |
-| `spans.length === 1` 且未命中词卡 | `wordForm`（Mark word/phrase/collocation） |
+| 条件                           | 显示                                        |
+| ---------------------------- | ----------------------------------------- |
+| 选区为空 / collapsed             | （隐藏整个 toolbar）                            |
+| `spans.length > 1`（跨句）       | `crossSentence`                           |
+| `spans.length === 1` 且整句选中   | `sentenceForm`（含 Mark / Translation / AI） |
+| `spans.length === 1` 且命中已有词卡 | **`wordDetail`**                          |
+| `spans.length === 1` 且未命中词卡  | `wordForm`（Mark word/phrase/collocation）  |
 
 `reader.click` 处理器对 `[data-word-card]` 的单击保持不变，仍调用 `showWordDetail()`，但需要解决 Bug A。
 
@@ -1228,16 +1230,16 @@ JS 在显示前调用 `setVisible(form, true)` 即可，与现有惯例一致。
 
 新增 Playwright 集成测试 `tests/web/test_reader_toolbar_state.py`（沿用 §15.7 模式，TestClient 启服务，Playwright 驱动）：
 
-| 用例 | 期望 |
-|------|------|
-| 加载页面后立即检查 | toolbar hidden；所有 group hidden |
-| 单击 `[data-word-card]` | toolbar visible；**仅** wordDetail visible，其余 hidden |
-| 双击 `[data-word-card]` | 同上：**仅** wordDetail visible（不应有 wordExisting） |
+| 用例                    | 期望                                                           |
+| --------------------- | ------------------------------------------------------------ |
+| 加载页面后立即检查             | toolbar hidden；所有 group hidden                               |
+| 单击 `[data-word-card]` | toolbar visible；**仅** wordDetail visible，其余 hidden           |
+| 双击 `[data-word-card]` | 同上：**仅** wordDetail visible（不应有 wordExisting）                |
 | 点击 wordDetail 内"Save" | PATCH 成功，span 的 `data-meaning`/`data-note` 更新，toolbar hidden |
-| 拖选跨两句 | crossSentence visible，wordDetail hidden |
-| 拖选整句 | sentenceForm visible，wordDetail hidden |
-| 拖选未标记词 | wordForm visible，wordDetail hidden |
-| wordDetail 显示后立即点击空白 | toolbar hidden（验证 `suppressNextUpdate` 不会漏关）|
+| 拖选跨两句                 | crossSentence visible，wordDetail hidden                      |
+| 拖选整句                  | sentenceForm visible，wordDetail hidden                       |
+| 拖选未标记词                | wordForm visible，wordDetail hidden                           |
+| wordDetail 显示后立即点击空白  | toolbar hidden（验证 `suppressNextUpdate` 不会漏关）                 |
 
 后端测试不变（§19 已覆盖 PATCH 端点）。
 
@@ -1247,6 +1249,196 @@ JS 在显示前调用 `setVisible(form, true)` 即可，与现有惯例一致。
 - 不做点击-选词联动（不调用 `selectAllChildren`），见 §20.5 拒因。
 - wordDetail 的多卡批量删除若工作量过大可降级为单卡，不阻塞本次修复。
 - 词汇 AI 按钮（解释 / 搭配 / 易混）留给 §21，本节只修状态机。
+
+`[新增 2026-06-15]`
+
+---
+
+## 22. 词汇 AI 分析面板改进
+
+### 22.1 背景与用户反馈
+
+§21 实现后通过真实使用发现四个问题（来自 2026-06-15 用户截图反馈）：
+
+1. **原文无高亮**：面板打开后看不出分析的是哪个词，需要在原文中定位被分析词的 span。
+2. **错因码不可读**：`L02, L06` 对用户毫无意义，需展开为完整中文描述。
+3. **内容结构与学习目标错位**：当前面板是"字典视角"（这个词是什么意思），用户需要的是"写作者视角"（作者为什么用这个词而不用更简单的词）。列出 `near_synonyms` 和 `common_collocations` 的价值不如直接解释 register 差异和用词动机。
+4. **面板内无笔记区**：点击"Explain word"后浮层关闭，用户在看完 AI 分析之后无处记录自己的理解——两个动作（读 AI → 写笔记）被割裂。
+
+### 22.2 修复一：原文词汇高亮
+
+**触发**：`renderWordAnalysis(payload)` 调用时。
+
+**行为**：
+- 在 reader 中找到 `[data-word-card="{card_id}"]` span（取第一个可见的）。
+- 给该 span 加 CSS class `word-analysis-active`（加背景色+轮廓，区别于普通词卡的点状下划线）。
+- 面板关闭（`closePanel()`）时移除该 class。
+
+**CSS**：
+```css
+[data-word-card].word-analysis-active {
+  background: #fef9c3;
+  border-radius: 2px;
+  outline: 2px solid #f59e0b;
+  outline-offset: 1px;
+}
+```
+
+不复用 `analysis-highlight`（那是句子证据高亮，蓝色）；词汇高亮用黄色系，与词卡点状下划线颜色一致，视觉语言统一。
+
+### 22.3 修复二：错因码展开为中文描述
+
+在 JS 中维护一张查找表（与 §2 枚举一致，不依赖后端）：
+
+```js
+const ERROR_CODE_LABELS = {
+  G01: "G01 长主语识别失败",
+  G02: "G02 后置定语修饰对象判断错",
+  G03: "G03 嵌套从句边界混乱",
+  G04: "G04 倒装 / 强调结构",
+  G05: "G05 非谓语动词作用判断错",
+  G06: "G06 省略 / 替代识别失败",
+  G07: "G07 平行结构对应失败",
+  L01: "L01 多义词义项判断错",
+  L02: "L02 假朋友 / 形近词混淆",
+  L03: "L03 搭配不熟（动名 / 形名 / 介词）",
+  L04: "L04 词根 / 词族联想不足",
+  L05: "L05 习语 / 固定短语未识别",
+  L06: "L06 学术词汇陌生",
+  D01: "D01 代词指代对象判断错",
+  D02: "D02 让步 / 对比逻辑误读",
+  D03: "D03 因果 / 推论连词误读",
+  D04: "D04 信息焦点判断错",
+  D05: "D05 篇章衔接回指失败",
+  X00: "X00 其他",
+};
+```
+
+`renderWordAnalysis()` 和 `renderDiagnosis()`（句子分析错因）都调用同一个展开函数。
+
+### 22.4 修复三：prompt v2——写作者视角
+
+#### 22.4.1 核心问题
+
+v1 prompt 生成的是字典释义视角：
+- `meaning_in_context`：这个词在这里是什么意思
+- `common_collocations`：这个词常见搭配
+- `near_synonyms`：近义词列表
+
+但用户学习目标是：**我已经能理解句子大意，现在想知道作者为什么用这个词而不用更简单的词**。即：
+- register（语域）是什么，比 basic/simple 更正式/学术？
+- 这个词比近义词多出了哪个蕴含义？
+- 如果我下次写作，什么场景该用，替换成简单词后会损失什么？
+
+#### 22.4.2 新 JSON Schema（word_analysis.v2）
+
+删除 `common_collocations`，合并 `near_synonyms` 和 `confusable_with` 进新字段 `vs_simpler`，增加 `register` 和 `why_this_word`：
+
+```json
+{
+  "lemma": "<base form>",
+  "lexical_type": "<word | phrase | collocation>",
+  "pos": "<noun | verb | adjective | adverb | preposition | conjunction | phrase | other>",
+  "meaning_in_context": "<1-2 句，精确描述该词在本句语义，不超过 30 词>",
+  "register": "<academic | formal | literary | neutral | colloquial | technical>",
+  "why_this_word": "<2-4 句：解释作者为何选用此词而非更简单的近义词；重点说明语域差异、蕴含义差异、搭配限制；举 1 个替换成简单词后语义/语感会有何损失的对比>",
+  "vs_simpler": [
+    {
+      "simpler": "<更简单的近义词，如 basic>",
+      "difference": "<1-2 句：两者的核心差异>"
+    }
+  ],
+  "morphology": {
+    "root": "<拉丁/希腊词根；无则空串>",
+    "family": ["<同根词 2-4 个；无则空列表>"]
+  },
+  "predicted_error_types": ["<1-2 个错误代码>"],
+  "confidence": 0.0
+}
+```
+
+`vs_simpler` 列 1-3 条，代替原来的 `near_synonyms` + `confusable_with` 扁平列表。删除 `common_collocations`（搭配信息已隐含在 `why_this_word` 的对比分析中）。
+
+#### 22.4.3 prompt v2 核心变化
+
+`word_analysis.v2.md` 相对 v1：
+- **任务说明**：帮助中国学习者理解"作者为什么选这个词，而不是更简单的近义词"。
+- `why_this_word` **Few-shot 示例**示范对比分析：
+  > `rudimentary` vs `basic`——rudimentary 属于学术正式语域，专指"处于早期发展阶段、功能尚不成熟"，带有时间/进化维度（evolutionary stage）；basic 是中性通用词，只表示"不复杂"，无发展阶段的蕴含。学术文本用 rudimentary 能精确表达"功能性尚不完整"，替换成 basic 后这层含义消失。
+- 删除 `common_collocations` 生成指令。
+- `vs_simpler` 要求与 `why_this_word` 呼应，每条 simpler 词来自正文已分析的对比。
+
+#### 22.4.4 版本管理
+
+新文件 `prompts/word_analysis.v2.md`，v1 保留（已有 `ai_cache` 引用 v1）。`prompt_versions` 表新增一行 `is_active=1` 指向 v2。`analyze_word()` 默认使用最新活跃版本。
+
+### 22.5 修复四：面板内用户笔记区
+
+#### 22.5.1 位置与布局
+
+Word Analysis 面板，AI 内容（`#analysis-word-sections`）之后、footer 按钮之前，新增 `#word-panel-notes` section：
+
+```
+┌──────────────────────────────────────┐
+│ WORD ANALYSIS                        │
+│ Word Analysis           [Close panel]│
+│ ─────────────────────────────────    │
+│ [Meaning in context]                 │
+│ [Why this word]                      │
+│ [vs. simpler]                        │
+│ [Morphology]                         │
+│ [Predicted error types]              │
+│ ─────────────────────────────────    │
+│ My notes                             │
+│ Definition  [___________________]    │  ← current_meaning
+│ Notes       [___________________]    │  ← user_note
+│                            [Save]    │
+└──────────────────────────────────────┘
+```
+
+#### 22.5.2 数据流
+
+- **预填充**：`renderWordAnalysis()` 时从 `[data-word-card="{card_id}"]` span 读取 `data-meaning` 和 `data-note` 填入输入框，无额外网络请求。
+- **保存**：点 Save → `PATCH /mark/word/{card_id}`（已有端点）→ 同步更新 span 的 `data-meaning` / `data-note` → 显示 1.5 秒"Saved ✓"状态提示，不关闭面板。
+- **与浮层 wordDetail 的关系**：两处编辑同一字段，保存逻辑相同，数据一致，互不冲突。
+
+#### 22.5.3 新 HTML 元素（纳入 `#analysis-word-sections` 内）
+
+```html
+<section id="word-panel-notes" class="analysis-section">
+  <h3>My notes</h3>
+  <div class="word-notes-fields">
+    <label class="word-notes-label">Definition
+      <input id="word-panel-meaning" type="text" placeholder="My definition…">
+    </label>
+    <label class="word-notes-label">Notes
+      <input id="word-panel-note" type="text" placeholder="My understanding…">
+    </label>
+  </div>
+  <div class="word-notes-actions">
+    <button id="word-panel-save" type="button">Save</button>
+    <span id="word-panel-save-status" class="toolbar-status" aria-live="polite"></span>
+  </div>
+</section>
+```
+
+`word-panel-notes` 放在 `#analysis-word-sections` 内部，随 `setWordMode()` / `setSentenceMode()` 自动显/隐，无需单独控制。
+
+### 22.6 实施顺序
+
+1. `word_analysis.v2.md` + `WORD_ANALYSIS_SCHEMA_V2`（`ai_json_schemas.py`）
+2. `_analysis_panel()` HTML：新增 `word-panel-notes`；替换 `collocations`/`synonyms` section 为 `why_this_word`/`register`/`vs_simpler` section
+3. JS：`ERROR_CODE_LABELS` 查找表；`renderWordAnalysis()` 适配新字段；词汇高亮（`word-analysis-active`）；笔记预填充 + `word-panel-save` 事件
+4. CSS：`.word-analysis-active`；`.word-notes-*`
+5. 测试：新 schema 校验测试；笔记保存集成测试；`renderWordAnalysis()` 新字段渲染测试
+
+### 22.7 排除项
+
+- 不做笔记历史版本（覆盖写）。
+- 不做笔记与 AI `why_this_word` 的对比/评分（留后续）。
+- `register` 字段仅展示，不驱动复习队列排序（留后续）。
+- 不删除 `word_analysis.v1.md`，已有缓存引用 v1。
+- `vs_simpler` 目前只展示，不与复习卡绑定（留后续）。
 
 `[新增 2026-06-15]`
 
@@ -1270,10 +1462,13 @@ JS 在显示前调用 `setVisible(form, true)` 即可，与现有惯例一致。
 - [x] §11 画像生成时机
 - [x] §12 技术栈与目录
 - [x] §13 开工顺序
-- [ ] §14 阅读交互：选中即操作（§14.7 Clear→Dismiss 重命名；§14.8 跨句批量取消标记）
+- [x] §14 阅读交互：选中即操作（§14.7 Clear→Dismiss 重命名；§14.8 跨句批量取消标记）
 - [x] §15 用户译文驱动 AI 诊断
-- [ ] §16 AI Provider 配置（DeepSeek 默认）
+- [x] §16 AI Provider 配置（DeepSeek 默认）
 - [x] §17 阅读视图排版
 - [x] §18 端到端动线与诊断面板
-- [ ] §19 词卡悬浮提示与备注编辑
-- [ ] §20 浮层状态机修复与词卡详情入口统一
+- [x] §19 词卡悬浮提示与备注编辑
+- [x] §20 浮层状态机修复与词卡详情入口统一
+- [ ] §21 词汇 AI 分析面板（基础版）
+- [ ] §22 词汇 AI 分析面板改进：原文高亮、错因展开、why_not_simpler、用户笔记区
+
