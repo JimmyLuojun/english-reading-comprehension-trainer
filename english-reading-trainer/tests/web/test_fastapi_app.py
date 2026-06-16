@@ -1353,6 +1353,7 @@ class TestReadingAndMarking:
         payload = response.json()
         assert payload["ok"] is True
         assert payload["surface_form"] == "cat"
+        assert payload["sentence_id"] == sentence_ids[0]
         assert payload["active_prompt_version"] == "v3"
         assert payload["is_stale"] is True
         assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
@@ -1403,6 +1404,10 @@ class TestReadingAndMarking:
             '<form id="toolbar-word-form" method="post" action="/mark/word" '
             'class="toolbar-group" hidden>'
         ) in response.text
+        assert (
+            '<form id="toolbar-analysis-word-form" method="post" action="/mark/word" '
+            'class="toolbar-group" hidden>'
+        ) in response.text
         assert 'id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden' in response.text
         assert 'id="toolbar-cross-sentence" class="toolbar-group" hidden' in response.text
         assert "toolbar-word-existing" not in response.text
@@ -1428,8 +1433,11 @@ class TestReadingAndMarking:
         assert "function hideAllPanels()" in response.text
         assert "function blurToolbarFocus()" in response.text
         assert "function selectionInsideToolbar(range)" in response.text
+        assert "function selectionInsideAnalysisPanel(range)" in response.text
+        assert "function showAnalysisWordToolbar(range, selectedText)" in response.text
         assert "if (toolbarContainsFocus()) return;" in response.text
         assert "if (selectionInsideToolbar(range)) return;" in response.text
+        assert "if (selectionInsideAnalysisPanel(range))" in response.text
         assert 'reader.addEventListener("mousedown", () => {' in response.text
         assert "blurToolbarFocus();" in response.text
         assert "(!toolbar.hidden && toolbarContainsFocus())" not in response.text

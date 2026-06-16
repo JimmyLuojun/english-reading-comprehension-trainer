@@ -9,10 +9,12 @@ a browser runtime.
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 import time
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,7 @@ PANEL_IDS = {
     "sentence": "toolbar-sentence-form",
     "word": "toolbar-word-form",
     "word_detail": "toolbar-word-detail",
+    "analysis_word": "toolbar-analysis-word-form",
     "cross_sentence": "toolbar-cross-sentence",
     "translation": "toolbar-translation-editor",
 }
@@ -78,7 +81,49 @@ def _seed_reader(db: DatabaseConnection, tmp_path: Path) -> int:
         },
     )
     assert response.status_code == 200
+    _attach_sentence_analysis(db, sentence_id)
     return int(result.book_id)
+
+
+def _attach_sentence_analysis(db: DatabaseConnection, sentence_id: int) -> int:
+    payload = {
+        "subject_skeleton": "The cat sat",
+        "clauses": [{"type": "main", "text": "The cat sat", "role": "statement"}],
+        "modifiers": [],
+        "logic_markers": [],
+        "anaphora": [],
+        "simplified_en": "The feline rested.",
+        "chinese_gloss": "Cat rests.",
+        "predicted_error_types": ["G01"],
+        "diagnosis_basis": "predicted",
+        "diagnosed_error_types": [],
+        "diagnosis_evidence": [],
+        "confidence": 0.9,
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    with db.get_connection() as conn:
+        card_id = conn.execute(
+            """INSERT INTO sentence_cards
+               (sentence_id, created_at, last_reviewed_at, review_count,
+                mastery_state, ef, interval_days, repetitions, due_at)
+               VALUES (?, ?, NULL, 0, 'new', 2.5, 1, 0, ?)""",
+            (sentence_id, now, now),
+        ).lastrowid
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, 'v1', 'manual', ?, 1, ?)""",
+            (
+                f"toolbar-analysis-{sentence_id}",
+                json.dumps(payload),
+                now,
+            ),
+        ).lastrowid
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    return int(cache_id)
 
 
 def _visible_panels(page: Page) -> dict[str, bool]:
@@ -247,6 +292,7 @@ def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) ->
         "sentence": False,
         "word": False,
         "word_detail": False,
+        "analysis_word": False,
         "cross_sentence": False,
         "translation": False,
     }
@@ -349,3 +395,36 @@ def test_selection_after_visible_toolbar_focus_shows_word_actions(
 
         _select_text(page, 1, "bright")
         _assert_only_panel(page, "word")
+
+
+def test_analysis_panel_selection_shows_mark_word(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        page.evaluate(
+            """() => {
+              const node = document.getElementById("analysis-simplified").firstChild;
+              const index = node.nodeValue.indexOf("feline");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + "feline".length);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+        page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
+        _assert_only_panel(page, "analysis_word")
+        form_values = page.evaluate(
+            """() => ({
+              sentenceId: document.getElementById("toolbar-analysis-word-sentence-id").value,
+              surfaceForm: document.getElementById("toolbar-analysis-word-surface-form").value,
+            })"""
+        )
+
+    assert form_values["sentenceId"]
+    assert form_values["surfaceForm"] == "feline"

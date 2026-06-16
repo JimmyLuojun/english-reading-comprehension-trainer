@@ -1128,6 +1128,7 @@ def _fetch_word_analysis_payload(
     with db.get_connection() as conn:
         row = conn.execute(
             """SELECT wc.id AS card_id, wc.surface_form, wc.lemma,
+                      wc.first_sentence_id,
                       ac.id AS cache_id, ac.prompt_version, ac.model,
                       ac.response_json, ac.created_at
                  FROM word_cards wc
@@ -1141,6 +1142,7 @@ def _fetch_word_analysis_payload(
     return {
         "ok": True,
         "card_id": row["card_id"],
+        "sentence_id": row["first_sentence_id"],
         "surface_form": row["surface_form"],
         "lemma": row["lemma"],
         "cache_id": row["cache_id"],
@@ -1593,6 +1595,12 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button type="submit" name="lexical_type" value="phrase">Mark phrase</button>
         <button type="submit" name="lexical_type" value="collocation">Mark collocation</button>
       </form>
+      <form id="toolbar-analysis-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>
+        <input id="toolbar-analysis-word-sentence-id" type="hidden" name="sentence_id">
+        <input id="toolbar-analysis-word-surface-form" type="hidden" name="surface_form">
+        <input type="hidden" name="return_to" value="{_escape(return_to)}">
+        <button type="submit" name="lexical_type" value="word">Mark word</button>
+      </form>
       <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
         <strong id="toolbar-word-detail-surface" class="word-detail-surface"></strong>
         <div class="word-detail-fields">
@@ -1742,6 +1750,9 @@ def _selection_script() -> str:
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
+      const analysisWordForm = document.getElementById("toolbar-analysis-word-form");
+      const analysisWordSentenceId = document.getElementById("toolbar-analysis-word-sentence-id");
+      const analysisWordSurfaceForm = document.getElementById("toolbar-analysis-word-surface-form");
       const wordDetail = document.getElementById("toolbar-word-detail");
       const wordDetailSurface = document.getElementById("toolbar-word-detail-surface");
       const wordDetailMeaning = document.getElementById("toolbar-word-detail-meaning");
@@ -1812,6 +1823,7 @@ def _selection_script() -> str:
       let activeCrossSentenceIds = [];
       let activeWordDetailCardId = null;
       let activeAnalysisSentenceId = null;
+      let activeAnalysisSourceSentenceId = null;
       let activeAnalysisWordCardId = null;
       let panelMode = "sentence";
       let translationEditorOpen = false;
@@ -1837,6 +1849,12 @@ def _selection_script() -> str:
         return Boolean(element && toolbar.contains(element));
       }
 
+      function selectionInsideAnalysisPanel(range) {
+        const node = range.commonAncestorContainer;
+        const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        return Boolean(element && panel && panel.contains(element));
+      }
+
       function hideTranslationEditor() {
         translationEditor.hidden = true;
         translationEditorOpen = false;
@@ -1850,6 +1868,7 @@ def _selection_script() -> str:
         hideTranslationEditor();
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
+        setVisible(analysisWordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
         analysisOpen.hidden = true;
@@ -1957,6 +1976,18 @@ def _selection_script() -> str:
         suppressNextUpdate = true;
       }
 
+      function showAnalysisWordToolbar(range, selectedText) {
+        if (!activeAnalysisSourceSentenceId) {
+          hideToolbar();
+          return;
+        }
+        hideAllPanels();
+        analysisWordSentenceId.value = activeAnalysisSourceSentenceId;
+        analysisWordSurfaceForm.value = selectedText;
+        setVisible(analysisWordForm, true);
+        showToolbar(range);
+      }
+
       function updateToolbar() {
         if (suppressNextUpdate) {
           suppressNextUpdate = false;
@@ -1976,6 +2007,11 @@ def _selection_script() -> str:
         const normalizedSelection = normalizeText(selectedText);
         if (!normalizedSelection) {
           hideToolbar();
+          return;
+        }
+
+        if (selectionInsideAnalysisPanel(range)) {
+          showAnalysisWordToolbar(range, selectedText);
           return;
         }
 
@@ -2210,6 +2246,7 @@ def _selection_script() -> str:
         panel.hidden = true;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
+        activeAnalysisSourceSentenceId = null;
         clearEvidenceHighlight();
         reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
           el.classList.remove("word-analysis-active");
@@ -2270,6 +2307,7 @@ def _selection_script() -> str:
       function renderAnalysisPayload(payload) {
         const analysis = payload.analysis || {};
         activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
+        activeAnalysisSourceSentenceId = activeAnalysisSentenceId;
         setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status";
@@ -2398,6 +2436,7 @@ def _selection_script() -> str:
       function renderWordAnalysis(payload) {
         const a = payload.analysis || {};
         activeAnalysisWordCardId = String(payload.card_id || "");
+        activeAnalysisSourceSentenceId = String(payload.sentence_id || "");
         setWordMode();
         openPanel();
         panelStatus.className = "analysis-status";
@@ -2561,6 +2600,7 @@ def _selection_script() -> str:
         });
       }
       wordForm.addEventListener("submit", () => { saveReaderProgress(); });
+      analysisWordForm.addEventListener("submit", () => { saveReaderProgress(); });
       sentenceForm.addEventListener("submit", () => { saveReaderProgress(); });
       panelRetry.addEventListener("click", () => {
         if (panelMode === "word" && activeAnalysisWordCardId) {
