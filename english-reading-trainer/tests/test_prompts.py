@@ -28,6 +28,7 @@ PROMPT_FILES = {
     "word_analysis":              PROMPTS_DIR / "word_analysis.v1.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
+WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 
 # Required template variables per prompt
 REQUIRED_VARS = {
@@ -108,6 +109,10 @@ class TestPromptFilesExist:
         assert size <= MAX_PROMPT_BYTES, (
             f"{name} is {size} bytes — exceeds {MAX_PROMPT_BYTES} byte limit"
         )
+
+    def test_current_word_prompt_v3_exists(self) -> None:
+        assert WORD_ANALYSIS_V3.exists()
+        assert WORD_ANALYSIS_V3.stat().st_size <= MAX_PROMPT_BYTES
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +239,11 @@ class TestJSONSchemaFieldsInPrompts:
         assert field in _read("word_analysis"), (
             f"word_analysis missing JSON field '{field}'"
         )
+
+    def test_word_prompt_v3_contains_chinese_meaning(self) -> None:
+        text = WORD_ANALYSIS_V3.read_text(encoding="utf-8")
+        assert "version: v3" in text
+        assert "chinese_meaning" in text
 
 
 # ---------------------------------------------------------------------------

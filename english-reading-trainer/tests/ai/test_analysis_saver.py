@@ -108,6 +108,22 @@ _VALID_WORD_JSON = json.dumps({
     "confidence": 0.9,
 })
 
+_VALID_WORD_JSON_V3 = json.dumps({
+    "lemma": "fox",
+    "lexical_type": "word",
+    "pos": "noun",
+    "meaning_in_context": "a wild animal known for cunning",
+    "chinese_meaning": "以狡猾著称的狐狸",
+    "register": "neutral",
+    "why_this_word": "Fox is the precise animal name; animal would be too general. If you wrote animal, you would lose the cultural association with cleverness.",
+    "vs_simpler": [
+        {"simpler": "animal", "difference": "Animal is broader; fox names the species and its familiar connotations."}
+    ],
+    "morphology": {"root": "", "family": ["foxy", "foxlike"]},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+})
+
 _INVALID_JSON_STR = "{ this is not valid JSON }"
 
 _INVALID_SCHEMA_JSON = json.dumps({
@@ -389,6 +405,17 @@ class TestSaveWordAnalysisHappyPath:
                 "SELECT pos FROM word_cards WHERE id = ?", (r.card_id,)
             ).fetchone()
         assert row["pos"] == "noun"
+
+    def test_v3_json_with_chinese_meaning_is_valid(self, db: DatabaseConnection, sid: int):
+        r = save_word_analysis(
+            db,
+            sid,
+            "fox",
+            _VALID_WORD_JSON_V3,
+            prompt_version="v3",
+        )
+
+        assert r.is_valid is True
 
     def test_cache_id_positive(self, db: DatabaseConnection, sid: int):
         r = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)

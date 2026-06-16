@@ -14,6 +14,7 @@ dependencies = [
     "ebooklib>=0.18",
     "beautifulsoup4>=4.12",
     "jsonschema>=4.21",
+    "httpx[socks]>=0.27",
     "openai>=1.30",
     "fastapi>=0.111",
     "uvicorn>=0.30",

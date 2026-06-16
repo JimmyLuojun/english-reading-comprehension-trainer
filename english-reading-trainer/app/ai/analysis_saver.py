@@ -9,7 +9,12 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA, WORD_ANALYSIS_SCHEMA
+from app.ai.ai_json_schemas import (
+    SENTENCE_ANALYSIS_SCHEMA,
+    WORD_ANALYSIS_SCHEMA,
+    WORD_ANALYSIS_SCHEMA_V2,
+    WORD_ANALYSIS_SCHEMA_V3,
+)
 from app.ai.ai_response_cache import compute_content_hash, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
 from app.db_connection import DatabaseConnection
@@ -137,8 +142,9 @@ def save_word_analysis(
     error = ""
     data: dict = {}
 
+    schema = _word_analysis_schema(prompt_version)
     try:
-        data = parse_and_validate(raw_json, WORD_ANALYSIS_SCHEMA)
+        data = parse_and_validate(raw_json, schema)
         response_json = json.dumps(data)
     except (json.JSONDecodeError, ValidationError) as exc:
         is_valid = False
@@ -283,6 +289,15 @@ def _sentence_error_codes(data: dict) -> tuple[str, ...]:
         code for code in data.get("predicted_error_types", [])
         if code in VALID_ERROR_CODES
     )
+
+
+def _word_analysis_schema(prompt_version: str) -> dict:
+    schemas = {
+        "v1": WORD_ANALYSIS_SCHEMA,
+        "v2": WORD_ANALYSIS_SCHEMA_V2,
+        "v3": WORD_ANALYSIS_SCHEMA_V3,
+    }
+    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V3)
 
 
 def _sync_sentence_card_errors(

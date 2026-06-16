@@ -8,11 +8,20 @@ quoted speech, ellipsis, parentheses, offset accuracy, normalize_for_hash.
 
 import pytest
 
+import app.nlp.sentence_segmenter as sentence_segmenter
 from app.nlp.sentence_segmenter import (
     SegmentedSentence,
     normalize_for_hash,
     segment_sentences,
 )
+
+
+class _FakeSegmenter:
+    def __init__(self, tokens: list[str]) -> None:
+        self._tokens = tokens
+
+    def segment(self, text: str) -> list[str]:
+        return self._tokens
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +192,52 @@ class TestCharacterOffsets:
         result = segment_sentences(text)
         for i in range(1, len(result)):
             assert result[i].char_start >= result[i - 1].char_end
+
+
+# ---------------------------------------------------------------------------
+# Defensive pysbd token handling
+# ---------------------------------------------------------------------------
+
+class TestSegmenterTokenFallbacks:
+    def test_whitespace_and_empty_tokens_are_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            sentence_segmenter,
+            "_get_segmenter",
+            lambda: _FakeSegmenter([" ", "", "Alpha.", " Beta."]),
+        )
+
+        result = segment_sentences(" Alpha. Beta.")
+
+        assert [segment.text for segment in result] == ["Alpha.", "Beta."]
+
+    def test_lstripped_token_is_used_when_raw_token_is_not_found(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            sentence_segmenter,
+            "_get_segmenter",
+            lambda: _FakeSegmenter(["  Alpha.", " Beta."]),
+        )
+
+        result = segment_sentences("Alpha. Beta.")
+
+        assert [segment.text for segment in result] == ["Alpha.", "Beta."]
+        assert result[0].char_start == 0
+
+    def test_unrecoverable_token_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            sentence_segmenter,
+            "_get_segmenter",
+            lambda: _FakeSegmenter(["Missing.", "Alpha."]),
+        )
+
+        result = segment_sentences("Alpha.")
+
+        assert [segment.text for segment in result] == ["Alpha."]
 
 
 # ---------------------------------------------------------------------------

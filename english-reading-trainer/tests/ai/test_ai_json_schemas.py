@@ -12,6 +12,7 @@ from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
+    WORD_ANALYSIS_SCHEMA_V3,
 )
 from app.db_models import VALID_ERROR_CODES
 
@@ -77,6 +78,11 @@ VALID_WORD_V2 = {
     "morphology": {"root": "mitis (Latin: soft, mild)", "family": ["mitigation", "mitigating", "unmitigated"]},
     "predicted_error_types": ["L02", "L04"],
     "confidence": 0.95,
+}
+
+VALID_WORD_V3 = {
+    **VALID_WORD_V2,
+    "chinese_meaning": "减轻不良影响",
 }
 
 
@@ -387,3 +393,38 @@ class TestWordSchemaV2InvalidInstances:
     def test_v1_word_rejected_by_v2_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate(VALID_WORD, WORD_ANALYSIS_SCHEMA_V2)
+
+
+# ---------------------------------------------------------------------------
+# WORD_ANALYSIS_SCHEMA_V3
+# ---------------------------------------------------------------------------
+
+class TestWordSchemaV3Structure:
+    def test_v3_schema_is_dict(self) -> None:
+        assert isinstance(WORD_ANALYSIS_SCHEMA_V3, dict)
+
+    def test_v3_requires_chinese_meaning(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V3["required"]
+        assert "chinese_meaning" in required
+        assert "chinese_meaning" in WORD_ANALYSIS_SCHEMA_V3["properties"]
+
+    def test_v3_preserves_v2_writer_fields(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V3["required"]
+        for field in ["register", "why_this_word", "vs_simpler"]:
+            assert field in required
+
+
+class TestWordSchemaV3ValidInstances:
+    def test_valid_v3_word_passes(self) -> None:
+        _validate(VALID_WORD_V3, WORD_ANALYSIS_SCHEMA_V3)
+
+
+class TestWordSchemaV3InvalidInstances:
+    def test_missing_chinese_meaning_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_WORD_V3.items() if k != "chinese_meaning"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V3)
+
+    def test_v2_word_rejected_by_v3_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_WORD_V2, WORD_ANALYSIS_SCHEMA_V3)

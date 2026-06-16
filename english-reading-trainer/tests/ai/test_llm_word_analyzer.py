@@ -34,6 +34,22 @@ _VALID_WORD_RESPONSE = json.dumps({
     "lexical_type": "word",
     "pos": "verb",
     "meaning_in_context": "to make the harmful effects of something less severe",
+    "chinese_meaning": "减轻不良影响",
+    "register": "formal",
+    "why_this_word": "Mitigate is formal register and targets a specific harm; reduce is vaguer. Writing 'reduce the effects' loses the connotation of purposeful countermeasure.",
+    "vs_simpler": [
+        {"simpler": "reduce", "difference": "Reduce is neutral; mitigate implies deliberate remediation."},
+    ],
+    "morphology": {"root": "mitis", "family": ["mitigation"]},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+})
+
+_VALID_WORD_RESPONSE_V2 = json.dumps({
+    "lemma": "mitigate",
+    "lexical_type": "word",
+    "pos": "verb",
+    "meaning_in_context": "to make the harmful effects of something less severe",
     "register": "formal",
     "why_this_word": "Mitigate is formal register and targets a specific harm; reduce is vaguer. Writing 'reduce the effects' loses the connotation of purposeful countermeasure.",
     "vs_simpler": [
@@ -87,7 +103,7 @@ class TestAnalyzeWordCacheHit:
     ) -> None:
         with _mock_llm([_VALID_WORD_RESPONSE_V1]):
             analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL, prompt_version="v1")
-        with _mock_llm([_VALID_WORD_RESPONSE]) as mock:
+        with _mock_llm([_VALID_WORD_RESPONSE_V2]) as mock:
             result = analyze_word(
                 db, _SURFACE, _SENTENCE, model=_MODEL,
                 prompt_version="v2", allow_stale=False,
@@ -108,6 +124,7 @@ class TestAnalyzeWordLLMSuccess:
         assert result.is_valid is True
         assert result.from_cache is False
         assert result.data["lemma"] == "mitigate"
+        assert result.data["chinese_meaning"] == "减轻不良影响"
 
     def test_result_saved_to_cache(self, db: DatabaseConnection) -> None:
         with _mock_llm([_VALID_WORD_RESPONSE]):

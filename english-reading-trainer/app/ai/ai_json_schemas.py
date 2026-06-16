@@ -7,6 +7,7 @@ enumeration from db_models.VALID_ERROR_CODES.
 
 WORD_ANALYSIS_SCHEMA    — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2 — v2 prompt, writer-perspective fields (§22)
+WORD_ANALYSIS_SCHEMA_V3 — v3 prompt, adds Chinese meaning for reader panel
 """
 
 from app.db_models import VALID_ERROR_CODES
@@ -263,5 +264,24 @@ WORD_ANALYSIS_SCHEMA_V2: dict = {
             "minimum": 0.0,
             "maximum": 1.0,
         },
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Word / phrase / collocation analysis schema v3
+# Adds a learner-facing Chinese meaning while preserving v2 writer-perspective
+# fields for backwards-compatible rendering of older cache payloads.
+# ---------------------------------------------------------------------------
+
+WORD_ANALYSIS_SCHEMA_V3: dict = {
+    **WORD_ANALYSIS_SCHEMA_V2,
+    "required": [
+        "lemma", "lexical_type", "pos", "meaning_in_context", "chinese_meaning",
+        "register", "why_this_word", "vs_simpler",
+        "morphology", "predicted_error_types", "confidence",
+    ],
+    "properties": {
+        **WORD_ANALYSIS_SCHEMA_V2["properties"],
+        "chinese_meaning": {"type": "string", "minLength": 1},
     },
 }

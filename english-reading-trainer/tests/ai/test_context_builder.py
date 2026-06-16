@@ -16,6 +16,8 @@ Coverage areas:
 """
 
 import json
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,6 +34,9 @@ from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
+CONTEXT_BUILDER_PATH = (
+    Path(__file__).parent.parent.parent / "app" / "ai" / "context_builder.py"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +330,33 @@ class TestLearnerProfile:
 # ---------------------------------------------------------------------------
 
 class TestRelatedCards:
+    def test_related_sentence_card_appears_in_output(self, seeded):
+        db, book_id, sid = seeded
+        with db.get_connection() as conn:
+            related_sid = conn.execute(
+                """SELECT id FROM sentences
+                   WHERE book_id = ? AND id != ?
+                   ORDER BY id LIMIT 1""",
+                (book_id, sid),
+            ).fetchone()["id"]
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('related-sentence', 'v1', 'test', ?, 1, '2026-01-01')""",
+                (json.dumps({"summary": "related"}),),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO sentence_cards
+                   (sentence_id, created_at, due_at, ai_analysis_id)
+                   VALUES (?, '2026-01-01', '2026-01-01', ?)""",
+                (related_sid, cache_id),
+            )
+
+        info = get_sentence_info(db, sid)
+
+        assert "• [" in info["related_cards_text"]
+        assert "It was a bright cold day" in info["related_cards_text"]
+
     def test_related_word_card_appears_in_output(self, seeded):
         db, book_id, sid = seeded
         with db.get_connection() as conn:
@@ -342,3 +374,82 @@ class TestRelatedCards:
         info = get_sentence_info(db, sid)
         assert "mitigate" in info["related_cards_text"]
         assert "to lessen severity" in info["related_cards_text"]
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+class TestCliEntryPoint:
+    def test_cli_without_args_exits_with_usage(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["context_builder"])
+
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path(str(CONTEXT_BUILDER_PATH), run_name="__main__")
+
+        assert exc.value.code == 1
+        assert "Usage: python -m app.ai.context_builder sentence <id>" in capsys.readouterr().out
+
+    def test_cli_sentence_mode_prints_prompt(
+        self,
+        seeded,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db, book_id, sid = seeded
+        monkeypatch.setenv("TRAINER_DB", str(getattr(db, "_db_path")))
+        monkeypatch.setattr(sys, "argv", ["context_builder", "sentence", str(sid)])
+
+        runpy.run_path(str(CONTEXT_BUILDER_PATH), run_name="__main__")
+
+        assert "Prediction Mode" in capsys.readouterr().out
+
+    def test_cli_word_mode_prints_prompt(
+        self,
+        seeded,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db, book_id, sid = seeded
+        monkeypatch.setenv("TRAINER_DB", str(getattr(db, "_db_path")))
+        monkeypatch.setattr(sys, "argv", ["context_builder", "word", str(sid), "fox"])
+
+        runpy.run_path(str(CONTEXT_BUILDER_PATH), run_name="__main__")
+
+        output = capsys.readouterr().out
+        assert "fox" in output
+        assert "The quick brown fox" in output
+
+    def test_cli_info_mode_prints_json(
+        self,
+        seeded,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db, book_id, sid = seeded
+        monkeypatch.setenv("TRAINER_DB", str(getattr(db, "_db_path")))
+        monkeypatch.setattr(sys, "argv", ["context_builder", "info", str(sid)])
+
+        runpy.run_path(str(CONTEXT_BUILDER_PATH), run_name="__main__")
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["sentence_id"] == sid
+        assert payload["book_title"] == "Test Book"
+
+    def test_cli_unknown_mode_exits_with_error(
+        self,
+        seeded,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        db, book_id, sid = seeded
+        monkeypatch.setenv("TRAINER_DB", str(getattr(db, "_db_path")))
+        monkeypatch.setattr(sys, "argv", ["context_builder", "unknown", str(sid)])
+
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path(str(CONTEXT_BUILDER_PATH), run_name="__main__")
+
+        assert exc.value.code == 1
+        assert "Unknown command: unknown" in capsys.readouterr().err

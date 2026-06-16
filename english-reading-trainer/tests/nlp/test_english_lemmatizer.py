@@ -12,6 +12,27 @@ import app.nlp.english_lemmatizer as english_lemmatizer
 from app.nlp.english_lemmatizer import lemmatize
 
 
+class _FakeToken:
+    def __init__(
+        self,
+        lemma: str,
+        *,
+        is_space: bool = False,
+        is_punct: bool = False,
+    ) -> None:
+        self.lemma_ = lemma
+        self.is_space = is_space
+        self.is_punct = is_punct
+
+
+class _FakeNlp:
+    def __init__(self, tokens: list[_FakeToken]) -> None:
+        self._tokens = tokens
+
+    def __call__(self, surface_form: str) -> list[_FakeToken]:
+        return self._tokens
+
+
 # ---------------------------------------------------------------------------
 # Empty / whitespace input
 # ---------------------------------------------------------------------------
@@ -101,6 +122,42 @@ class TestPunctuationStripping:
 
 
 # ---------------------------------------------------------------------------
+# spaCy success path
+# ---------------------------------------------------------------------------
+
+class TestSpacyPath:
+    def test_spacy_model_success_path_is_used(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_nlp", None)
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", False)
+        monkeypatch.setattr(
+            english_lemmatizer,
+            "_load_spacy_model",
+            lambda: _FakeNlp([
+                _FakeToken("quick"),
+                _FakeToken("", is_space=True),
+                _FakeToken("", is_punct=True),
+                _FakeToken("fox"),
+            ]),
+        )
+
+        assert english_lemmatizer.lemmatize("Quick, foxes.") == "quick fox"
+
+    def test_spacy_empty_lemma_list_falls_back_to_surface(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_nlp", None)
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", False)
+        monkeypatch.setattr(
+            english_lemmatizer,
+            "_load_spacy_model",
+            lambda: _FakeNlp([
+                _FakeToken("", is_space=True),
+                _FakeToken("", is_punct=True),
+            ]),
+        )
+
+        assert english_lemmatizer.lemmatize("...") == "..."
+
+
+# ---------------------------------------------------------------------------
 # Multi-word phrases
 # ---------------------------------------------------------------------------
 
@@ -145,6 +202,31 @@ class TestIdempotency:
 # ---------------------------------------------------------------------------
 
 class TestRuleFallback:
+    def test_rule_fallback_short_token_is_unchanged(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", True)
+
+        assert english_lemmatizer.lemmatize("am") == "am"
+
+    def test_rule_fallback_ies_plural_becomes_y(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", True)
+
+        assert english_lemmatizer.lemmatize("stories") == "story"
+
+    def test_rule_fallback_ied_past_becomes_y(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", True)
+
+        assert english_lemmatizer.lemmatize("studied") == "study"
+
+    def test_rule_fallback_oes_plural_drops_es(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", True)
+
+        assert english_lemmatizer.lemmatize("goes") == "go"
+
+    def test_rule_fallback_does_not_strip_double_s_singular(self, monkeypatch):
+        monkeypatch.setattr(english_lemmatizer, "_use_rule_fallback", True)
+
+        assert english_lemmatizer.lemmatize("class") == "class"
+
     def test_missing_spacy_model_uses_rule_fallback(self, monkeypatch):
         def raise_missing_model():
             raise OSError("model missing")
