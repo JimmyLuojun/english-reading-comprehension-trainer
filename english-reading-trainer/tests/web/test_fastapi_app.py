@@ -702,12 +702,18 @@ class TestReadingAndMarking:
         assert 'id="toolbar-translation-editor"' in response.text
         assert 'id="analysis-panel"' in response.text
         assert 'id="analysis-word-meaning-zh"' in response.text
+        assert ".analysis-panel {\n      position: fixed;" in response.text
+        assert "width: min(520px, 92vw);" in response.text
+        assert ".reader-page.analysis-open .reader" not in response.text
         assert "window.prompt" not in response.text
         assert f"reader:progress:book:${{bookId}}" in response.text
         assert 'data-restore-progress="1"' in response.text
         assert "top_sentence_id" in response.text
         assert "/mark/word" in response.text
         assert "selectedWordCardIds" in response.text
+        assert "captureReadingAnchor" in response.text
+        assert "restoreReadingAnchor" in response.text
+        assert "markReaderSelection" in response.text
         assert "range.intersectsNode(span)" in response.text
         assert "deleteWordCardsAndReload" in response.text
         assert ".reader-sentence:target" in response.text
@@ -1166,6 +1172,36 @@ class TestReadingAndMarking:
         assert response.status_code == 303
         assert _word_card_id(db, "cat") > 0
 
+    def test_mark_word_ajax_returns_word_card_payload(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ice masses",
+                "lexical_type": "phrase",
+                "return_to": "/read/1",
+            },
+            headers={"X-Requested-With": "fetch", "Accept": "application/json"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["created"] is True
+        assert payload["card_id"] == _word_card_id(db, "ice masses")
+        assert payload["word_card"] == {
+            "id": payload["card_id"],
+            "lemma": "ice masses",
+            "surface_form": "ice masses",
+            "lexical_type": "phrase",
+            "current_meaning": "",
+            "user_note": "",
+        }
+
     def test_unmark_word_archives_word_card(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -1373,9 +1409,23 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert 'id="toolbar-word-detail-explain"' in response.text
+        assert 'id="toolbar-word-detail-view-card"' in response.text
+        assert 'id="analysis-panel-previous"' in response.text
+        assert 'data-analysis-mark="word"' in response.text
+        assert 'data-analysis-mark="phrase"' in response.text
+        assert 'data-analysis-mark="collocation"' in response.text
+        assert 'data-analysis-analyze="word"' in response.text
+        assert 'id="toolbar-analysis-word-status"' in response.text
         assert 'id="analysis-word-sections"' in response.text
         assert 'id="analysis-sentence-sections"' in response.text
         assert "requestWordAnalysis" in response.text
+        assert "markAnalysisSelection" in response.text
+        assert "registerWordCard" in response.text
+        assert "rebuildGlossaryRegex" in response.text
+        assert '"X-Requested-With": "fetch"' in response.text
+        assert "pushCurrentAnalysis" in response.text
+        assert "restorePreviousAnalysis" in response.text
+        assert "Back to ${previous.label} analysis" in response.text
         # §22 elements
         assert 'id="analysis-word-register"' in response.text
         assert 'id="analysis-word-why"' in response.text
@@ -1390,6 +1440,20 @@ class TestReadingAndMarking:
         assert "payload.surface_form || payload.lemma" in response.text
         assert "voiceschanged" in response.text
         assert "speechSynthesis.cancel()" in response.text
+        assert "function applyGlossaryHighlights(element)" in response.text
+        assert "glossaryEntries" in response.text
+        assert "glossary-word" in response.text
+        assert "function unregisterWordCard(cardId)" in response.text
+        assert "function deleteAnalysisWordCardInPlace(cardId)" in response.text
+        assert "showGlossaryWordDetail" in response.text
+        assert 'panel.addEventListener("mouseover"' not in response.text
+        assert "saveAnalysisMeaningIfEmpty" in response.text
+        assert "glossary_return_url" in response.text
+        assert "/cards#card-${cardId}" in response.text
+        assert "background: #fef3c7" in response.text
+        assert "max-width: min(calc(100vw - 16px), 520px)" in response.text
+        assert ".word-detail-actions button" in response.text
+        assert "flex-wrap: wrap" in response.text
 
     def test_toolbar_defaults_to_mutually_hidden_panels(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1464,6 +1528,25 @@ class TestReadingAndMarking:
         assert response.status_code == 400
         assert "empty" in response.text
 
+    def test_mark_word_ajax_invalid_input_returns_json_400(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "",
+                "lexical_type": "word",
+            },
+            headers={"X-Requested-With": "fetch", "Accept": "application/json"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["ok"] is False
+        assert "empty" in response.json()["error"]
+
     def test_cards_page_shows_created_cards(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -1483,8 +1566,11 @@ class TestReadingAndMarking:
         assert response.status_code == 200
         assert "Sentence Cards" in response.text
         assert "cat" in response.text
+        assert 'id="card-' in response.text
+        assert "glossary_return_url" in response.text
+        assert "Back to reading" in response.text
 
-    def test_cards_page_word_table_has_definition_column(
+    def test_cards_page_word_table_has_notes_column(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1499,7 +1585,7 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "Definition" in response.text
+        assert "Notes" in response.text
         assert "AI Meaning" in response.text
         assert "Source" in response.text
 
@@ -1549,7 +1635,7 @@ class TestReadingAndMarking:
         assert response.text.count(f'href="{source_href}"') >= 2
         assert 'data-speak-text="cat"' in response.text
 
-    def test_cards_page_shows_user_definition(
+    def test_cards_page_note_input_preserves_current_meaning(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1572,7 +1658,7 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "basic and elementary" in response.text
+        assert 'data-current-meaning="basic and elementary"' in response.text
 
     def test_cards_page_ai_meaning_details_element(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1604,11 +1690,12 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "<details>" in response.text
-        assert "AI ▸" in response.text
+        assert "<details>" not in response.text
+        assert "▶ Reveal" in response.text
+        assert "hover-popover-panel" in response.text
         assert "relating to being or existence" in response.text
 
-    def test_cards_page_word_def_cell_has_edit_elements(
+    def test_cards_page_word_note_cell_has_edit_elements(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1623,12 +1710,12 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "def-text" in response.text
-        assert "def-edit-btn" in response.text
-        assert "def-input" in response.text
+        assert "note-text" in response.text
+        assert "note-edit-btn" in response.text
+        assert "note-input" in response.text
         assert "data-card-id" in response.text
 
-    def test_cards_page_def_cell_shows_current_meaning(
+    def test_cards_page_note_cell_does_not_show_current_meaning(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1651,7 +1738,65 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "lasting a very short time" in response.text
+        assert f'<span class="note-text" data-card-id="{card_id}">—</span>' in response.text
+        assert 'data-current-meaning="lasting a very short time"' in response.text
+
+    def test_cards_page_note_cell_shows_user_note(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "lasting a very short time", "user_note": "my own note"},
+        )
+
+        response = client.get("/cards")
+
+        assert "my own note" in response.text
+        assert '<span class="note-text" data-card-id="' in response.text
+        assert 'data-current-meaning="lasting a very short time"' in response.text
+
+    def test_cards_page_note_cell_suppresses_note_duplicate_of_meaning(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={
+                "current_meaning": "lasting a very short time",
+                "user_note": "lasting a very short time",
+            },
+        )
+
+        response = client.get("/cards")
+
+        assert f'<span class="note-text" data-card-id="{card_id}">—</span>' in response.text
+        assert 'value=""' in response.text
+        assert 'data-current-meaning="lasting a very short time"' in response.text
 
 
 class TestReviewRoutes:
@@ -1693,14 +1838,16 @@ class TestReviewRoutes:
             ).fetchone()["id"]
         client.patch(
             f"/mark/word/{card_id}",
-            data={"current_meaning": "lasting a very short time", "user_note": ""},
+            data={"current_meaning": "lasting a very short time", "user_note": "my own note"},
         )
         _make_due_yesterday(db, "word_cards", card_id)
 
         response = client.get("/review")
 
-        assert "Reveal" in response.text
-        assert "lasting a very short time" in response.text
+        assert "▶ Reveal" in response.text
+        assert "hover-popover-panel" in response.text
+        assert "Your note:" in response.text
+        assert "my own note" in response.text
 
     def test_review_page_no_reveal_when_definition_empty(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1722,7 +1869,62 @@ class TestReviewRoutes:
 
         response = client.get("/review")
 
-        assert 'class="review-reveal"' not in response.text
+        assert "▶ Reveal" not in response.text
+        assert 'class="hover-popover"' not in response.text
+
+    def test_review_page_does_not_show_definition_as_note(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "ephemeral",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'ephemeral'"
+            ).fetchone()["id"]
+        client.patch(
+            f"/mark/word/{card_id}",
+            data={"current_meaning": "AI-backed meaning", "user_note": ""},
+        )
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert "Your note:" not in response.text
+        assert "AI-backed meaning" not in response.text
+
+    def test_review_page_does_not_show_note_when_it_duplicates_definition(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "rudimentary",
+                "lexical_type": "word",
+            },
+        )
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                "SELECT id FROM word_cards WHERE surface_form = 'rudimentary'"
+            ).fetchone()["id"]
+            conn.execute(
+                "UPDATE word_cards SET current_meaning = ?, user_note = ? WHERE id = ?",
+                ("basic and undeveloped", "basic and undeveloped", card_id),
+            )
+        _make_due_yesterday(db, "word_cards", card_id)
+
+        response = client.get("/review")
+
+        assert "Your note:" not in response.text
+        assert "basic and undeveloped" not in response.text
 
     def test_review_page_reveal_shows_ai_meaning(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1754,7 +1956,8 @@ class TestReviewRoutes:
 
         response = client.get("/review")
 
-        assert "Reveal" in response.text
+        assert "▶ Reveal" in response.text
+        assert "hover-popover-panel" in response.text
         assert "AI meaning:" in response.text
         assert "lasting a very short time" in response.text
 
@@ -1776,7 +1979,7 @@ class TestReviewRoutes:
             ).fetchone()["id"]
         client.patch(
             f"/mark/word/{card_id}",
-            data={"current_meaning": "基础的且简单的", "user_note": ""},
+            data={"current_meaning": "基础的且简单的", "user_note": "我自己的笔记"},
         )
         with db.get_connection() as conn:
             cache_id = conn.execute(
@@ -1793,9 +1996,11 @@ class TestReviewRoutes:
 
         response = client.get("/review")
 
-        assert "Your definition:" in response.text
+        assert "▶ Reveal" in response.text
+        assert "hover-popover-panel" in response.text
+        assert "Your note:" in response.text
         assert "AI meaning:" in response.text
-        assert "基础的且简单的" in response.text
+        assert "我自己的笔记" in response.text
         assert "basic and undeveloped" in response.text
 
     def test_review_page_pronunciation_only_for_word_prompts(

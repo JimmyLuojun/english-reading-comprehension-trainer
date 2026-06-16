@@ -433,7 +433,7 @@ class TestBuildDailyReviewQueue:
 # ---------------------------------------------------------------------------
 
 class TestReviewQueueItemAnswer:
-    def test_word_card_answer_is_current_meaning(
+    def test_word_card_answer_is_user_note(
         self, db: DatabaseConnection
     ) -> None:
         sentence_id = _seed_sentence(db, "Ephemeral beauty fades quickly.")
@@ -445,7 +445,7 @@ class TestReviewQueueItemAnswer:
                     review_count, mastery_state, ef, interval_days, repetitions,
                     due_at, occurrence_count, user_note)
                    VALUES ('ephemeral', 'ephemeral', 'word', ?, 'lasting a very short time',
-                           '', ?, NULL, 0, 'new', 2.5, 0, 0, ?, 1, '')""",
+                           '', ?, NULL, 0, 'new', 2.5, 0, 0, ?, 1, 'my own note')""",
                 (sentence_id, NOW.isoformat(), NOW.isoformat()),
             ).lastrowid
 
@@ -453,12 +453,41 @@ class TestReviewQueueItemAnswer:
 
         assert len(items) == 1
         assert items[0].card_id == card_id
-        assert items[0].answer == "lasting a very short time"
+        assert items[0].answer == "my own note"
 
-    def test_word_card_answer_empty_when_current_meaning_blank(
+    def test_word_card_answer_empty_when_user_note_blank_even_with_meaning(
         self, db: DatabaseConnection
     ) -> None:
-        _insert_word_card(db, surface_form="ontological")
+        sentence_id = _seed_sentence(db, "Ontological categories matter.")
+        with db.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note)
+                   VALUES ('ontological', 'ontological', 'word', ?, 'AI-backed meaning',
+                           '', ?, NULL, 0, 'new', 2.5, 0, 0, ?, 1, '')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            )
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+        assert items[0].answer == ""
+
+    def test_word_card_answer_empty_when_user_note_duplicates_meaning(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Rudimentary tools shaped early civilizations.")
+        with db.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note)
+                   VALUES ('rudimentary', 'rudimentary', 'word', ?, 'basic and undeveloped',
+                           '', ?, NULL, 0, 'new', 2.5, 0, 0, ?, 1, 'basic and undeveloped')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            )
         items = list_due_cards(db, as_of=NOW, card_type="word")
         assert items[0].answer == ""
 

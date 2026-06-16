@@ -205,7 +205,13 @@ def _word_due_sql() -> str:
             wc.review_count,
             wc.due_at,
             wc.surface_form AS prompt,
-            wc.current_meaning AS answer,
+            CASE
+                WHEN NULLIF(wc.user_note, '') IS NOT NULL
+                 AND wc.user_note != COALESCE(wc.current_meaning, '')
+                 AND wc.user_note != COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '')
+                THEN wc.user_note
+                ELSE ''
+            END AS answer,
             COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '') AS ai_meaning,
             COALESCE(b.title, '') AS source_book_title,
             CASE

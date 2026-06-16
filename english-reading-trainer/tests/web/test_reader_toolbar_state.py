@@ -81,6 +81,11 @@ def _seed_reader(db: DatabaseConnection, tmp_path: Path) -> int:
         },
     )
     assert response.status_code == 200
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE word_cards SET current_meaning = ? WHERE lemma = ?",
+            ("a small domestic feline", "cat"),
+        )
     _attach_sentence_analysis(db, sentence_id)
     return int(result.book_id)
 
@@ -229,6 +234,20 @@ def _select_text(page: Page, sentence_index: int, text: str) -> None:
     page.wait_for_timeout(60)
 
 
+def _select_text_until_panel(page: Page, sentence_index: int, text: str, panel_id: str) -> None:
+    for _ in range(3):
+        _select_text(page, sentence_index, text)
+        try:
+            page.wait_for_function(
+                f'!document.getElementById("{panel_id}").hidden',
+                timeout=1000,
+            )
+            return
+        except PlaywrightError:
+            page.evaluate("document.dispatchEvent(new Event('selectionchange'))")
+    page.wait_for_function(f'!document.getElementById("{panel_id}").hidden')
+
+
 def _new_page(browser: Browser, url: str) -> Iterator[Page]:
     page = browser.new_page()
     page.goto(url)
@@ -298,6 +317,45 @@ def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) ->
     }
 
 
+def test_analysis_panel_overlays_reader_without_layout_shift(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        before = page.evaluate(
+            """() => {
+              const rect = document.querySelector(".reader").getBoundingClientRect();
+              return { left: rect.left, width: rect.width };
+            }"""
+        )
+
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        after = page.evaluate(
+            """() => {
+              const readerRect = document.querySelector(".reader").getBoundingClientRect();
+              const panel = document.getElementById("analysis-panel");
+              const panelStyle = getComputedStyle(panel);
+              const panelRect = panel.getBoundingClientRect();
+              return {
+                bodyClass: document.body.className,
+                left: readerRect.left,
+                panelPosition: panelStyle.position,
+                panelRight: Math.round(window.innerWidth - panelRect.right),
+                panelWidth: panelRect.width,
+                width: readerRect.width,
+              };
+            }"""
+        )
+
+    assert after["bodyClass"] == "reader-page analysis-open"
+    assert after["left"] == before["left"]
+    assert after["width"] == before["width"]
+    assert after["panelPosition"] == "fixed"
+    assert after["panelRight"] == 0
+    assert after["panelWidth"] <= 520
+
+
 def test_click_marked_word_shows_only_word_detail(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()
@@ -347,6 +405,112 @@ def test_selection_modes_are_mutually_exclusive(browser: Browser, reader_url: st
         _assert_only_panel(page, "word")
 
 
+def test_mark_word_keeps_reader_scroll_position(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.evaluate(
+            """() => {
+              document.querySelector(".reader").style.paddingTop = "1000px";
+              window.scrollTo(0, 880);
+            }"""
+        )
+        _select_text_until_panel(page, 1, "bright", "toolbar-word-form")
+        before = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              return {
+                sentenceTop: sentence.getBoundingClientRect().top,
+                scrollY: window.scrollY,
+                url: window.location.href,
+              };
+            }"""
+        )
+
+        page.locator('#toolbar-word-form button[value="word"]').click()
+        page.wait_for_function(
+            """() => Array.from(document.querySelectorAll("[data-word-card]"))
+              .some((node) => node.textContent === "bright")"""
+        )
+        after = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              return {
+                brightMarked: Array.from(document.querySelectorAll("[data-word-card]"))
+                  .some((node) => node.textContent === "bright"),
+                sentenceTop: sentence.getBoundingClientRect().top,
+                scrollY: window.scrollY,
+                toolbarHidden: document.getElementById("selection-toolbar").hidden,
+                url: window.location.href,
+              };
+            }"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT lexical_type FROM word_cards WHERE lemma = ? AND archived_at IS NULL",
+            ("bright",),
+        ).fetchone()
+
+    assert before["scrollY"] > 0
+    assert after["url"] == before["url"]
+    assert abs(after["sentenceTop"] - before["sentenceTop"]) <= 1
+    assert after["scrollY"] > 0
+    assert after["toolbarHidden"] is True
+    assert after["brightMarked"] is True
+    assert row is not None
+    assert row["lexical_type"] == "word"
+
+
+def test_remove_word_card_keeps_reader_scroll_position(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.evaluate(
+            """() => {
+              document.querySelector(".reader").style.paddingTop = "1000px";
+              window.scrollTo(0, 880);
+            }"""
+        )
+        page.locator("[data-word-card]").click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        before = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[0];
+              return {
+                sentenceTop: sentence.getBoundingClientRect().top,
+                scrollY: window.scrollY,
+                url: window.location.href,
+              };
+            }"""
+        )
+
+        page.locator("#toolbar-word-detail-remove").click()
+        page.wait_for_function('document.querySelectorAll("[data-word-card]").length === 0')
+        after = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[0];
+              return {
+                remainingWordCards: document.querySelectorAll("[data-word-card]").length,
+                sentenceTop: sentence.getBoundingClientRect().top,
+                scrollY: window.scrollY,
+                toolbarHidden: document.getElementById("selection-toolbar").hidden,
+                url: window.location.href,
+              };
+            }"""
+        )
+
+    assert before["scrollY"] > 0
+    assert after["url"] == before["url"]
+    assert abs(after["sentenceTop"] - before["sentenceTop"]) <= 1
+    assert after["scrollY"] > 0
+    assert after["toolbarHidden"] is True
+    assert after["remainingWordCards"] == 0
+
+
 def test_sentence_boundary_touch_does_not_count_as_cross_sentence(
     browser: Browser,
     reader_url: str,
@@ -365,6 +529,7 @@ def test_collapsed_selection_after_word_detail_hides_toolbar(browser: Browser, r
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()
         page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.wait_for_timeout(300)
         page.evaluate(
             """() => {
               window.getSelection().removeAllRanges();
@@ -423,8 +588,420 @@ def test_analysis_panel_selection_shows_mark_word(
             """() => ({
               sentenceId: document.getElementById("toolbar-analysis-word-sentence-id").value,
               surfaceForm: document.getElementById("toolbar-analysis-word-surface-form").value,
+              markWord: Boolean(document.querySelector('[data-analysis-mark="word"]')),
+              markPhrase: Boolean(document.querySelector('[data-analysis-mark="phrase"]')),
+              markCollocation: Boolean(document.querySelector('[data-analysis-mark="collocation"]')),
+              aiAnalysis: Boolean(document.querySelector('[data-analysis-analyze="word"]')),
             })"""
         )
 
     assert form_values["sentenceId"]
     assert form_values["surfaceForm"] == "feline"
+    assert form_values["markWord"] is True
+    assert form_values["markPhrase"] is True
+    assert form_values["markCollocation"] is True
+    assert form_values["aiAnalysis"] is True
+
+
+def test_analysis_panel_mark_phrase_keeps_current_analysis(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        before_url = page.url
+        page.evaluate(
+            """() => {
+              const node = document.getElementById("analysis-simplified").firstChild;
+              const index = node.nodeValue.indexOf("feline");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + "feline".length);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+        page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
+        page.locator('[data-analysis-mark="phrase"]').click()
+        page.wait_for_function(
+            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+        )
+        state = page.evaluate(
+            """() => ({
+              url: window.location.href,
+              panelHidden: document.getElementById("analysis-panel").hidden,
+              simplified: document.getElementById("analysis-simplified").textContent,
+              highlighted: Boolean(document.querySelector("#analysis-simplified .glossary-word")),
+            })"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT lexical_type FROM word_cards WHERE lemma = ? AND archived_at IS NULL",
+            ("feline",),
+        ).fetchone()
+
+    assert state == {
+        "url": before_url,
+        "panelHidden": False,
+        "simplified": "The feline rested.",
+        "highlighted": True,
+    }
+    assert row is not None
+    assert row["lexical_type"] == "phrase"
+
+
+def test_analysis_panel_ai_analysis_marks_then_returns_to_previous_analysis(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        card_id = int(route.request.url.rstrip("/").rsplit("/", 1)[-1])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": card_id,
+                "sentence_id": 1,
+                "lemma": "feline",
+                "surface_form": "feline",
+                "lexical_type": "word",
+                "analysis": {
+                    "meaning_in_context": "catlike animal",
+                    "chinese_meaning": "猫科动物",
+                    "register": "neutral",
+                    "why_this_word": "It names the animal precisely.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "felis", "family": ["feline"]},
+                    "predicted_error_types": ["L01"],
+                },
+                "cache_id": 1,
+                "prompt_version": "v3",
+                "active_prompt_version": "v3",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
+    for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        page.evaluate(
+            """() => {
+              const node = document.getElementById("analysis-simplified").firstChild;
+              const index = node.nodeValue.indexOf("feline");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + "feline".length);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+        page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
+        page.locator('[data-analysis-analyze="word"]').click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent === "catlike animal"'
+        )
+        word_state = page.evaluate(
+            """() => ({
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
+              previousText: document.getElementById("analysis-panel-previous").textContent,
+              wordSectionsHidden: document.getElementById("analysis-word-sections").hidden,
+            })"""
+        )
+
+        page.locator("#analysis-panel-previous").click()
+        page.wait_for_function('!document.getElementById("analysis-sentence-sections").hidden')
+        restored_state = page.evaluate(
+            """() => ({
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
+              simplified: document.getElementById("analysis-simplified").textContent,
+              sentenceSectionsHidden: document.getElementById("analysis-sentence-sections").hidden,
+            })"""
+        )
+
+    assert word_state == {
+        "previousHidden": False,
+        "previousText": "Back to sentence analysis",
+        "wordSectionsHidden": False,
+    }
+    assert restored_state == {
+        "previousHidden": True,
+        "simplified": "The feline rested.",
+        "sentenceSectionsHidden": False,
+    }
+
+
+def test_analysis_panel_glossary_word_opens_detail_then_links_to_cards_and_back(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        glossary_word = page.locator("#analysis-gloss .glossary-word").first
+        glossary_word.wait_for()
+        glossary_state = glossary_word.evaluate(
+            """(element) => ({
+              text: element.textContent,
+              cardId: element.dataset.cardId,
+              meaning: element.dataset.meaning,
+            })"""
+        )
+
+        glossary_word.hover()
+        page.wait_for_timeout(120)
+        assert page.locator("#toolbar-word-detail").evaluate("(element) => element.hidden") is True
+        glossary_word.click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        _assert_only_panel(page, "word_detail")
+        detail_state = page.evaluate(
+            """() => ({
+              surface: document.getElementById("toolbar-word-detail-surface").textContent,
+              meaning: document.getElementById("toolbar-word-detail-meaning").value,
+              viewCardId: document.getElementById("toolbar-word-detail-view-card").dataset.cardId,
+            })"""
+        )
+
+        page.locator("#toolbar-word-detail-view-card").click()
+        page.wait_for_url("**/cards#card-*")
+        cards_state = page.evaluate(
+            """(cardId) => ({
+              hash: window.location.hash,
+              targetFound: Boolean(document.getElementById(`card-${cardId}`)),
+              returnVisible: Boolean(document.querySelector(".glossary-return")),
+              returnHref: document.querySelector(".glossary-return")?.href || "",
+            })""",
+            glossary_state["cardId"],
+        )
+        page.locator(".glossary-return").click()
+        page.wait_for_url("**/read/*")
+        returned_path = page.evaluate("window.location.pathname")
+
+    assert glossary_state == {
+        "text": "Cat",
+        "cardId": glossary_state["cardId"],
+        "meaning": "a small domestic feline",
+    }
+    assert glossary_state["cardId"]
+    assert detail_state == {
+        "surface": "Cat",
+        "meaning": "a small domestic feline",
+        "viewCardId": glossary_state["cardId"],
+    }
+    assert cards_state["hash"] == f"#card-{glossary_state['cardId']}"
+    assert cards_state["targetFound"] is True
+    assert cards_state["returnVisible"] is True
+    assert "/read/" in cards_state["returnHref"]
+    assert returned_path.startswith("/read/")
+
+
+def test_analysis_panel_remove_glossary_word_stays_in_analysis_panel(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        initial_url = page.evaluate("window.location.href")
+        glossary_word = page.locator("#analysis-gloss .glossary-word").first
+        glossary_word.wait_for()
+        card_id = glossary_word.get_attribute("data-card-id")
+
+        glossary_word.click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-remove").click()
+        page.wait_for_function(
+            f"""() => (
+              document.getElementById("analysis-panel").hidden === false
+              && document.getElementById("toolbar-word-detail").hidden === true
+              && document.querySelectorAll('.glossary-word[data-card-id="{card_id}"]').length === 0
+            )""",
+        )
+        state = page.evaluate(
+            """(cardId) => ({
+              url: window.location.href,
+              panelHidden: document.getElementById("analysis-panel").hidden,
+              wordDetailHidden: document.getElementById("toolbar-word-detail").hidden,
+              highlighted: document.querySelectorAll(`.glossary-word[data-card-id="${cardId}"]`).length,
+              analysisText: document.getElementById("analysis-gloss").textContent,
+            })""",
+            card_id,
+        )
+
+    assert state == {
+        "url": initial_url,
+        "panelHidden": False,
+        "wordDetailHidden": True,
+        "highlighted": 0,
+        "analysisText": "Cat rests.",
+    }
+
+
+def test_word_analysis_nested_explain_can_return_to_previous_analysis(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    calls = {"count": 0}
+
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        nested = calls["count"] > 1
+        payload = {
+            "ok": True,
+            "card_id": 1,
+            "sentence_id": 1,
+            "lemma": "cat",
+            "surface_form": "Cat",
+            "lexical_type": "word",
+            "analysis": {
+                "meaning_in_context": "second meaning" if nested else "first meaning",
+                "chinese_meaning": "猫",
+                "register": "common",
+                "why_this_word": (
+                    "Nested Cat explanation."
+                    if nested
+                    else "First Cat explanation with Cat as a glossary link."
+                ),
+                "vs_simpler": [],
+                "morphology": {"root": "cat", "family": ["catlike"]},
+                "predicted_error_types": ["L01"],
+            },
+            "cache_id": calls["count"],
+            "prompt_version": "v3",
+            "active_prompt_version": "v3",
+            "from_cache": False,
+            "is_stale": False,
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(payload),
+        )
+
+    for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
+        page.locator("[data-word-card]").click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-explain").click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent === "first meaning"'
+        )
+        first_state = page.evaluate(
+            """() => ({
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
+              why: document.getElementById("analysis-word-why").textContent,
+            })"""
+        )
+
+        nested_link = page.locator("#analysis-word-why .glossary-word").first
+        nested_link.wait_for()
+        nested_link.click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-explain").click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent === "second meaning"'
+        )
+        nested_state = page.evaluate(
+            """() => ({
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
+              previousText: document.getElementById("analysis-panel-previous").textContent,
+              meaning: document.getElementById("analysis-word-meaning").textContent,
+            })"""
+        )
+
+        page.locator("#analysis-panel-previous").click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent === "first meaning"'
+        )
+        restored_state = page.evaluate(
+            """() => ({
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
+              meaning: document.getElementById("analysis-word-meaning").textContent,
+              why: document.getElementById("analysis-word-why").textContent,
+            })"""
+        )
+
+    assert calls["count"] == 2
+    assert first_state == {
+        "previousHidden": True,
+        "why": "First Cat explanation with Cat as a glossary link.",
+    }
+    assert nested_state == {
+        "previousHidden": False,
+        "previousText": "Back to Cat analysis",
+        "meaning": "second meaning",
+    }
+    assert restored_state == {
+        "previousHidden": True,
+        "meaning": "first meaning",
+        "why": "First Cat explanation with Cat as a glossary link.",
+    }
+
+
+def test_word_analysis_notes_do_not_fallback_to_definition(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE word_cards SET user_note = current_meaning WHERE lemma = ?",
+            ("cat",),
+        )
+
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": 1,
+                "sentence_id": 1,
+                "lemma": "cat",
+                "surface_form": "Cat",
+                "lexical_type": "word",
+                "analysis": {
+                    "meaning_in_context": "a small domestic feline",
+                    "chinese_meaning": "猫",
+                    "register": "common",
+                    "why_this_word": "It names the animal.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "cat", "family": ["catlike"]},
+                    "predicted_error_types": ["L01"],
+                },
+                "cache_id": 1,
+                "prompt_version": "v3",
+                "active_prompt_version": "v3",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
+    for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
+        page.locator("[data-word-card]").click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-explain").click()
+        page.wait_for_function(
+            'document.getElementById("word-panel-meaning").value === "a small domestic feline"'
+        )
+        notes_state = page.evaluate(
+            """() => ({
+              definition: document.getElementById("word-panel-meaning").value,
+              note: document.getElementById("word-panel-note").value,
+            })"""
+        )
+
+    assert notes_state == {
+        "definition": "a small domestic feline",
+        "note": "",
+    }
