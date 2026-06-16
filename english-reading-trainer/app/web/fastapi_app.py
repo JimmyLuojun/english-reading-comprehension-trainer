@@ -12,7 +12,9 @@ import html
 import json
 import os
 import re
+import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -71,8 +73,11 @@ _MAX_EPUB_IMPORT_BYTES = 100 * 1024 * 1024
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 _AUTO_TITLE_MAX_LEN = 80
 _DEFAULT_SENTENCE_PROMPT_VERSION = "v1"
+_DEFAULT_WORD_PROMPT_VERSION = "v3"
 _PREDICT_SENTENCE_PROMPT = "sentence_analysis_predict"
 _DIAGNOSE_SENTENCE_PROMPT = "sentence_analysis_diagnose"
+_WORD_ANALYSIS_PROMPT = "word_analysis"
+_WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[’'-][A-Za-z0-9]+)*")
 
 
 class UploadTooLargeError(ValueError):
@@ -81,6 +86,16 @@ class UploadTooLargeError(ValueError):
     def __init__(self, max_bytes: int) -> None:
         self.max_bytes = max_bytes
         super().__init__(f"Upload exceeds {_format_mb(max_bytes)} MB limit.")
+
+
+@dataclass(frozen=True)
+class DeleteBookResult:
+    """Statistics returned after deleting an imported book/article."""
+
+    sentence_cards_deleted: int
+    word_cards_reanchored: int
+    word_cards_deleted: int
+    review_logs_deleted: int
 
 
 def create_app(
@@ -261,6 +276,15 @@ def create_app(
         body += _books_table(rows)
         return _html_page("Books", body, active="books")
 
+    @web_app.post("/books/{book_id}/delete")
+    def delete_book(book_id: int) -> Any:
+        db = db_factory()
+        result = _delete_book(db, book_id)
+        if result is None:
+            return _error_page("Book not found", status_code=404)
+        _purge_book_assets_dir(db, book_id)
+        return _redirect("/books")
+
     @web_app.get("/books/{book_id}", response_class=HTMLResponse)
     def book_detail(book_id: int) -> HTMLResponse:
         db = db_factory()
@@ -304,7 +328,7 @@ def create_app(
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
         blocks = _fetch_chapter_blocks(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
-        return_to = f"/read/{book_id}?chapter={chapter_idx}"
+        return_to = f"/read/{book_id}?chapter={chapter_idx}&restore=1"
         restore_progress = "chapter" not in request.query_params or (
             request.query_params.get("restore") == "1"
         )
@@ -529,6 +553,7 @@ def create_app(
                 status_code=500,
             )
         payload["from_cache"] = result.from_cache
+        payload["is_stale"] = bool(payload["is_stale"] or result.is_stale)
         return JSONResponse(payload)
 
     @web_app.get("/cards", response_class=HTMLResponse)
@@ -684,6 +709,176 @@ def _fetch_book(db: DatabaseConnection, book_id: int) -> dict[str, Any] | None:
     with db.get_connection() as conn:
         row = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
     return dict(row) if row else None
+
+
+def _delete_book(db: DatabaseConnection, book_id: int) -> DeleteBookResult | None:
+    with db.get_connection() as conn:
+        book = conn.execute(
+            "SELECT id FROM books WHERE id = ?",
+            (book_id,),
+        ).fetchone()
+        if book is None:
+            return None
+
+        sentence_cards_deleted = conn.execute(
+            """SELECT COUNT(*)
+                 FROM sentence_cards sc
+                 JOIN sentences s ON s.id = sc.sentence_id
+                WHERE s.book_id = ?""",
+            (book_id,),
+        ).fetchone()[0]
+        sentence_log_delete = conn.execute(
+            """DELETE FROM review_logs
+                WHERE card_type = 'sentence'
+                  AND card_id IN (
+                    SELECT sc.id
+                      FROM sentence_cards sc
+                      JOIN sentences s ON s.id = sc.sentence_id
+                     WHERE s.book_id = ?)""",
+            (book_id,),
+        )
+        review_logs_deleted = max(sentence_log_delete.rowcount, 0)
+
+        word_card_rows = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT wc.id, wc.lemma, wc.surface_form, wc.lexical_type
+                     FROM word_cards wc
+                     JOIN sentences s ON s.id = wc.first_sentence_id
+                    WHERE s.book_id = ?
+                    ORDER BY wc.id""",
+                (book_id,),
+            ).fetchall()
+        ]
+        candidate_rows = _fetch_reanchor_candidate_sentences(conn, book_id)
+        word_card_ids_to_delete: list[int] = []
+        word_cards_reanchored = 0
+
+        for card in word_card_rows:
+            reanchor_sentence_id = _find_reanchor_sentence_id(card, candidate_rows)
+            if reanchor_sentence_id is None:
+                word_card_ids_to_delete.append(card["id"])
+                continue
+            conn.execute(
+                "UPDATE word_cards SET first_sentence_id = ? WHERE id = ?",
+                (reanchor_sentence_id, card["id"]),
+            )
+            word_cards_reanchored += 1
+
+        if word_card_ids_to_delete:
+            placeholders = _sql_placeholders(word_card_ids_to_delete)
+            word_log_delete = conn.execute(
+                f"""DELETE FROM review_logs
+                     WHERE card_type = 'word'
+                       AND card_id IN ({placeholders})""",
+                word_card_ids_to_delete,
+            )
+            review_logs_deleted += max(word_log_delete.rowcount, 0)
+            conn.execute(
+                f"DELETE FROM word_cards WHERE id IN ({placeholders})",
+                word_card_ids_to_delete,
+            )
+
+        conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
+
+    return DeleteBookResult(
+        sentence_cards_deleted=sentence_cards_deleted,
+        word_cards_reanchored=word_cards_reanchored,
+        word_cards_deleted=len(word_card_ids_to_delete),
+        review_logs_deleted=review_logs_deleted,
+    )
+
+
+def _fetch_reanchor_candidate_sentences(
+    conn: Any,
+    deleted_book_id: int,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """SELECT id, text
+             FROM sentences
+            WHERE book_id != ?
+            ORDER BY book_id, chapter_id, paragraph_id, idx, id""",
+        (deleted_book_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _find_reanchor_sentence_id(
+    card: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> int | None:
+    lexical_type = str(card.get("lexical_type") or LexicalType.WORD.value)
+    if lexical_type == LexicalType.WORD.value:
+        return _find_word_reanchor_sentence_id(card, candidates)
+    return _find_phrase_reanchor_sentence_id(card, candidates)
+
+
+def _find_word_reanchor_sentence_id(
+    card: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> int | None:
+    terms = _word_card_terms(card)
+    if not terms:
+        return None
+    for candidate in candidates:
+        tokens = set(_word_tokens(str(candidate["text"])))
+        if terms & tokens:
+            return candidate["id"]
+    return None
+
+
+def _find_phrase_reanchor_sentence_id(
+    card: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> int | None:
+    phrases = _phrase_card_terms(card)
+    if not phrases:
+        return None
+    for candidate in candidates:
+        normalized_text = _normalize_phrase_text(str(candidate["text"]))
+        if any(phrase in normalized_text for phrase in phrases):
+            return candidate["id"]
+    return None
+
+
+def _word_card_terms(card: dict[str, Any]) -> set[str]:
+    terms: set[str] = set()
+    for key in ("surface_form", "lemma"):
+        tokens = _word_tokens(str(card.get(key) or ""))
+        if len(tokens) == 1:
+            terms.add(tokens[0])
+    return terms
+
+
+def _phrase_card_terms(card: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key in ("surface_form", "lemma"):
+        normalized = _normalize_phrase_text(str(card.get(key) or ""))
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            terms.append(normalized)
+    return terms
+
+
+def _word_tokens(text: str) -> list[str]:
+    return [match.group(0).lower() for match in _WORD_TOKEN_RE.finditer(text)]
+
+
+def _normalize_phrase_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _sql_placeholders(values: list[Any]) -> str:
+    return ",".join("?" for _ in values)
+
+
+def _purge_book_assets_dir(db: DatabaseConnection, book_id: int) -> None:
+    assets_dir = Path(getattr(db, "_db_path")).parent / "assets" / "books" / str(book_id)
+    try:
+        shutil.rmtree(assets_dir, ignore_errors=True)
+    except OSError:
+        pass
 
 
 def _fetch_chapters(db: DatabaseConnection, book_id: int) -> list[dict[str, Any]]:
@@ -942,6 +1137,7 @@ def _fetch_word_analysis_payload(
         ).fetchone()
     if row is None:
         return None
+    active_version = _active_word_prompt_version(db)
     return {
         "ok": True,
         "card_id": row["card_id"],
@@ -949,9 +1145,10 @@ def _fetch_word_analysis_payload(
         "lemma": row["lemma"],
         "cache_id": row["cache_id"],
         "prompt_version": row["prompt_version"],
+        "active_prompt_version": active_version,
         "model": row["model"],
         "created_at": row["created_at"],
-        "is_stale": False,
+        "is_stale": row["prompt_version"] != active_version,
         "from_cache": True,
         "analysis": json.loads(row["response_json"]),
     }
@@ -1001,6 +1198,18 @@ def _active_sentence_prompt_version(
     return row["version"] if row else _DEFAULT_SENTENCE_PROMPT_VERSION
 
 
+def _active_word_prompt_version(db: DatabaseConnection) -> str:
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT version
+                 FROM prompt_versions
+                WHERE name = ? AND is_active = 1
+                ORDER BY id DESC LIMIT 1""",
+            (_WORD_ANALYSIS_PROMPT,),
+        ).fetchone()
+    return row["version"] if row else _DEFAULT_WORD_PROMPT_VERSION
+
+
 def _books_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No books imported yet.</p>'
@@ -1012,15 +1221,28 @@ def _books_table(rows: list[dict[str, Any]]) -> str:
         f"<td>{_escape(row['source_format'])}</td>"
         f"<td>{row['total_chapters']}</td>"
         f"<td>{row['total_sentences']}</td>"
+        f"<td>{_delete_book_form(row['id'])}</td>"
         "</tr>"
         for row in rows
     )
     return f"""
     <table>
-      <thead><tr><th>ID</th><th>Title</th><th>Author</th><th>Format</th><th>Chapters</th><th>Sentences</th></tr></thead>
+      <thead><tr><th>ID</th><th>Title</th><th>Author</th><th>Format</th><th>Chapters</th><th>Sentences</th><th>Actions</th></tr></thead>
       <tbody>{body}</tbody>
     </table>
     """
+
+
+def _delete_book_form(book_id: int) -> str:
+    confirm = (
+        "Delete this book and all related sentence cards? Word cards that also "
+        "appear in other books will be kept and re-anchored."
+    )
+    return (
+        f'<form method="post" action="/books/{book_id}/delete" class="inline-form">'
+        f'<button class="danger" type="submit" onclick="return confirm(\'{_escape(confirm)}\')">'
+        "Delete</button></form>"
+    )
 
 
 def _chapters_table(book_id: int, rows: list[dict[str, Any]]) -> str:
@@ -1348,7 +1570,6 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="toolbar-translation-open" type="button">Write translation</button>
-        <button id="toolbar-analysis-open" type="button">AI analysis</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
         <input id="toolbar-translation-value" type="hidden" name="user_translation">
@@ -1393,6 +1614,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-cross-sentence-delete" type="button" class="danger" hidden>Unmark sentences</button>
         <button id="toolbar-dismiss" type="button">Dismiss</button>
       </div>
+      <button id="toolbar-analysis-open" type="button" hidden>AI analysis</button>
     </div>
     <script id="word-card-index" type="application/json">{_json_script(word_index)}</script>
     <script>{_selection_script()}</script>
@@ -1443,6 +1665,7 @@ def _analysis_panel() -> str:
         <section class="analysis-section">
           <h3>Meaning in context</h3>
           <p id="analysis-word-meaning" class="analysis-text"></p>
+          <p id="analysis-word-meaning-zh" class="analysis-text analysis-translation"></p>
         </section>
         <section class="analysis-section">
           <h3>Register</h3>
@@ -1482,6 +1705,7 @@ def _analysis_panel() -> str:
       </div>
       <footer class="analysis-panel-actions">
         <button id="analysis-panel-retry" type="button">Reanalyze</button>
+        <button id="analysis-panel-unmark" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="analysis-panel-return" type="button">Back to reading</button>
       </footer>
     </aside>
@@ -1532,6 +1756,7 @@ def _selection_script() -> str:
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
       const panelRetry = document.getElementById("analysis-panel-retry");
+      const panelUnmark = document.getElementById("analysis-panel-unmark");
       const panelKicker = document.getElementById("analysis-panel-kicker");
       const panelTitle = document.getElementById("analysis-panel-title");
       const panelMeta = document.getElementById("analysis-panel-meta");
@@ -1544,6 +1769,7 @@ def _selection_script() -> str:
       const skeleton = document.getElementById("analysis-skeleton");
       const diagnosis = document.getElementById("analysis-diagnosis");
       const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
+      const wordAnalysisMeaningZh = document.getElementById("analysis-word-meaning-zh");
       const wordRegister = document.getElementById("analysis-word-register");
       const wordWhy = document.getElementById("analysis-word-why");
       const wordVsSimpler = document.getElementById("analysis-word-vs-simpler");
@@ -1595,10 +1821,29 @@ def _selection_script() -> str:
       const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
       const lemmaKey = (value) => value.toLowerCase().trim();
 
+      function toolbarContainsFocus() {
+        return Boolean(document.activeElement && toolbar.contains(document.activeElement));
+      }
+
+      function blurToolbarFocus() {
+        if (toolbarContainsFocus() && typeof document.activeElement.blur === "function") {
+          document.activeElement.blur();
+        }
+      }
+
+      function selectionInsideToolbar(range) {
+        const node = range.commonAncestorContainer;
+        const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        return Boolean(element && toolbar.contains(element));
+      }
+
       function hideTranslationEditor() {
         translationEditor.hidden = true;
         translationEditorOpen = false;
         translationStatus.textContent = "";
+        if (translationEditor.contains(document.activeElement)) {
+          blurToolbarFocus();
+        }
       }
 
       function hideAllPanels() {
@@ -1607,6 +1852,7 @@ def _selection_script() -> str:
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
+        analysisOpen.hidden = true;
       }
 
       function hideToolbar() {
@@ -1620,6 +1866,7 @@ def _selection_script() -> str:
         activeWordDetailCardId = null;
         wordDetailRemove.dataset.cardId = "";
         crossSentenceDelete.dataset.sentenceIds = "";
+        blurToolbarFocus();
       }
 
       function setVisible(element, visible) {
@@ -1629,7 +1876,10 @@ def _selection_script() -> str:
       function selectedSentenceSpans(range) {
         return Array.from(reader.querySelectorAll("[data-sentence-id]")).filter((span) => {
           try {
-            return range.intersectsNode(span);
+            if (!range.intersectsNode(span)) return false;
+            // Exclude span when range only touches its trailing boundary
+            if (range.startContainer === span && range.startOffset >= span.childNodes.length) return false;
+            return true;
           } catch {
             return false;
           }
@@ -1712,14 +1962,16 @@ def _selection_script() -> str:
           suppressNextUpdate = false;
           return;
         }
-        if (translationEditorOpen || toolbar.contains(document.activeElement)) return;
+        if (translationEditorOpen) return;
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          if (toolbarContainsFocus()) return;
           hideToolbar();
           return;
         }
 
         const range = selection.getRangeAt(0);
+        if (selectionInsideToolbar(range)) return;
         const selectedText = selection.toString().trim();
         const normalizedSelection = normalizeText(selectedText);
         if (!normalizedSelection) {
@@ -1758,7 +2010,7 @@ def _selection_script() -> str:
         sentenceSubmit.hidden = !wholeSentence || markedSentence;
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
         translationOpen.hidden = !wholeSentence;
-        analysisOpen.hidden = !wholeSentence;
+        analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
 
@@ -1844,6 +2096,7 @@ def _selection_script() -> str:
       }
 
       async function deleteAndReload(url) {
+        saveReaderProgress();
         const separator = url.includes("?") ? "&" : "?";
         const response = await fetch(`${url}${separator}return_to=${encodeURIComponent(returnTo)}`, {
           method: "DELETE",
@@ -1922,6 +2175,7 @@ def _selection_script() -> str:
           return;
         }
         translationValue.value = value;
+        saveReaderProgress();
         translationForm.submit();
       }
 
@@ -1935,6 +2189,7 @@ def _selection_script() -> str:
         }
         if (sentenceSections) sentenceSections.hidden = false;
         if (wordSections) wordSections.hidden = true;
+        if (panelUnmark) panelUnmark.hidden = false;
       }
 
       function setWordMode() {
@@ -1943,6 +2198,7 @@ def _selection_script() -> str:
         if (panelTitle) panelTitle.textContent = "Word Analysis";
         if (sentenceSections) sentenceSections.hidden = true;
         if (wordSections) wordSections.hidden = false;
+        if (panelUnmark) panelUnmark.hidden = true;
       }
 
       function openPanel() {
@@ -1953,6 +2209,7 @@ def _selection_script() -> str:
       function closePanel() {
         panel.hidden = true;
         document.body.classList.remove("analysis-open");
+        if (panelUnmark) panelUnmark.hidden = true;
         clearEvidenceHighlight();
         reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
           el.classList.remove("word-analysis-active");
@@ -1979,6 +2236,7 @@ def _selection_script() -> str:
         panelMeta.textContent = "";
         panelRetry.hidden = true;
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = "";
+        if (wordAnalysisMeaningZh) wordAnalysisMeaningZh.textContent = "";
         if (wordRegister) wordRegister.textContent = "";
         if (wordWhy) wordWhy.textContent = "";
         if (wordVsSimpler) wordVsSimpler.replaceChildren();
@@ -2162,6 +2420,10 @@ def _selection_script() -> str:
           wordPronunciation.hidden = !speakText;
         }
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
+        if (wordAnalysisMeaningZh) {
+          const chineseMeaning = a.chinese_meaning || a.chinese_gloss || "";
+          wordAnalysisMeaningZh.textContent = chineseMeaning ? `中文：${chineseMeaning}` : "中文：—";
+        }
         if (wordRegister) wordRegister.textContent = a.register || "—";
         if (wordWhy) wordWhy.textContent = a.why_this_word || "—";
         if (wordVsSimpler) renderVsSimpler(wordVsSimpler, a.vs_simpler || []);
@@ -2252,6 +2514,11 @@ def _selection_script() -> str:
         if (event.target.closest("textarea, input")) return;
         event.preventDefault();
       });
+      reader.addEventListener("mousedown", () => {
+        if (toolbarContainsFocus()) {
+          blurToolbarFocus();
+        }
+      });
       sentenceDelete.addEventListener("click", () => {
         if (activeSentenceId) deleteAndReload(`/mark/sentence/${activeSentenceId}`);
       });
@@ -2285,6 +2552,16 @@ def _selection_script() -> str:
       });
       panelClose.addEventListener("click", closePanel);
       panelReturn.addEventListener("click", closePanel);
+      if (panelUnmark) {
+        panelUnmark.addEventListener("click", async () => {
+          const sentenceId = activeAnalysisSentenceId;
+          if (!sentenceId) return;
+          closePanel();
+          await deleteSentenceCardsInPlace([sentenceId]);
+        });
+      }
+      wordForm.addEventListener("submit", () => { saveReaderProgress(); });
+      sentenceForm.addEventListener("submit", () => { saveReaderProgress(); });
       panelRetry.addEventListener("click", () => {
         if (panelMode === "word" && activeAnalysisWordCardId) {
           requestWordAnalysis(activeAnalysisWordCardId);
@@ -2765,6 +3042,9 @@ def _css() -> str:
       --accent: #2563eb;
       --accent-strong: #1d4ed8;
       --ok: #047857;
+      --danger: #b42318;
+      --danger-line: #fecdca;
+      --danger-bg: #fff1f0;
     }
     * { box-sizing: border-box; }
     body {
@@ -2798,6 +3078,15 @@ def _css() -> str:
     nav a.active, .button.primary, button:hover, .button:hover {
       border-color: var(--accent);
       color: var(--accent-strong);
+    }
+    button.danger, .button.danger {
+      border-color: var(--danger-line);
+      color: var(--danger);
+    }
+    button.danger:hover, .button.danger:hover {
+      background: var(--danger-bg);
+      border-color: var(--danger);
+      color: var(--danger);
     }
     .reader-page {
       background: #ffffff;
@@ -2950,6 +3239,8 @@ def _css() -> str:
     }
     [data-sentence-id].marked {
       background: linear-gradient(transparent 60%, #ffe58a 60%);
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
     }
     .reader-sentence:target {
       background: #bfdbfe;
@@ -3150,6 +3441,10 @@ def _css() -> str:
     .analysis-text {
       margin: 0;
       line-height: 1.55;
+    }
+    .analysis-translation {
+      margin-top: 6px;
+      color: var(--muted);
     }
     .analysis-codes {
       display: inline-block;

@@ -20,6 +20,7 @@ from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
+from app.review.sm2_scheduler import apply_review
 from app.web.fastapi_app import create_app
 from tests.importers.epub_builder import (
     PNG_1X1_BYTES,
@@ -49,6 +50,7 @@ _VALID_WORD_ANALYSIS = {
     "lexical_type": "word",
     "pos": "noun",
     "meaning_in_context": "a small domestic feline animal",
+    "chinese_meaning": "小型家养猫科动物",
     "register": "neutral",
     "why_this_word": "Cat is the neutral everyday term for the animal. Feline would be more formal or literary. Writing 'a small domestic feline animal' would sound clinical rather than natural.",
     "vs_simpler": [
@@ -111,6 +113,29 @@ def _seed_book(db: DatabaseConnection, tmp_path: Path) -> tuple[int, list[int]]:
     return result.book_id, sentence_ids
 
 
+def _seed_text_book(
+    db: DatabaseConnection,
+    tmp_path: Path,
+    filename: str,
+    *,
+    title: str,
+    text: str,
+    author: str = "Author",
+) -> tuple[int, list[int]]:
+    path = tmp_path / filename
+    path.write_text(text, encoding="utf-8")
+    result = import_txt(db, path, title=title, author=author)
+    with db.get_connection() as conn:
+        sentence_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM sentences WHERE book_id = ? ORDER BY id",
+                (result.book_id,),
+            ).fetchall()
+        ]
+    return result.book_id, sentence_ids
+
+
 def _seed_three_chapter_book(db: DatabaseConnection, tmp_path: Path) -> int:
     path = tmp_path / "three-chapters.txt"
     path.write_text(
@@ -139,6 +164,11 @@ def _word_card_id(db: DatabaseConnection, lemma: str) -> int:
             "SELECT id FROM word_cards WHERE lemma = ?",
             (lemma,),
         ).fetchone()["id"]
+
+
+def _table_count(db: DatabaseConnection, table_name: str) -> int:
+    with db.get_connection() as conn:
+        return conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
 
 
 def _make_due_yesterday(db: DatabaseConnection, table_name: str, card_id: int) -> None:
@@ -214,7 +244,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 5
+        assert count == 6
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -314,6 +344,341 @@ class TestBasicPages:
         assert "Chapter not found" in response.text
 
 
+class TestBookDeletion:
+    def test_books_page_has_delete_form_and_deletion_redirects(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        page = client.get("/books")
+        response = client.post(f"/books/{book_id}/delete", follow_redirects=False)
+
+        assert page.status_code == 200
+        assert "Actions" in page.text
+        assert "Delete" in page.text
+        assert f'action="/books/{book_id}/delete"' in page.text
+        assert response.status_code == 303
+        assert response.headers["location"] == "/books"
+
+    def test_delete_missing_book_returns_404(self, client: TestClient) -> None:
+        response = client.post("/books/999/delete")
+
+        assert response.status_code == 404
+        assert "Book not found" in response.text
+
+    def test_delete_txt_book_cascades_sentence_data_and_keeps_ai_cache(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/cards"})
+        sentence_card_id = _sentence_card_id(db, sentence_ids[0])
+        _attach_sentence_analysis(db, sentence_ids[0])
+        with db.get_connection() as conn:
+            tag_id = conn.execute(
+                "INSERT INTO tags (name, category) VALUES ('important', 'user')"
+            ).lastrowid
+            error_type_id = conn.execute(
+                "SELECT id FROM error_types ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO sentence_card_tags (card_id, tag_id) VALUES (?, ?)",
+                (sentence_card_id, tag_id),
+            )
+            conn.execute(
+                """INSERT INTO sentence_card_errors (card_id, error_type_id)
+                   VALUES (?, ?)""",
+                (sentence_card_id, error_type_id),
+            )
+        ai_cache_before = _table_count(db, "ai_cache")
+
+        response = client.post(f"/books/{book_id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM books WHERE id = ?",
+                (book_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM chapters WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM paragraphs").fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM sentences WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM sentence_cards WHERE id = ?",
+                (sentence_card_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM sentence_card_tags WHERE card_id = ?",
+                (sentence_card_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM sentence_card_errors WHERE card_id = ?",
+                (sentence_card_id,),
+            ).fetchone()[0] == 0
+        assert _table_count(db, "ai_cache") == ai_cache_before
+
+    def test_delete_epub_book_removes_asset_rows_and_directory(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        epub_path = make_epub_with_image(tmp_path, "delete-image.epub")
+        result = import_epub(db, epub_path)
+        asset_dir = tmp_path / "assets" / "books" / str(result.book_id)
+
+        response = client.post(f"/books/{result.book_id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert not asset_dir.exists()
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM book_assets WHERE book_id = ?",
+                (result.book_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM chapter_blocks WHERE book_id = ?",
+                (result.book_id,),
+            ).fetchone()[0] == 0
+
+    def test_delete_book_ignores_asset_cleanup_failure_after_db_commit(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        with patch("app.web.fastapi_app.shutil.rmtree", side_effect=OSError("denied")):
+            response = client.post(f"/books/{book_id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM books WHERE id = ?",
+                (book_id,),
+            ).fetchone()[0] == 0
+
+    def test_delete_book_reanchors_word_card_and_preserves_state_and_logs(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_a, sentence_ids_a = _seed_text_book(
+            db,
+            tmp_path,
+            "anchor-a.txt",
+            title="Anchor A",
+            text="The cat sat on the mat.",
+        )
+        _, sentence_ids_b = _seed_text_book(
+            db,
+            tmp_path,
+            "anchor-b.txt",
+            title="Anchor B",
+            text="Later a cat slept near the window.",
+        )
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids_a[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "cat")
+        apply_review(db, "word", card_id, "pass")
+        with db.get_connection() as conn:
+            before = dict(conn.execute(
+                """SELECT first_sentence_id, ef, interval_days, repetitions,
+                          review_count, due_at, archived_at, user_note,
+                          current_meaning
+                     FROM word_cards WHERE id = ?""",
+                (card_id,),
+            ).fetchone())
+            log_count_before = conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'word' AND card_id = ?",
+                (card_id,),
+            ).fetchone()[0]
+
+        response = client.post(f"/books/{book_a}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            after = dict(conn.execute(
+                """SELECT first_sentence_id, ef, interval_days, repetitions,
+                          review_count, due_at, archived_at, user_note,
+                          current_meaning
+                     FROM word_cards WHERE id = ?""",
+                (card_id,),
+            ).fetchone())
+            log_count_after = conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'word' AND card_id = ?",
+                (card_id,),
+            ).fetchone()[0]
+        assert before["first_sentence_id"] == sentence_ids_a[0]
+        assert after["first_sentence_id"] in sentence_ids_b
+        for key in (
+            "ef", "interval_days", "repetitions", "review_count",
+            "due_at", "archived_at", "user_note", "current_meaning",
+        ):
+            assert after[key] == before[key]
+        assert log_count_after == log_count_before == 1
+
+    def test_delete_book_removes_unanchored_word_logs_without_touching_other_logs(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_a, sentence_ids_a = _seed_text_book(
+            db,
+            tmp_path,
+            "delete-a.txt",
+            title="Delete A",
+            text="The cat sat on the mat.",
+        )
+        _, sentence_ids_b = _seed_text_book(
+            db,
+            tmp_path,
+            "delete-b.txt",
+            title="Delete B",
+            text="The dog slept near the window.",
+        )
+        client.post(f"/mark/sentence/{sentence_ids_a[0]}", data={"return_to": "/cards"})
+        client.post(f"/mark/sentence/{sentence_ids_b[0]}", data={"return_to": "/cards"})
+        sentence_card_b = _sentence_card_id(db, sentence_ids_b[0])
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids_a[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids_b[0]),
+                "surface_form": "dog",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        cat_card = _word_card_id(db, "cat")
+        dog_card = _word_card_id(db, "dog")
+        apply_review(db, "sentence", _sentence_card_id(db, sentence_ids_a[0]), "pass")
+        apply_review(db, "sentence", sentence_card_b, "pass")
+        apply_review(db, "word", cat_card, "pass")
+        apply_review(db, "word", dog_card, "pass")
+
+        response = client.post(f"/books/{book_a}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM word_cards WHERE id = ?",
+                (cat_card,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'word' AND card_id = ?",
+                (cat_card,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM sentence_cards WHERE id = ?",
+                (sentence_card_b,),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM word_cards WHERE id = ?",
+                (dog_card,),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'word' AND card_id = ?",
+                (dog_card,),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                """SELECT COUNT(*) FROM review_logs
+                    WHERE card_type = 'sentence' AND card_id = ?""",
+                (sentence_card_b,),
+            ).fetchone()[0] == 1
+
+    def test_delete_book_reanchors_phrase_with_normalized_whitespace(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_a, sentence_ids_a = _seed_text_book(
+            db,
+            tmp_path,
+            "phrase-a.txt",
+            title="Phrase A",
+            text="Climate change affects coastal cities.",
+        )
+        _, sentence_ids_b = _seed_text_book(
+            db,
+            tmp_path,
+            "phrase-b.txt",
+            title="Phrase B",
+            text="Climate    change shapes public policy.",
+        )
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids_a[0]),
+                "surface_form": "climate change",
+                "lexical_type": "phrase",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "climate change")
+
+        response = client.post(f"/books/{book_a}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT first_sentence_id FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["first_sentence_id"] in sentence_ids_b
+
+    def test_delete_book_uses_strict_word_boundaries_for_reanchor(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_a, sentence_ids_a = _seed_text_book(
+            db,
+            tmp_path,
+            "boundary-a.txt",
+            title="Boundary A",
+            text="The cat sat on the mat.",
+        )
+        _seed_text_book(
+            db,
+            tmp_path,
+            "boundary-b.txt",
+            title="Boundary B",
+            text="Education can concatenate ideas quickly.",
+        )
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids_a[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "cat")
+        apply_review(db, "word", card_id, "pass")
+
+        response = client.post(f"/books/{book_a}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM review_logs WHERE card_type = 'word' AND card_id = ?",
+                (card_id,),
+            ).fetchone()[0] == 0
+
+
 class TestReadingAndMarking:
     def test_read_page_shows_sentences_and_selection_toolbar(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -336,12 +701,14 @@ class TestReadingAndMarking:
         assert 'id="toolbar-analysis-open"' in response.text
         assert 'id="toolbar-translation-editor"' in response.text
         assert 'id="analysis-panel"' in response.text
+        assert 'id="analysis-word-meaning-zh"' in response.text
         assert "window.prompt" not in response.text
         assert f"reader:progress:book:${{bookId}}" in response.text
         assert 'data-restore-progress="1"' in response.text
         assert "top_sentence_id" in response.text
         assert "/mark/word" in response.text
         assert "selectedWordCardIds" in response.text
+        assert "range.intersectsNode(span)" in response.text
         assert "deleteWordCardsAndReload" in response.text
         assert ".reader-sentence:target" in response.text
 
@@ -986,7 +1353,10 @@ class TestReadingAndMarking:
         payload = response.json()
         assert payload["ok"] is True
         assert payload["surface_form"] == "cat"
+        assert payload["active_prompt_version"] == "v3"
+        assert payload["is_stale"] is True
         assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
+        assert payload["analysis"]["chinese_meaning"] == "小型家养猫科动物"
 
     def test_read_page_includes_explain_button(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1056,6 +1426,13 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert "function hideAllPanels()" in response.text
+        assert "function blurToolbarFocus()" in response.text
+        assert "function selectionInsideToolbar(range)" in response.text
+        assert "if (toolbarContainsFocus()) return;" in response.text
+        assert "if (selectionInsideToolbar(range)) return;" in response.text
+        assert 'reader.addEventListener("mousedown", () => {' in response.text
+        assert "blurToolbarFocus();" in response.text
+        assert "(!toolbar.hidden && toolbarContainsFocus())" not in response.text
         assert "let suppressNextUpdate = false;" in response.text
         assert "suppressNextUpdate = true;" in response.text
         assert "setVisible(wordDetail, true);" in response.text
@@ -1904,6 +2281,7 @@ class TestWordAnalysisPanelV2:
         assert 'id="analysis-word-register"' in response.text
         assert 'id="analysis-word-why"' in response.text
         assert 'id="analysis-word-vs-simpler"' in response.text
+        assert 'id="analysis-word-meaning-zh"' in response.text
 
     def test_panel_has_notes_section_inputs(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1952,6 +2330,16 @@ class TestWordAnalysisPanelV2:
         assert response.status_code == 200
         assert "wordPanelSave" in response.text
         assert "wordPanelSaveStatus" in response.text
+
+    def test_js_renders_chinese_word_meaning(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        response = client.get(f"/read/{book_id}")
+        assert response.status_code == 200
+        assert "wordAnalysisMeaningZh" in response.text
+        assert "a.chinese_meaning || a.chinese_gloss" in response.text
+        assert "中文：" in response.text
 
     def test_post_word_analysis_v2_payload_returned(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

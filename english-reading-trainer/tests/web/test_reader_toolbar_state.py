@@ -138,6 +138,25 @@ def _select_sentence_contents(page: Page, sentence_index: int) -> None:
     page.wait_for_timeout(60)
 
 
+def _select_sentence_touching_previous_boundary(page: Page, sentence_index: int) -> None:
+    page.evaluate(
+        """(sentenceIndex) => {
+          const spans = Array.from(document.querySelectorAll("[data-sentence-id]"));
+          const previous = spans[sentenceIndex - 1];
+          const sentence = spans[sentenceIndex];
+          const range = document.createRange();
+          range.setStart(previous, previous.childNodes.length);
+          range.setEndAfter(sentence);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          document.dispatchEvent(new Event("selectionchange"));
+        }""",
+        sentence_index,
+    )
+    page.wait_for_timeout(60)
+
+
 def _select_text(page: Page, sentence_index: int, text: str) -> None:
     page.evaluate(
         """({sentenceIndex, text}) => {
@@ -282,6 +301,20 @@ def test_selection_modes_are_mutually_exclusive(browser: Browser, reader_url: st
         _assert_only_panel(page, "word")
 
 
+def test_sentence_boundary_touch_does_not_count_as_cross_sentence(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_sentence_touching_previous_boundary(page, 1)
+        _assert_only_panel(page, "sentence")
+        analysis_hidden = page.locator("#toolbar-analysis-open").evaluate(
+            "element => element.hidden"
+        )
+
+    assert analysis_hidden is False
+
+
 def test_collapsed_selection_after_word_detail_hides_toolbar(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()
@@ -298,3 +331,21 @@ def test_collapsed_selection_after_word_detail_hides_toolbar(browser: Browser, r
 
     assert state["toolbar"] is False
     assert state["word_detail"] is False
+
+
+def test_selection_after_visible_toolbar_focus_shows_word_actions(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-word-card]").click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-meaning").focus()
+        page.evaluate(
+            """() => {
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+
+        _select_text(page, 1, "bright")
+        _assert_only_panel(page, "word")
