@@ -205,6 +205,25 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert "requestAnalysis(sentenceId, activeSentenceTranslation || null);" in analysis_click
 
 
+def test_translated_sentence_double_click_shortcut_preserves_word_card_priority() -> None:
+    script = _selection_script()
+    shortcut = script[script.index("function openTranslatedSentenceShortcut"):]
+    shortcut = shortcut[: shortcut.index("function showAnalysisWordToolbar")]
+    double_click = script[script.index('reader.addEventListener("dblclick"'):]
+    double_click = double_click[: double_click.index('document.addEventListener("selectionchange"')]
+
+    assert "if (!sentence?.dataset.translation?.trim()) return false;" in shortcut
+    assert "loadSavedAnalysis(activeSentenceId);" in shortcut
+    assert "showMarkedSentenceToolbar(sentence);" in shortcut
+    assert "openTranslationEditor();" in shortcut
+    assert 'const wordSpan = event.target.closest("[data-word-card]");' in double_click
+    assert "showWordDetail(wordSpan);" in double_click
+    assert 'const sentence = event.target.closest("[data-sentence-id]");' in double_click
+    assert "!sentence.dataset.translation?.trim()" in double_click
+    assert "window.getSelection()?.removeAllRanges();" in double_click
+    assert "openTranslatedSentenceShortcut(sentence);" in double_click
+
+
 def test_word_detail_explain_saves_edits_before_analysis() -> None:
     script = _selection_script()
     save_helper = script[script.index("async function saveWordDetailEdits"):]

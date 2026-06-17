@@ -537,6 +537,20 @@ def _selection_script() -> str:
         positionToolbar(sentence.getBoundingClientRect());
       }
 
+      function openTranslatedSentenceShortcut(sentence) {
+        if (!sentence?.dataset.translation?.trim()) return false;
+        activeSentenceId = sentence.dataset.sentenceId;
+        activeSentenceTranslation = sentence.dataset.translation || "";
+        if (sentence.dataset.analysisId) {
+          hideToolbar();
+          loadSavedAnalysis(activeSentenceId);
+          return true;
+        }
+        showMarkedSentenceToolbar(sentence);
+        openTranslationEditor();
+        return true;
+      }
+
       function showAnalysisWordToolbar(range, selectedText) {
         if (!activeAnalysisSourceSentenceId) {
           hideToolbar();
@@ -1784,6 +1798,19 @@ def _selection_script() -> str:
         if (sentence.dataset.marked === "1") {
           showMarkedSentenceToolbar(sentence);
         }
+      });
+      reader.addEventListener("dblclick", (event) => {
+        const wordSpan = event.target.closest("[data-word-card]");
+        if (wordSpan) {
+          event.preventDefault();
+          showWordDetail(wordSpan);
+          return;
+        }
+        const sentence = event.target.closest("[data-sentence-id]");
+        if (!sentence || !sentence.dataset.translation?.trim()) return;
+        event.preventDefault();
+        window.getSelection()?.removeAllRanges();
+        openTranslatedSentenceShortcut(sentence);
       });
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
       window.addEventListener("scroll", () => {
