@@ -552,6 +552,41 @@ def test_sentence_boundary_touch_does_not_count_as_cross_sentence(
     assert analysis_hidden is False
 
 
+def test_click_marked_sentence_without_analysis_shows_sentence_actions(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_sentence_contents(page, 1)
+        page.locator("#toolbar-sentence-submit").click()
+        page.wait_for_function(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              return document.getElementById("selection-toolbar").hidden
+                && sentence.dataset.marked === "1"
+                && !sentence.dataset.analysisId;
+            }"""
+        )
+
+        page.locator("[data-sentence-id]").nth(1).click()
+        page.wait_for_function('!document.getElementById("toolbar-sentence-form").hidden')
+        state = page.evaluate(
+            """() => ({
+              analysisHidden: document.getElementById("toolbar-analysis-open").hidden,
+              deleteHidden: document.getElementById("toolbar-sentence-delete").hidden,
+              submitHidden: document.getElementById("toolbar-sentence-submit").hidden,
+              toolbarHidden: document.getElementById("selection-toolbar").hidden,
+            })"""
+        )
+
+    assert state == {
+        "analysisHidden": False,
+        "deleteHidden": False,
+        "submitHidden": True,
+        "toolbarHidden": False,
+    }
+
+
 def test_collapsed_selection_after_word_detail_hides_toolbar(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()

@@ -45,3 +45,14 @@ def test_analysis_selection_toolbar_reenables_buttons_when_shown() -> None:
     assert show_toolbar.index("setAnalysisWordButtonsDisabled(false);") < show_toolbar.index(
         "setVisible(analysisWordForm, true);"
     )
+
+
+def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -> None:
+    script = _selection_script()
+
+    assert "function showMarkedSentenceToolbar(sentence)" in script
+    click_handler = script[script.index('reader.addEventListener("click"'):]
+    click_handler = click_handler[:click_handler.index('document.addEventListener("selectionchange"')]
+    assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in click_handler
+    assert 'if (sentence.dataset.marked === "1")' in click_handler
+    assert "showMarkedSentenceToolbar(sentence);" in click_handler

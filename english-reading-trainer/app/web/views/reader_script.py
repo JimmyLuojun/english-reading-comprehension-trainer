@@ -444,6 +444,28 @@ def _selection_script() -> str:
         positionToolbar(span.getBoundingClientRect());
       }
 
+      function showMarkedSentenceToolbar(sentence) {
+        suppressNextUpdate = true;
+        suppressCollapsedToolbarHideUntil = Date.now() + 250;
+        hideAllPanels();
+        activeSentenceId = sentence.dataset.sentenceId;
+        activeSentenceTranslation = sentence.dataset.translation || "";
+        activeWordCardId = null;
+        activeWordCardIds = [];
+
+        sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
+        translationForm.action = `/mark/sentence/${activeSentenceId}/translation`;
+        sentenceSubmit.hidden = true;
+        sentenceDelete.hidden = sentence.dataset.marked !== "1";
+        translationOpen.hidden = false;
+        analysisOpen.hidden = false;
+        translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
+        analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
+        configureCrossSentenceActions([]);
+        setVisible(sentenceForm, true);
+        positionToolbar(sentence.getBoundingClientRect());
+      }
+
       function showAnalysisWordToolbar(range, selectedText) {
         if (!activeAnalysisSourceSentenceId) {
           hideToolbar();
@@ -1497,9 +1519,15 @@ def _selection_script() -> str:
           return;
         }
         const sentence = event.target.closest("[data-sentence-id]");
-        if (!sentence || !sentence.dataset.analysisId) return;
+        if (!sentence) return;
         if (hasSelection) return;
-        loadSavedAnalysis(sentence.dataset.sentenceId);
+        if (sentence.dataset.analysisId) {
+          loadSavedAnalysis(sentence.dataset.sentenceId);
+          return;
+        }
+        if (sentence.dataset.marked === "1") {
+          showMarkedSentenceToolbar(sentence);
+        }
       });
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
       window.addEventListener("scroll", () => {
