@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from app.web.config import _MAX_EPUB_IMPORT_BYTES, _MAX_TEXT_IMPORT_BYTES
-from app.web.utils import _format_mb
-from app.web.views.layout import _escape, _html_page
+from fastapi.responses import HTMLResponse
+
+from app.web.views.layout import _html_page
 
 def _import_forms() -> str:
     return """

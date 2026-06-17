@@ -706,7 +706,7 @@ class TestReadingAndMarking:
         assert "width: min(520px, 92vw);" in response.text
         assert ".reader-page.analysis-open .reader" not in response.text
         assert "window.prompt" not in response.text
-        assert f"reader:progress:book:${{bookId}}" in response.text
+        assert "reader:progress:book:${bookId}" in response.text
         assert 'data-restore-progress="1"' in response.text
         assert "top_sentence_id" in response.text
         assert "/mark/word" in response.text
@@ -876,9 +876,9 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert f'data-word-card="{card_id}"' in response.text
-        assert f'data-meaning=""' in response.text
-        assert f'data-note=""' in response.text
-        assert f'>cat</span>' in response.text
+        assert 'data-meaning=""' in response.text
+        assert 'data-note=""' in response.text
+        assert ">cat</span>" in response.text
         assert "box-decoration-break: clone" in response.text
         assert "text-decoration-thickness: 0.12em" in response.text
         assert "rgba(251, 191, 36, 0.34)" in response.text

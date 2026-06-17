@@ -36,6 +36,19 @@ from app.web.routers.reader import register_reader_routes
 from app.web.routers.review import register_review_routes
 
 
+__all__ = [
+    "_MAX_EPUB_IMPORT_BYTES",
+    "_MAX_TEXT_IMPORT_BYTES",
+    "_update_word_card_analysis_id",
+    "analyze_sentence",
+    "analyze_word",
+    "app",
+    "create_app",
+    "shutil",
+    "tempfile",
+]
+
+
 def create_app(
     db_factory: Callable[[], DatabaseConnection] | None = None,
 ) -> FastAPI:

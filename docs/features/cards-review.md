@@ -96,7 +96,7 @@ source_href = /read/{source_book_id}?chapter={source_chapter_idx}#sentence-{sour
 | ---------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `app/cards/word_card_service.py` — `list_word_cards`                                           | 加来源句子、章节、书籍字段                       |
 | `app/review/daily_review_queue.py` — `_word_due_sql` / `_sentence_due_sql` / `ReviewQueueItem` | 加 `answer` 与来源字段                    |
-| `app/web/fastapi_app.py` — `_word_cards_table` / `_due_table` / CSS                            | UI 渲染                               |
+| `app/web/views/cards.py` / `app/web/views/review.py` / `app/web/views/styles.py`               | UI 渲染                               |
 | `tests/cards/test_word_card_service.py`                                                        | 验证新列                                |
 | `tests/review/test_daily_review_queue.py`                                                      | 验证 `answer` 与来源字段                   |
 | `tests/web/test_fastapi_app.py`                                                                | 验证 Cards / Review 来源链接与 Reader 目标高亮 |

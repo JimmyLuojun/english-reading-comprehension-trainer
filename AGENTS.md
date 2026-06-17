@@ -13,6 +13,7 @@
   - 外部依赖（LLM 调用、SQLite 写入、文件系统、网络）默认 mock，但**数据库迁移和 SQL schema 必须用真实 SQLite 集成测试**，不能 mock。
   - 测试框架：`pytest`。覆盖率工具：`pytest-cov`，目标 ≥ 90% 行覆盖、关键模块（`sm2_scheduler` / `ai_response_cache` / `json_output_validator`）100%。
   - 测试必须可独立运行（`pytest tests/`），不依赖外部网络或环境变量。
+  - Web 代码变更后运行 `python -m ruff check app/web`，防止拆分后遗留未使用导入、缺失名称和不清晰依赖。
 
 ## Shared Memory
 

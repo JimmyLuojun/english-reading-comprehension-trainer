@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
-from app.web.config import _WORD_TOKEN_RE
 from app.web.views.books import _section_label
 from app.web.views.layout import _escape
 from app.web.views.reader_script import _selection_script

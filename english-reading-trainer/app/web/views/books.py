@@ -92,8 +92,8 @@ def _strip_section_ordinal(title: str) -> str:
     return re.sub(r"^\s*(?:chapter\s+)?\d+(?:[\s.:)-]+)", "", title, flags=re.I).strip()
 
 def _appendix_letter(title: str) -> str:
-    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title)
+    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title, re.I)
     return match.group(1) if match else ""
 
 def _strip_appendix_ordinal(title: str) -> str:
-    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title).strip()
+    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title, flags=re.I).strip()
