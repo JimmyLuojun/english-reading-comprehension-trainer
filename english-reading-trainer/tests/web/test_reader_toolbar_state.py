@@ -433,6 +433,41 @@ def test_selection_modes_are_mutually_exclusive(browser: Browser, reader_url: st
         _assert_only_panel(page, "word")
 
 
+def test_translation_editor_does_not_cover_target_sentence(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.set_viewport_size({"width": 900, "height": 520})
+        _select_sentence_contents(page, 1)
+        page.locator("#toolbar-translation-open").click()
+        page.wait_for_function('!document.getElementById("toolbar-translation-editor").hidden')
+        geometry = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              const toolbar = document.getElementById("selection-toolbar");
+              const sentenceRect = sentence.getBoundingClientRect();
+              const toolbarRect = toolbar.getBoundingClientRect();
+              const overlaps = !(
+                toolbarRect.bottom <= sentenceRect.top
+                || toolbarRect.top >= sentenceRect.bottom
+                || toolbarRect.right <= sentenceRect.left
+                || toolbarRect.left >= sentenceRect.right
+              );
+              return {
+                overlaps,
+                toolbarBottom: Math.round(toolbarRect.bottom),
+                toolbarTop: Math.round(toolbarRect.top),
+                viewportHeight: window.innerHeight,
+              };
+            }"""
+        )
+
+    assert geometry["overlaps"] is False, geometry
+    assert geometry["toolbarTop"] >= 0
+    assert geometry["toolbarBottom"] <= geometry["viewportHeight"] + 1
+
+
 def test_mark_word_keeps_reader_scroll_position(
     browser: Browser,
     reader_url: str,

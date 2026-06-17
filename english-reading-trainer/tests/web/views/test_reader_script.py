@@ -146,6 +146,23 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
     assert "showMarkedSentenceToolbar(sentence);" in click_handler
 
 
+def test_translation_editor_repositions_after_expanding() -> None:
+    script = _selection_script()
+    position_toolbar = script[script.index("function positionToolbar(anchor)"):]
+    position_toolbar = position_toolbar[: position_toolbar.index("function showToolbar")]
+    open_editor = script[script.index("function openTranslationEditor()"):]
+    open_editor = open_editor[: open_editor.index("async function saveTranslationOnly")]
+
+    assert "availableAbove" in position_toolbar
+    assert "availableBelow" in position_toolbar
+    assert "window.innerHeight - toolbarRect.height" in position_toolbar
+    assert "const sentence = document.getElementById(`sentence-${activeSentenceId}`);" in open_editor
+    assert "positionToolbar(sentence.getBoundingClientRect());" in open_editor
+    assert open_editor.index("translationEditor.hidden = false;") < open_editor.index(
+        "positionToolbar(sentence.getBoundingClientRect());"
+    )
+
+
 def test_word_detail_explain_saves_edits_before_analysis() -> None:
     script = _selection_script()
     save_helper = script[script.index("async function saveWordDetailEdits"):]

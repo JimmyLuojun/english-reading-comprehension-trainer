@@ -429,14 +429,28 @@ def _selection_script() -> str:
         requestAnimationFrame(() => {
           const toolbarRect = toolbar.getBoundingClientRect();
           const viewportPadding = 8;
-          let top = window.scrollY + anchor.top - toolbarRect.height - 10;
-          if (top < window.scrollY + viewportPadding) {
-            top = window.scrollY + anchor.bottom + 10;
+          const gap = 10;
+          const availableAbove = anchor.top - viewportPadding - gap;
+          const availableBelow = window.innerHeight - anchor.bottom - viewportPadding - gap;
+          const maxViewportTop = Math.max(
+            viewportPadding,
+            window.innerHeight - toolbarRect.height - viewportPadding,
+          );
+          let viewportTop;
+          if (toolbarRect.height <= availableAbove) {
+            viewportTop = anchor.top - toolbarRect.height - gap;
+          } else if (toolbarRect.height <= availableBelow) {
+            viewportTop = anchor.bottom + gap;
+          } else if (availableBelow >= availableAbove) {
+            viewportTop = Math.min(anchor.bottom + gap, maxViewportTop);
+          } else {
+            viewportTop = Math.max(viewportPadding, anchor.top - toolbarRect.height - gap);
           }
+          const clampedTop = Math.max(viewportPadding, Math.min(viewportTop, maxViewportTop));
           const centeredLeft = window.scrollX + anchor.left + (anchor.width / 2) - (toolbarRect.width / 2);
           const maxLeft = window.scrollX + window.innerWidth - toolbarRect.width - viewportPadding;
           const left = Math.max(window.scrollX + viewportPadding, Math.min(centeredLeft, maxLeft));
-          toolbar.style.top = `${top}px`;
+          toolbar.style.top = `${window.scrollY + clampedTop}px`;
           toolbar.style.left = `${left}px`;
         });
       }
@@ -939,6 +953,7 @@ def _selection_script() -> str:
 
       function openTranslationEditor() {
         if (!activeSentenceId) return;
+        const sentence = document.getElementById(`sentence-${activeSentenceId}`);
         translationText.value = activeSentenceTranslation;
         translationEditor.hidden = false;
         translationEditorOpen = true;
@@ -946,7 +961,10 @@ def _selection_script() -> str:
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
-        requestAnimationFrame(() => translationText.focus());
+        requestAnimationFrame(() => {
+          if (sentence) positionToolbar(sentence.getBoundingClientRect());
+          translationText.focus();
+        });
       }
 
       async function saveTranslationOnly() {

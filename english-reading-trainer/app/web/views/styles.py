@@ -344,6 +344,8 @@ def _css() -> str:
       display: grid;
       gap: 6px;
       width: min(520px, calc(92vw - 16px));
+      max-height: min(52vh, 360px);
+      overflow: auto;
     }
     .translation-editor[hidden] { display: none; }
     .translation-editor label {
