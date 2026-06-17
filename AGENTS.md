@@ -21,6 +21,15 @@
 Never modify `CLAUDE.md` or `GEMINI.md` directly - they only import `AGENTS.md`.
 This ensures Claude Code, Codex CLI, and Gemini CLI share the same context consistently.
 
+## AI-Managed Documentation
+
+- Keep `docs/design.md` as the architecture map and document index. Do not keep adding long feature execution plans to it.
+- Put evolving feature designs in `docs/features/`.
+- Record non-trivial architecture decisions as ADRs in `docs/decisions/`; use them to avoid re-litigating settled choices.
+- Keep machine-checkable project truth in `docs/state/`. `docs/state/schema.sql` must be generated from the real SQLite schema, not hand-maintained from prose.
+- Update `STATUS.md` at the end of non-trivial project work with current state, in-flight work, next steps, known issues, and recent verification.
+- One fact should have one source of truth. Prefer links from overview docs instead of copying the same detailed design into multiple files.
+
 ## Project Structure
 
 - `.claude/agents/` - Custom subagents for specialized tasks
