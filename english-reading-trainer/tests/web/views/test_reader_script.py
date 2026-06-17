@@ -163,6 +163,48 @@ def test_translation_editor_repositions_after_expanding() -> None:
     )
 
 
+def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> None:
+    script = _selection_script()
+    label_helper = script[script.index("function analysisButtonLabel"):]
+    label_helper = label_helper[: label_helper.index("function markSentenceTranslated")]
+    translated_helper = script[script.index("function markSentenceTranslated"):]
+    translated_helper = translated_helper[: translated_helper.index("function clearSentenceTranslation")]
+    clear_translation = script[script.index("function clearSentenceTranslation"):]
+    clear_translation = clear_translation[: clear_translation.index("function showWordDetail")]
+    save_translation = script[script.index("async function saveTranslationOnly"):]
+    save_translation = save_translation[: save_translation.index("async function deleteTranslationInPlace")]
+    delete_translation = script[script.index("async function deleteTranslationInPlace"):]
+    delete_translation = delete_translation[: delete_translation.index("function setSentenceMode")]
+    unmark_helper = script[script.index("function markSentenceSpanUnmarked"):]
+    unmark_helper = unmark_helper[: unmark_helper.index("function markSentenceSpanMarked")]
+    analysis_click = script[script.index('analysisOpen.addEventListener("click"'):]
+    analysis_click = analysis_click[: analysis_click.index('crossSentenceDelete.addEventListener("click"')]
+
+    assert 'const translationDelete = document.getElementById("toolbar-translation-delete");' in script
+    assert '"Check translation"' in label_helper
+    assert 'sentence.dataset.translation = translation;' in translated_helper
+    assert 'sentence.dataset.analysisId = "";' in translated_helper
+    assert 'sentence.classList.add("translated");' in translated_helper
+    assert 'sentence.classList.add("marked", "translated");' not in translated_helper
+    assert 'sentence.classList.remove("analyzed", "analyzed-stale");' in translated_helper
+    assert 'sentence.title = "Translation saved";' in translated_helper
+    assert 'sentence.dataset.translation = "";' in clear_translation
+    assert 'sentence.dataset.marked = "0";' in clear_translation
+    assert (
+        'sentence.classList.remove("translated", "marked", "analyzed", "analyzed-stale");'
+        in clear_translation
+    )
+    assert 'sentence.removeAttribute("title");' in clear_translation
+    assert "markSentenceTranslated(sentence, value);" in save_translation
+    assert 'fetch(url, { method: "DELETE" })' in delete_translation
+    assert "clearSentenceTranslation(sentence);" in delete_translation
+    assert 'translationDelete.hidden = !activeSentenceTranslation;' in script
+    assert 'translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;' in script
+    assert 'translationDelete.addEventListener("click", deleteTranslationInPlace);' in script
+    assert 'sentence.dataset.translation = "";' not in unmark_helper
+    assert "requestAnalysis(sentenceId, activeSentenceTranslation || null);" in analysis_click
+
+
 def test_word_detail_explain_saves_edits_before_analysis() -> None:
     script = _selection_script()
     save_helper = script[script.index("async function saveWordDetailEdits"):]

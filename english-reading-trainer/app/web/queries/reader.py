@@ -8,6 +8,7 @@ from typing import Any
 from app.db_connection import DatabaseConnection
 from app.web.queries.analysis import _active_sentence_prompt_version
 
+
 def _fetch_chapter_sentences(
     db: DatabaseConnection,
     chapter_id: int,
@@ -16,7 +17,7 @@ def _fetch_chapter_sentences(
         rows = conn.execute(
             """SELECT s.id, s.idx, s.text, s.paragraph_id, p.idx AS paragraph_idx,
                       CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card,
-                      COALESCE(sc.user_translation, '') AS user_translation,
+                      COALESCE(st.user_translation, '') AS user_translation,
                       sc.ai_analysis_id,
                       ac.prompt_version AS analysis_prompt_version,
                       ac.model AS analysis_model,
@@ -25,6 +26,8 @@ def _fetch_chapter_sentences(
                  JOIN paragraphs p ON p.id = s.paragraph_id
                  LEFT JOIN sentence_cards sc
                    ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                 LEFT JOIN sentence_cards st
+                   ON st.sentence_id = s.id
                  LEFT JOIN ai_cache ac
                    ON ac.id = sc.ai_analysis_id
                 WHERE s.chapter_id = ?
@@ -46,6 +49,7 @@ def _fetch_chapter_sentences(
         )
     return result
 
+
 def _fetch_chapter_blocks(
     db: DatabaseConnection,
     chapter_id: int,
@@ -66,6 +70,7 @@ def _fetch_chapter_blocks(
         ).fetchall()
     return [dict(row) for row in rows]
 
+
 def _fetch_book_asset(
     db: DatabaseConnection,
     book_id: int,
@@ -81,6 +86,7 @@ def _fetch_book_asset(
         ).fetchone()
     return dict(row) if row else None
 
+
 def _asset_storage_path(db: DatabaseConnection, storage_path: str) -> Path:
     base_dir = Path(getattr(db, "_db_path")).parent / "assets"
     relative = Path(storage_path)
@@ -93,6 +99,7 @@ def _asset_storage_path(db: DatabaseConnection, storage_path: str) -> Path:
     except ValueError as exc:
         raise ValueError("Asset storage path escapes asset root") from exc
     return candidate
+
 
 def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
     with db.get_connection() as conn:

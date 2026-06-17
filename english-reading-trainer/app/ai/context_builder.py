@@ -100,7 +100,7 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
                JOIN books    b ON s.book_id    = b.id
                JOIN chapters c ON s.chapter_id = c.id
                LEFT JOIN sentence_cards sc
-                 ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                 ON sc.sentence_id = s.id
                WHERE s.id = ?""",
             (sentence_id,),
         ).fetchone()
@@ -223,7 +223,6 @@ def _render(template: str, variables: dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 def _get_db() -> DatabaseConnection:
-    from datetime import datetime, timezone
     db_path = os.environ.get(
         "TRAINER_DB",
         str(_PROJECT_ROOT / "data" / "reading_trainer.db"),

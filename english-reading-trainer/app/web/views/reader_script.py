@@ -18,6 +18,7 @@ def _selection_script() -> str:
       const sentenceSubmit = document.getElementById("toolbar-sentence-submit");
       const sentenceDelete = document.getElementById("toolbar-sentence-delete");
       const translationOpen = document.getElementById("toolbar-translation-open");
+      const translationDelete = document.getElementById("toolbar-translation-delete");
       const analysisOpen = document.getElementById("toolbar-analysis-open");
       const translationForm = document.getElementById("toolbar-translation-form");
       const translationValue = document.getElementById("toolbar-translation-value");
@@ -473,6 +474,31 @@ def _selection_script() -> str:
         if (wordDetailViewCard) wordDetailViewCard.dataset.cardId = activeWordDetailCardId;
       }
 
+      function analysisButtonLabel(sentence) {
+        if (sentence?.dataset.translation?.trim()) return "Check translation";
+        return sentence?.dataset.analysisId ? "Open analysis panel" : "AI analysis";
+      }
+
+      function markSentenceTranslated(sentence, translation) {
+        if (!sentence) return;
+        sentence.dataset.translation = translation;
+        sentence.dataset.analysisId = "";
+        sentence.dataset.analysisStale = "0";
+        sentence.classList.add("translated");
+        sentence.classList.remove("analyzed", "analyzed-stale");
+        sentence.title = "Translation saved";
+      }
+
+      function clearSentenceTranslation(sentence) {
+        if (!sentence) return;
+        sentence.dataset.translation = "";
+        sentence.dataset.marked = "0";
+        sentence.dataset.analysisId = "";
+        sentence.dataset.analysisStale = "0";
+        sentence.classList.remove("translated", "marked", "analyzed", "analyzed-stale");
+        sentence.removeAttribute("title");
+      }
+
       function showWordDetail(span) {
         suppressNextUpdate = true;
         suppressCollapsedToolbarHideUntil = Date.now() + 250;
@@ -502,9 +528,10 @@ def _selection_script() -> str:
         sentenceSubmit.hidden = true;
         sentenceDelete.hidden = sentence.dataset.marked !== "1";
         translationOpen.hidden = false;
+        translationDelete.hidden = !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
-        analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
+        analysisOpen.textContent = analysisButtonLabel(sentence);
         configureCrossSentenceActions([]);
         setVisible(sentenceForm, true);
         positionToolbar(sentence.getBoundingClientRect());
@@ -753,9 +780,10 @@ def _selection_script() -> str:
         sentenceSubmit.hidden = !wholeSentence || markedSentence;
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
         translationOpen.hidden = !wholeSentence;
+        translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
-        analysisOpen.textContent = sentence.dataset.analysisId ? "Open analysis panel" : "AI analysis";
+        analysisOpen.textContent = analysisButtonLabel(sentence);
 
         wordSentenceId.value = activeSentenceId;
         wordSurfaceForm.value = selectedText;
@@ -895,7 +923,6 @@ def _selection_script() -> str:
         sentence.dataset.marked = "0";
         sentence.dataset.analysisId = "";
         sentence.dataset.analysisStale = "0";
-        sentence.dataset.translation = "";
       }
 
       function markSentenceSpanMarked(sentenceId) {
@@ -988,8 +1015,30 @@ def _selection_script() -> str:
             return;
           }
           const sentence = document.getElementById(`sentence-${activeSentenceId}`);
-          if (sentence) sentence.dataset.translation = value;
+          markSentenceTranslated(sentence, value);
           activeSentenceTranslation = value;
+          window.getSelection()?.removeAllRanges();
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+        } catch {
+          window.location.assign(returnTo);
+        }
+      }
+
+      async function deleteTranslationInPlace() {
+        if (!activeSentenceId) return;
+        const sentenceId = activeSentenceId;
+        const anchor = captureReadingAnchor(translationDelete);
+        try {
+          const url = `/mark/sentence/${sentenceId}/translation?return_to=${encodeURIComponent(returnTo)}`;
+          const response = await fetch(url, { method: "DELETE" });
+          if (!response.ok) {
+            window.location.assign(response.url || returnTo);
+            return;
+          }
+          const sentence = document.getElementById(`sentence-${sentenceId}`);
+          clearSentenceTranslation(sentence);
+          activeSentenceTranslation = "";
           window.getSelection()?.removeAllRanges();
           hideToolbar();
           restoreReadingAnchor(anchor);
@@ -1222,6 +1271,10 @@ def _selection_script() -> str:
         sentence.dataset.analysisStale = payload.is_stale ? "1" : "0";
         sentence.dataset.translation = payload.user_translation || sentence.dataset.translation || "";
         sentence.classList.add("marked");
+        if (sentence.dataset.translation.trim()) {
+          sentence.classList.add("translated");
+          sentence.title = "Translation saved";
+        }
         sentence.classList.remove("analyzed", "analyzed-stale");
         sentence.classList.add(payload.is_stale ? "analyzed-stale" : "analyzed");
       }
@@ -1512,6 +1565,7 @@ def _selection_script() -> str:
       translationOpen.addEventListener("click", openTranslationEditor);
       translationCancel.addEventListener("click", hideTranslationEditor);
       translationSave.addEventListener("click", saveTranslationOnly);
+      translationDelete.addEventListener("click", deleteTranslationInPlace);
       translationAnalyze.addEventListener("click", () => {
         const sentenceId = activeSentenceId;
         const value = translationText.value.trim();
@@ -1526,7 +1580,7 @@ def _selection_script() -> str:
         hideToolbar();
         restoreReadingAnchor(anchor);
         if (sentence?.dataset.analysisId) loadSavedAnalysis(sentenceId);
-        else requestAnalysis(sentenceId, null);
+        else requestAnalysis(sentenceId, activeSentenceTranslation || null);
       });
       crossSentenceDelete.addEventListener("click", () => {
         const ids = (crossSentenceDelete.dataset.sentenceIds || "")

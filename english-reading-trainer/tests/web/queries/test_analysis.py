@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.cards.sentence_card_service import create_sentence_card
+from app.cards.sentence_card_service import create_sentence_card, save_sentence_translation
 from app.cards.word_card_service import create_or_update_word_card
 from app.db_connection import DatabaseConnection
 from app.db_models import LexicalType
@@ -54,6 +54,19 @@ def test_fetch_sentence_for_analysis_and_missing_error(tmp_path: Path) -> None:
     assert _fetch_sentence_for_analysis(db, sentence_id)["text"] == "The cat sat."
     with pytest.raises(ValueError):
         _fetch_sentence_for_analysis(db, 999)
+
+
+def test_fetch_sentence_for_analysis_uses_archived_translation(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    save_sentence_translation(db, sentence_id, "猫坐着。")
+
+    sentence = _fetch_sentence_for_analysis(db, sentence_id)
+
+    assert sentence["user_translation"] == "猫坐着。"
 
 
 def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:

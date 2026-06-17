@@ -468,6 +468,37 @@ def test_translation_editor_does_not_cover_target_sentence(
     assert geometry["toolbarBottom"] <= geometry["viewportHeight"] + 1
 
 
+def test_saved_translation_underlines_sentence_and_changes_analysis_action(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_sentence_contents(page, 0)
+        page.locator("#toolbar-translation-open").click()
+        page.locator("#toolbar-translation-text").fill("猫坐在垫子上。")
+        page.locator("#toolbar-translation-save").click()
+        page.wait_for_function(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[0];
+              return document.getElementById("selection-toolbar").hidden
+                && sentence.classList.contains("translated")
+                && !sentence.classList.contains("marked")
+                && sentence.dataset.translation === "猫坐在垫子上。"
+                && !sentence.dataset.analysisId
+                && !sentence.classList.contains("analyzed")
+                && !sentence.classList.contains("analyzed-stale");
+            }"""
+        )
+
+        _select_sentence_contents(page, 0)
+        page.wait_for_function(
+            'document.getElementById("toolbar-analysis-open").textContent === "Check translation"'
+        )
+        action_text = page.locator("#toolbar-analysis-open").text_content()
+
+    assert action_text == "Check translation"
+
+
 def test_mark_word_keeps_reader_scroll_position(
     browser: Browser,
     reader_url: str,

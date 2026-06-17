@@ -10,6 +10,7 @@ from app.cards.sentence_card_service import (
     SentenceCardNotFoundError,
     archive_sentence_card,
     create_sentence_card,
+    delete_sentence_translation,
     list_sentence_cards,
     save_sentence_translation,
 )
@@ -73,6 +74,19 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         except ValueError as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
+
+    @web_app.delete("/mark/sentence/{sentence_id}/translation")
+    async def delete_marked_sentence_translation(
+        sentence_id: int, request: Request
+    ) -> Any:
+        return_to = _safe_return_to(request.query_params.get("return_to", "/cards"))
+        db = db_factory()
+        try:
+            delete_sentence_translation(db, sentence_id)
+        except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(return_to)
+
     @web_app.delete("/mark/sentence/{sentence_id}")
     async def unmark_sentence(sentence_id: int, request: Request) -> Any:
         return_to = _safe_return_to(request.query_params.get("return_to", "/cards"))

@@ -911,7 +911,7 @@ class TestReadingAndMarking:
             count = conn.execute("SELECT COUNT(*) FROM sentence_cards").fetchone()[0]
         assert count == 1
 
-    def test_save_sentence_translation_creates_card_and_redirects(
+    def test_save_sentence_translation_creates_archived_record_and_redirects(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -926,13 +926,14 @@ class TestReadingAndMarking:
         assert response.headers["location"] == "/cards"
         with db.get_connection() as conn:
             row = conn.execute(
-                """SELECT user_translation, translation_created_at
+                """SELECT user_translation, translation_created_at, archived_at
                      FROM sentence_cards
                     WHERE sentence_id = ?""",
                 (sentence_ids[0],),
             ).fetchone()
         assert row["user_translation"] == "猫坐在垫子上。"
         assert row["translation_created_at"] is not None
+        assert row["archived_at"] is not None
 
     def test_save_sentence_translation_overwrites_previous_value(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -967,6 +968,38 @@ class TestReadingAndMarking:
 
         assert response.status_code == 400
         assert "user_translation" in response.text
+
+    def test_delete_sentence_translation_archives_review_card(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            f"/mark/sentence/{sentence_ids[0]}",
+            data={"return_to": "/cards"},
+        )
+        client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "猫坐在垫子上。", "return_to": "/cards"},
+        )
+
+        response = client.delete(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            params={"return_to": "/cards"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/cards"
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT archived_at, user_translation, translation_created_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["archived_at"] is not None
+        assert row["user_translation"] is None
+        assert row["translation_created_at"] is None
 
     def test_analyze_sentence_endpoint_saves_analysis_and_errors(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1029,9 +1062,12 @@ class TestReadingAndMarking:
         assert mock.call_args.kwargs["user_translation"] == "猫坐在垫子上。"
         with db.get_connection() as conn:
             row = conn.execute(
-                "SELECT user_translation FROM sentence_cards WHERE sentence_id = ?",
+                """SELECT archived_at, user_translation
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
                 (sentence_ids[0],),
             ).fetchone()
+        assert row["archived_at"] is None
         assert row["user_translation"] == "猫坐在垫子上。"
         assert _sentence_error_codes(db, sentence_ids[0]) == {"G02"}
 

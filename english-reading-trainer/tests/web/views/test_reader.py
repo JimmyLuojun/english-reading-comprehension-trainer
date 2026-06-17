@@ -8,6 +8,7 @@ from app.web.views.reader import (
     _reader_boundary_link,
     _reader_media_block,
     _reader_sentence_span,
+    _selection_toolbar,
     _word_cards_by_sentence,
 )
 
@@ -55,9 +56,39 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
         [{"id": 3, "surface_form": "cat", "current_meaning": "meaning", "user_note": ""}],
     )
 
-    assert 'class="reader-sentence marked analyzed-stale"' in html
+    assert 'class="reader-sentence marked translated analyzed-stale"' in html
+    assert 'title="Translation saved"' in html
     assert 'data-translation="&lt;translation&gt;"' in html
     assert 'data-word-card="3"' in html
+
+
+def test_reader_sentence_span_can_show_translation_without_marked_state() -> None:
+    html = _reader_sentence_span(
+        {
+            "id": 1,
+            "text": "The cat sat.",
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "猫坐着。",
+            "ai_analysis_id": None,
+        },
+        2,
+        [],
+    )
+
+    assert 'class="reader-sentence translated"' in html
+    assert 'class="reader-sentence marked' not in html
+    assert 'data-marked="0"' in html
+    assert 'data-translation="猫坐着。"' in html
+
+
+def test_selection_toolbar_contains_delete_translation_action() -> None:
+    html = _selection_toolbar("/read/1", [])
+
+    assert 'id="toolbar-translation-delete"' in html
+    assert "Delete translation" in html
+    assert "hidden" in html
 
 
 def test_reader_media_and_boundary_links() -> None:

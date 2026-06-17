@@ -98,9 +98,10 @@ def save_sentence_translation(
     """
     Store the latest user translation for *sentence_id* and return the card id.
 
-    Creates the sentence card if needed. Re-submission overwrites the previous
-    translation and clears stale AI analysis/error links so the next analysis
-    uses a cache key that includes the latest translation.
+    Creates an archived translation record if needed. Re-submission overwrites
+    the previous translation and clears stale AI analysis/error links so the next
+    analysis uses a cache key that includes the latest translation. Saving a
+    translation alone must not add the sentence to the active Review queue.
     """
     cleaned_translation = user_translation.strip()
     if not cleaned_translation:
@@ -121,8 +122,7 @@ def save_sentence_translation(
             note = user_note if user_note else existing["user_note"]
             conn.execute(
                 """UPDATE sentence_cards
-                      SET archived_at = NULL,
-                          user_note = ?,
+                      SET user_note = ?,
                           user_translation = ?,
                           translation_created_at = ?,
                           ai_analysis_id = NULL
@@ -137,7 +137,47 @@ def save_sentence_translation(
             sentence_id=sentence_id,
             user_note=user_note,
             user_translation=cleaned_translation,
+            archived_at=now,
         )
+
+
+def delete_sentence_translation(db: DatabaseConnection, sentence_id: int) -> int:
+    """
+    Clear the saved translation for *sentence_id* and archive its review card.
+
+    Deleting the translation removes the reason for reviewing this sentence in
+    the translation workflow, so the active sentence card is archived as well.
+    Review logs and SM-2 history remain preserved on the soft-deleted card.
+    """
+    now = _utcnow()
+    with db.get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
+        ).fetchone():
+            raise ValueError(f"Sentence id={sentence_id} not found.")
+
+        existing = conn.execute(
+            """SELECT id, user_translation
+                 FROM sentence_cards
+                WHERE sentence_id = ?""",
+            (sentence_id,),
+        ).fetchone()
+        if existing is None or not (existing["user_translation"] or "").strip():
+            raise ValueError(
+                f"No saved translation exists for sentence id={sentence_id}."
+            )
+
+        conn.execute(
+            """UPDATE sentence_cards
+                  SET user_translation = NULL,
+                      translation_created_at = NULL,
+                      ai_analysis_id = NULL,
+                      archived_at = ?
+                WHERE id = ?""",
+            (now, existing["id"]),
+        )
+        _clear_sentence_card_errors(conn, existing["id"])
+    return existing["id"]
 
 
 def get_sentence_card(
@@ -242,6 +282,7 @@ def _insert_sentence_card(
     sentence_id: int,
     user_note: str,
     user_translation: str | None,
+    archived_at: str | None = None,
 ) -> int:
     now = _utcnow()
     translation_created_at = now if user_translation is not None else None
@@ -249,8 +290,8 @@ def _insert_sentence_card(
         """INSERT INTO sentence_cards
            (sentence_id, created_at, last_reviewed_at, review_count,
             mastery_state, ef, interval_days, repetitions, due_at, user_note,
-            user_translation, translation_created_at)
-           VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            user_translation, translation_created_at, archived_at)
+           VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             sentence_id, now,
             MasteryState.NEW.value,
@@ -261,6 +302,7 @@ def _insert_sentence_card(
             user_note,
             user_translation,
             translation_created_at,
+            archived_at,
         ),
     ).lastrowid
 

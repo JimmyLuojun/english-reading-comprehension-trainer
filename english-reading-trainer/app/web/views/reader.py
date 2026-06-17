@@ -188,11 +188,14 @@ def _reader_sentence_span(
     classes = ["reader-sentence"]
     if row["has_card"]:
         classes.append("marked")
+    if (row.get("user_translation") or "").strip():
+        classes.append("translated")
     if row.get("has_analysis"):
         classes.append("analyzed-stale" if row.get("analysis_is_stale") else "analyzed")
     text = _highlight_word_cards(row["text"], word_cards)
+    title_attr = ' title="Translation saved"' if "translated" in classes else ""
     return (
-        f'<span id="sentence-{row["id"]}" class="{" ".join(classes)}" '
+        f'<span id="sentence-{row["id"]}" class="{" ".join(classes)}"{title_attr} '
         f'data-sentence-id="{row["id"]}" '
         f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
         f'data-translation="{_escape(row.get("user_translation", ""))}" '
@@ -261,6 +264,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="toolbar-translation-open" type="button">Write translation</button>
+        <button id="toolbar-translation-delete" type="button" class="danger" hidden>Delete translation</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
         <input id="toolbar-translation-value" type="hidden" name="user_translation">

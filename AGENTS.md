@@ -4,6 +4,10 @@
 
 ## Guidelines
 
+### Response Style
+
+- When the user asks to list negative consequences to avoid and give a simple effective solution, answer in that order: first concrete risks/regressions to avoid, then the minimal viable solution. Do not detour into broad architecture unless the current design cannot support the fix.
+
 ### Testing
 
 - **每个 Python 代码文件都要有对应的单元测试，覆盖尽可能完整。**

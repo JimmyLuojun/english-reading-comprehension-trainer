@@ -14,6 +14,7 @@ from app.web.config import (
     _WORD_ANALYSIS_PROMPT,
 )
 
+
 def _fetch_sentence_for_analysis(
     db: DatabaseConnection,
     sentence_id: int,
@@ -23,13 +24,14 @@ def _fetch_sentence_for_analysis(
             """SELECT s.id, s.text, COALESCE(sc.user_translation, '') AS user_translation
                  FROM sentences s
                  LEFT JOIN sentence_cards sc
-                   ON sc.sentence_id = s.id AND sc.archived_at IS NULL
+                   ON sc.sentence_id = s.id
                 WHERE s.id = ?""",
             (sentence_id,),
         ).fetchone()
     if row is None:
         raise ValueError(f"Sentence id={sentence_id} not found.")
     return dict(row)
+
 
 def _fetch_sentence_analysis_payload(
     db: DatabaseConnection,
@@ -71,6 +73,7 @@ def _fetch_sentence_analysis_payload(
         "analysis": analysis,
     }
 
+
 def _fetch_word_analysis_payload(
     db: DatabaseConnection,
     card_id: int,
@@ -104,6 +107,7 @@ def _fetch_word_analysis_payload(
         "from_cache": True,
         "analysis": json.loads(row["response_json"]),
     }
+
 
 def _update_word_card_analysis_id(
     db: DatabaseConnection,

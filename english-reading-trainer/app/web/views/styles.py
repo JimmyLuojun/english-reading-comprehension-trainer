@@ -214,6 +214,12 @@ def _css() -> str:
       box-decoration-break: clone;
       -webkit-box-decoration-break: clone;
     }
+    [data-sentence-id].translated {
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-color: #2563eb;
+      text-decoration-thickness: 1.5px;
+    }
     .reader-sentence:target {
       background: #bfdbfe;
       border-radius: 2px;
