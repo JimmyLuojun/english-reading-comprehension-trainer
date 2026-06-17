@@ -15,10 +15,15 @@ from app.cards.sentence_card_service import (
 )
 from app.cards.word_card_service import (
     WordCardNotFoundError,
+    WordCardSourceNotFoundError,
+    add_word_card_source,
     archive_word_card,
     create_or_update_word_card,
+    find_word_card_occurrence_candidates,
     get_word_card,
+    list_word_card_sources,
     list_word_cards,
+    set_primary_word_card_source,
     update_word_card_note,
 )
 from app.db_connection import DatabaseConnection
@@ -36,6 +41,7 @@ from app.web.views import (
     _cards_return_script,
     _html_page,
     _sentence_cards_table,
+    _word_card_sources_page,
     _word_cards_table,
 )
 
@@ -163,3 +169,35 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         </section>
         """
         return _html_page("Cards", body, active="cards")
+
+    @web_app.get("/cards/word/{card_id}/sources", response_class=HTMLResponse)
+    def word_card_sources(card_id: int) -> HTMLResponse:
+        db = db_factory()
+        card = get_word_card(db, card_id)
+        if card is None:
+            return _error_page(f"Active word card id={card_id} not found.", status_code=404)
+        sources = list_word_card_sources(db, card_id)
+        candidates = find_word_card_occurrence_candidates(db, card_id)
+        return _html_page(
+            "Word Card Sources",
+            _word_card_sources_page(card, sources, candidates),
+            active="cards",
+        )
+
+    @web_app.post("/cards/word/{card_id}/sources")
+    async def add_word_source(card_id: int, request: Request) -> Any:
+        form = await _read_form(request)
+        try:
+            sentence_id = int(form.get("sentence_id", "0"))
+            add_word_card_source(db_factory(), card_id, sentence_id)
+        except (ValueError, WordCardNotFoundError) as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(f"/cards/word/{card_id}/sources")
+
+    @web_app.post("/cards/word/{card_id}/sources/{source_id}/primary")
+    def set_primary_word_source(card_id: int, source_id: int) -> Any:
+        try:
+            set_primary_word_card_source(db_factory(), card_id, source_id)
+        except (WordCardNotFoundError, WordCardSourceNotFoundError) as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(f"/cards/word/{card_id}/sources")

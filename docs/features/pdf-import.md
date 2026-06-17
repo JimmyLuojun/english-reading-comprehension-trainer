@@ -2,6 +2,8 @@
 
 `[新增 2026-06-17]`
 
+实现状态：Phase 2B 已落地。`app/importers/pdf_importer.py` 支持可抽取文本 PDF 导入，`books.source_format` 已扩展为 `pdf`，Web `/import/file` 与 CLI `books import pdf` 已接入。Phase 2A 保留矢量图表区域：从 PDF lines/curves/rects/images 检测粗粒度 figure region，通过 `pdfplumber`/`pypdfium2` 渲染为 PNG，写入现有 `book_assets` 和 `chapter_blocks(kind='figure')`，并从正文 words 中排除图表区域内标签以避免重复。Phase 2B 进一步把数学公式和代码块等 non-prose 文本区域渲染为 figure，避免它们进入 sentences、AI analysis 和复习流水线。当前实现仍按本文排除项执行：不做 OCR、不嵌入 PDF viewer、不追求视觉版面 1:1 复刻。
+
 目标：支持导入可抽取文本的 PDF，并让导入后的阅读和训练体验尽量等同于当前 EPUB：连续阅读、选句、选词、词卡/句卡、AI analysis、来源跳转、复习队列和阅读位置恢复都继续基于现有阅读页工作。
 
 核心决策：PDF 不做独立 PDF viewer。PDF importer 必须把源 PDF 归一化为现有 `books / chapters / paragraphs / sentences / chapter_blocks` 数据模型，阅读页仍使用 `/read/{book_id}` 和 `sentence_id` DOM span。PDF 原版页面截图、OCR、复杂版面复刻都不作为第一版主路径。
@@ -69,13 +71,15 @@ def import_pdf(
 
 插入策略：
 
-- Phase 1 直接复用 EPUB importer 的 `_insert()`：
+- PDF importer 直接复用 EPUB importer 的 `_insert()`：
 
   ```python
-  from app.importers.epub_importer import _insert
+  from app.importers.epub_importer import EpubAssetSource, TextBlock, _insert
   ```
 
-- 调用时传入 `SourceFormat.PDF` 和 `asset_sources={}`。
+- 文本块传入 `TextBlock(kind="prose")`。
+- Phase 2A 图表块传入 `TextBlock(kind="figure", asset_href=...)`，并用同一个 `asset_href` 在 `asset_sources` 中提供 `EpubAssetSource(media_type="image/png", content=...)`。
+- `_insert()` 负责把 prose 写入 `paragraphs/sentences/chapter_blocks`，把 figure 写入 `book_assets/chapter_blocks`。
 
 - 暂不为“共享插入器”提前抽象 `base_importer.py`；等第三种复杂导入格式或 `_insert()` 出现 PDF 专用分支时再提取。
 
@@ -123,6 +127,25 @@ words = [
 - 普通换行合并为空格，段落之间保留空行。
 - 去除孤立页码行和重复空白。
 - 每个 prose block 交给现有 `segment_sentences()` 切句，保持句子哈希逻辑一致。
+
+Phase 2A 图表保留规则：
+
+- 从 `page.lines`、`page.curves`、`page.rects`、`page.images` 获取候选区域。
+- 过滤页眉页脚区域和全宽细横线等装饰性噪声。
+- 先合并相邻候选 bbox，再过滤过小区域，避免把框线图拆成多个零散图片。
+- 只有包含可抽取标签文字或真实 image primitive 的区域才写入 figure，空白矩形不视为可导入内容。
+- 图表区域内 words 不进入 `_words_to_lines()`，避免 `Hash / Block / Transaction` 等标签变成重复正文。
+- 用 `page.crop(region).to_image(resolution=150)` 渲染 PNG；不引入 PyMuPDF，不使用 OCR。
+
+Phase 2B non-prose 文本区域规则：
+
+- 用 `page.extract_words(extra_attrs=["fontname", "size"])` 获取字体和字号。
+- 识别 monospace 字体行作为代码块，例如 Courier/Mono/Consolas/Menlo。
+- 识别数学区域：Symbol/Math 字体、数学符号密度高、字号变化明显、非字母比例高的行。
+- 把连续 non-prose 行按垂直间距聚类成局部 region；公式和代码之间间距较大时拆成多个 figure。
+- 把这些 region 走同一套 PNG 渲染和 `book_assets/chapter_blocks(kind='figure')` 写入路径。
+- region 内 words 从正文抽取中排除；周围英文 prose 继续进入 `sentences`。
+- Phase 2B 不尝试把公式线性化为文本，也不把代码块先做成 `pre`；以后如需可选择代码，再单独加 `TextBlock(kind="pre")` 路径。
 
 章节策略：
 

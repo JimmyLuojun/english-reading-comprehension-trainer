@@ -47,6 +47,94 @@ def test_analysis_selection_toolbar_reenables_buttons_when_shown() -> None:
     )
 
 
+def test_analysis_glossary_highlights_nested_word_sections() -> None:
+    script = _selection_script()
+    apply_highlights = script[script.index("function applyGlossaryHighlights"):]
+    apply_highlights = apply_highlights[: apply_highlights.index("function refreshAnalysisGlossaryHighlights")]
+    refresh_highlights = script[script.index("function refreshAnalysisGlossaryHighlights"):]
+    refresh_highlights = refresh_highlights[: refresh_highlights.index("function setAnalysisWordButtonsDisabled")]
+    render_vs_simpler = script[script.index("function renderVsSimpler"):]
+    render_vs_simpler = render_vs_simpler[: render_vs_simpler.index("function renderWordAnalysis")]
+
+    assert "document.createTreeWalker(element, NodeFilter.SHOW_TEXT" in apply_highlights
+    assert 'parent.closest(".glossary-word")' in apply_highlights
+    assert "textNode.replaceWith(fragment);" in apply_highlights
+    assert "wordVsSimpler" in refresh_highlights
+    assert "applyGlossaryHighlights(container);" in render_vs_simpler
+
+
+def test_source_word_card_param_loads_saved_word_analysis() -> None:
+    script = _selection_script()
+    load_saved = script[script.index("async function loadSavedWordAnalysis"):]
+    load_saved = load_saved[: load_saved.index("function clearEvidenceHighlight")]
+    boot = script[script.index("restoreReaderProgress();"):]
+
+    assert 'new URLSearchParams(window.location.search).get("word_card")' in script
+    assert 'fetch(`/analysis/word/${cardId}`)' in load_saved
+    assert "renderWordAnalysis(payload);" in load_saved
+    assert "if (initialWordCardId)" in boot
+    assert "loadSavedWordAnalysis(initialWordCardId)" in boot
+
+
+def test_reader_script_supports_pro_reanalysis_button() -> None:
+    script = _selection_script()
+    request_word = script[script.index("async function requestWordAnalysis"):]
+    request_word = request_word[: request_word.index("async function loadSavedWordAnalysis")]
+
+    assert 'document.getElementById("analysis-panel-retry-pro")' in script
+    assert 'body.set("prefer_pro", "1");' in request_word
+    assert 'requestWordAnalysis(activeAnalysisWordCardId, { preferPro: true });' in script
+    assert 'requestAnalysis(activeAnalysisSentenceId, null, { preferPro: true });' in script
+
+
+def test_analysis_toolbar_actions_run_on_pointerdown_before_click() -> None:
+    script = _selection_script()
+    action_helper = script[script.index("function analysisWordActionFromEvent"):]
+    action_helper = action_helper[: action_helper.index('panel.addEventListener("click"')]
+    submit_handler = script[script.index('analysisWordForm.addEventListener("submit"'):]
+    submit_handler = submit_handler[: submit_handler.index('analysisWordForm.addEventListener("pointerdown"')]
+    pointer_handler = script[script.index('analysisWordForm.addEventListener("pointerdown"'):]
+    pointer_handler = pointer_handler[: pointer_handler.index('analysisWordForm.addEventListener("click"')]
+    click_handler = script[script.index('analysisWordForm.addEventListener("click"'):]
+    click_handler = click_handler[: click_handler.index('sentenceForm.addEventListener("submit"')]
+
+    assert "event.submitter ||" in action_helper
+    assert 'target?.closest("[data-analysis-mark]")' in action_helper
+    assert 'target?.closest("[data-analysis-analyze]")' in action_helper
+    assert "analysisWordForm.contains(markButton)" in action_helper
+    assert "analysisWordForm.contains(analyzeButton)" in action_helper
+
+    assert "event.preventDefault();" in submit_handler
+    assert "runAnalysisWordAction(action);" in submit_handler
+    assert "event.preventDefault();" in pointer_handler
+    assert "event.stopPropagation();" in pointer_handler
+    assert "analysisWordPointerActionHandled = true;" in pointer_handler
+    assert "runAnalysisWordAction(action);" in pointer_handler
+    assert "markAnalysisSelection(" not in pointer_handler
+
+    assert "if (analysisWordPointerActionHandled)" in click_handler
+    assert "analysisWordPointerActionHandled = false;" in click_handler
+    assert "runAnalysisWordAction(action);" in click_handler
+
+
+def test_analysis_toolbar_action_in_progress_blocks_collapsed_selection_hide() -> None:
+    script = _selection_script()
+    mark_analysis = script[script.index("async function markAnalysisSelection"):]
+    mark_analysis = mark_analysis[: mark_analysis.index("async function markReaderSelection")]
+    update_toolbar = script[script.index("function updateToolbar()"):]
+    update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
+    collapsed_selection = update_toolbar[
+        update_toolbar.index("if (!selection || selection.rangeCount === 0 || selection.isCollapsed)") :
+    ]
+    collapsed_selection = collapsed_selection[: collapsed_selection.index("const range = selection.getRangeAt(0);")]
+
+    assert "let analysisWordActionInProgress = false;" in script
+    assert "analysisWordActionInProgress = true;" in mark_analysis
+    assert "suppressCollapsedToolbarHideUntil = Date.now() + 1200;" in mark_analysis
+    assert "analysisWordActionInProgress = false;" in mark_analysis
+    assert "if (analysisWordActionInProgress) return;" in collapsed_selection
+
+
 def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -> None:
     script = _selection_script()
 
@@ -56,3 +144,33 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
     assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in click_handler
     assert 'if (sentence.dataset.marked === "1")' in click_handler
     assert "showMarkedSentenceToolbar(sentence);" in click_handler
+
+
+def test_word_detail_explain_saves_edits_before_analysis() -> None:
+    script = _selection_script()
+    save_helper = script[script.index("async function saveWordDetailEdits"):]
+    save_helper = save_helper[: save_helper.index('wordDetailSave.addEventListener("click"')]
+    explain_handler = script[script.index('wordDetailExplain.addEventListener("click"'):]
+    explain_handler = explain_handler[: explain_handler.index("if (wordDetailViewCard)")]
+
+    assert 'fetch(`/mark/word/${cardId}`, { method: "PATCH", body })' in save_helper
+    assert "updateWordCardElements(cardId, meaning, note);" in save_helper
+    assert "const saved = await saveWordDetailEdits({ hideAfter: false });" in explain_handler
+    assert "if (!saved) return;" in explain_handler
+    assert "requestWordAnalysis(cardId, { pushCurrent: !panel.hidden });" in explain_handler
+
+
+def test_word_analysis_renders_learner_note_check_without_overwriting_notes() -> None:
+    script = _selection_script()
+    loading_word = script[script.index("function setPanelLoadingWord"):]
+    loading_word = loading_word[: loading_word.index("function renderAnalysisError")]
+    render_word = script[script.index("function renderWordAnalysis"):]
+    render_word = render_word[: render_word.index("async function saveAnalysisMeaningIfEmpty")]
+
+    assert 'document.getElementById("analysis-word-note-check-section")' in script
+    assert 'document.getElementById("analysis-word-note-check")' in script
+    assert "wordNoteCheckSection.hidden = true;" in loading_word
+    assert "const check = a.learner_note_check || {};" in render_word
+    assert 'status !== "not_provided"' in render_word
+    assert "wordPanelNote.value = distinctUserNote" in render_word
+    assert "wordPanelNote.value = check" not in render_word

@@ -288,10 +288,10 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <input id="toolbar-analysis-word-sentence-id" type="hidden" name="sentence_id">
         <input id="toolbar-analysis-word-surface-form" type="hidden" name="surface_form">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
-        <button type="button" data-analysis-mark="word">Mark word</button>
-        <button type="button" data-analysis-mark="phrase">Mark phrase</button>
-        <button type="button" data-analysis-mark="collocation">Mark collocation</button>
-        <button type="button" data-analysis-analyze="word">AI analysis</button>
+        <button type="submit" name="lexical_type" value="word" data-analysis-mark="word">Mark word</button>
+        <button type="submit" name="lexical_type" value="phrase" data-analysis-mark="phrase">Mark phrase</button>
+        <button type="submit" name="lexical_type" value="collocation" data-analysis-mark="collocation">Mark collocation</button>
+        <button type="submit" name="lexical_type" value="word" data-analysis-analyze="word">AI analysis</button>
         <span id="toolbar-analysis-word-status" class="toolbar-status" aria-live="polite"></span>
       </form>
       <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
@@ -380,6 +380,10 @@ def _analysis_panel() -> str:
           <h3>vs. simpler alternatives</h3>
           <div id="analysis-word-vs-simpler"></div>
         </section>
+        <section id="analysis-word-note-check-section" class="analysis-section" hidden>
+          <h3>Your note check</h3>
+          <p id="analysis-word-note-check" class="analysis-text"></p>
+        </section>
         <section class="analysis-section">
           <h3>Morphology</h3>
           <p id="analysis-word-morphology" class="analysis-text"></p>
@@ -406,6 +410,7 @@ def _analysis_panel() -> str:
       </div>
       <footer class="analysis-panel-actions">
         <button id="analysis-panel-retry" type="button">Reanalyze</button>
+        <button id="analysis-panel-retry-pro" type="button">Reanalyze with Pro</button>
         <button id="analysis-panel-previous" type="button" hidden>Back to previous analysis</button>
         <button id="analysis-panel-unmark" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="analysis-panel-return" type="button">Back to reading</button>

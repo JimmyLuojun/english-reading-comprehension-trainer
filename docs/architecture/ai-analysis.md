@@ -174,14 +174,18 @@ prompts/
 ```text
 OPENAI_API_KEY    — API key
 OPENAI_BASE_URL   — endpoint（DeepSeek / OpenAI / Ollama / Azure 等）
-TRAINER_MODEL     — 模型名，默认 deepseek-chat
+TRAINER_MODEL     — 默认模型名，默认 deepseek-v4-flash，用于词汇等普通分析
+TRAINER_SENTENCE_MODEL — 句子 AI analysis 模型名，默认 deepseek-v4-pro
+TRAINER_PRO_MODEL — 手动 Pro 重分析模型名，默认 deepseek-v4-pro
 ```
 
 **默认 Provider：DeepSeek。** 其 API 与 OpenAI SDK 完全兼容，默认配置为：
 
 ```text
 OPENAI_BASE_URL=https://api.deepseek.com/v1
-TRAINER_MODEL=deepseek-chat
+TRAINER_MODEL=deepseek-v4-flash
+TRAINER_SENTENCE_MODEL=deepseek-v4-pro
+TRAINER_PRO_MODEL=deepseek-v4-pro
 ```
 
 现有 `llm_sentence_analyzer.py` / `llm_word_analyzer.py` 无需改动代码即可切换。

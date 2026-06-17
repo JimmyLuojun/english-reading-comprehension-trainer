@@ -7,12 +7,13 @@ all tables/columns from §1 of design.md, constraint violations, seed data.
 """
 
 import sqlite3
+import shutil
 from pathlib import Path
 
 import pytest
 
 from app.db_connection import DatabaseConnection
-from app.db_models import ERROR_TYPES, VALID_ERROR_CODES
+from app.db_models import VALID_ERROR_CODES
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,9 @@ class TestMigrationRunner:
         assert "003_archive_cards.sql" in applied
         assert "004_sentence_user_translation.sql" in applied
         assert "005_chapter_section_metadata.sql" in applied
+        assert "006_epub_assets_and_blocks.sql" in applied
+        assert "007_pdf_source_format.sql" in applied
+        assert "008_word_card_sources.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -54,6 +58,63 @@ class TestMigrationRunner:
         assert "003_archive_cards.sql" in recorded
         assert "004_sentence_user_translation.sql" in recorded
         assert "005_chapter_section_metadata.sql" in recorded
+        assert "006_epub_assets_and_blocks.sql" in recorded
+        assert "007_pdf_source_format.sql" in recorded
+        assert "008_word_card_sources.sql" in recorded
+
+    def test_word_card_sources_migration_backfills_and_recounts(
+        self, tmp_path: Path
+    ) -> None:
+        partial_dir = tmp_path / "partial_migrations"
+        partial_dir.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("00[1-7]_*.sql")):
+            shutil.copy(sql_file, partial_dir / sql_file.name)
+        db = DatabaseConnection(tmp_path / "recount.db")
+        db.apply_migrations(partial_dir)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('B', 'txt', 'h_recount', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters (book_id, idx, title, sentence_start, sentence_end) "
+                "VALUES (?, 1, 'Ch', 0, 1)",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx, sentence_start, sentence_end) "
+                "VALUES (?, 1, 0, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                "INSERT INTO sentences "
+                "(book_id, chapter_id, paragraph_id, idx, text, text_hash, "
+                "char_offset_start, char_offset_end) "
+                "VALUES (?, ?, ?, 0, 'intangible asset.', 'h_s', 0, 17)",
+                (book_id, chapter_id, paragraph_id),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    created_at, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count)
+                   VALUES ('intangible', 'intangible', 'word', ?,
+                           '2026-01-01T00:00:00+00:00', 'new', 2.5, 0, 0,
+                           '2026-01-01T00:00:00+00:00', 11)""",
+                (sentence_id,),
+            )
+
+        db.apply_migrations(MIGRATIONS_DIR)
+
+        with db.get_connection() as conn:
+            card = conn.execute("SELECT id, occurrence_count FROM word_cards").fetchone()
+            source = conn.execute(
+                "SELECT sentence_id, is_primary FROM word_card_sources WHERE card_id = ?",
+                (card["id"],),
+            ).fetchone()
+        assert card["occurrence_count"] == 1
+        assert source["sentence_id"] == sentence_id
+        assert source["is_primary"] == 1
 
     def test_migrations_dir_empty_returns_empty(self, tmp_path: Path) -> None:
         db = DatabaseConnection(tmp_path / "a.db")
@@ -110,6 +171,7 @@ class TestPragmas:
 EXPECTED_TABLES = [
     "books", "chapters", "paragraphs", "sentences",
     "sentence_cards", "word_cards", "review_logs",
+    "word_card_sources",
     "tags", "error_types",
     "sentence_card_tags", "sentence_card_errors",
     "word_card_tags", "word_card_errors",
@@ -157,6 +219,14 @@ class TestColumns:
                     "archived_at"]:
             assert col in cols
 
+    def test_word_card_sources_columns(self, db: DatabaseConnection) -> None:
+        cols = db.get_table_columns("word_card_sources")
+        for col in [
+            "id", "card_id", "sentence_id", "surface_form", "source_key",
+            "is_primary", "created_at",
+        ]:
+            assert col in cols
+
     def test_review_logs_has_sm2_before_after_fields(self, db: DatabaseConnection) -> None:
         cols = db.get_table_columns("review_logs")
         for col in ["quality", "outcome", "ef_before", "ef_after",
@@ -196,13 +266,135 @@ class TestColumns:
 # ---------------------------------------------------------------------------
 
 class TestConstraints:
-    def test_books_source_format_check(self, db: DatabaseConnection) -> None:
+    def test_books_source_format_accepts_pdf_and_rejects_invalid(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('PDF', 'pdf', 'h_pdf', '2026-01-01T00:00:00+00:00')"
+            )
+
         with pytest.raises(sqlite3.IntegrityError):
             with db.get_connection() as conn:
                 conn.execute(
                     "INSERT INTO books (title, source_format, file_hash, imported_at) "
-                    "VALUES ('X', 'pdf', 'h1', '2026-01-01T00:00:00+00:00')"
+                    "VALUES ('X', 'html', 'h_html', '2026-01-01T00:00:00+00:00')"
                 )
+
+    def test_pdf_source_format_migration_preserves_existing_related_data(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for filename in [
+            "001_initial_schema.sql",
+            "002_seed_error_types.sql",
+            "003_archive_cards.sql",
+            "004_sentence_user_translation.sql",
+            "005_chapter_section_metadata.sql",
+            "006_epub_assets_and_blocks.sql",
+        ]:
+            shutil.copy(MIGRATIONS_DIR / filename, old_migrations / filename)
+
+        db = DatabaseConnection(tmp_path / "old.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            txt_book_id = conn.execute(
+                "INSERT INTO books "
+                "(title, author, source_format, file_hash, imported_at) "
+                "VALUES ('TXT', '', 'txt', 'h_txt', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            epub_book_id = conn.execute(
+                "INSERT INTO books "
+                "(title, author, source_format, file_hash, imported_at) "
+                "VALUES ('EPUB', '', 'epub', 'h_epub', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters "
+                "(book_id, idx, title, section_kind, chapter_number) "
+                "VALUES (?, 1, 'Chapter 1', 'chapter', 1)",
+                (epub_book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx) VALUES (?, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                """INSERT INTO sentences
+                   (book_id, chapter_id, paragraph_id, idx, text, text_hash)
+                   VALUES (?, ?, ?, 0, 'Existing EPUB sentence.', 'hash')""",
+                (epub_book_id, chapter_id, paragraph_id),
+            ).lastrowid
+            asset_id = conn.execute(
+                """INSERT INTO book_assets
+                   (book_id, source_href, media_type, storage_path, sha256, byte_size)
+                   VALUES (?, 'image.png', 'image/png', 'books/2/image.png', 'asset-hash', 10)""",
+                (epub_book_id,),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO chapter_blocks
+                   (book_id, chapter_id, idx, kind, paragraph_id, asset_id)
+                   VALUES (?, ?, 1, 'figure', ?, ?)""",
+                (epub_book_id, chapter_id, paragraph_id, asset_id),
+            )
+
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO books "
+                    "(title, source_format, file_hash, imported_at) "
+                    "VALUES ('PDF Before', 'pdf', 'h_pdf_before', '2026-01-01')"
+                )
+
+            assert sentence_id > 0
+            assert txt_book_id > 0
+
+        applied = db.apply_migrations(MIGRATIONS_DIR)
+
+        assert applied == ["007_pdf_source_format.sql", "008_word_card_sources.sql"]
+        with db.get_connection() as conn:
+            counts = {
+                table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "books",
+                    "chapters",
+                    "paragraphs",
+                    "sentences",
+                    "book_assets",
+                    "chapter_blocks",
+                )
+            }
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('PDF After', 'pdf', 'h_pdf_after', '2026-01-01')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                    "VALUES ('Duplicate', 'pdf', 'h_pdf_after', '2026-01-01')"
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                    "VALUES ('Bad', 'html', 'h_bad', '2026-01-01')"
+                )
+            assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+            sentence = conn.execute(
+                "SELECT text FROM sentences WHERE id = ?",
+                (sentence_id,),
+            ).fetchone()
+
+        assert counts == {
+            "books": 2,
+            "chapters": 1,
+            "paragraphs": 1,
+            "sentences": 1,
+            "book_assets": 1,
+            "chapter_blocks": 1,
+        }
+        assert sentence["text"] == "Existing EPUB sentence."
 
     def test_chapter_blocks_kind_check(self, db: DatabaseConnection) -> None:
         with pytest.raises(sqlite3.IntegrityError):

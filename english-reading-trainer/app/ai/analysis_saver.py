@@ -14,12 +14,13 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
+    WORD_ANALYSIS_SCHEMA_V4,
 )
 from app.ai.ai_response_cache import compute_content_hash, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
+from app.cards.word_card_service import record_word_card_source
 from app.db_connection import DatabaseConnection
 from app.db_models import (
-    LexicalType,
     MasteryState,
     SM2_DEFAULT_EF,
     SM2_INITIAL_INTERVAL_DAYS,
@@ -246,37 +247,40 @@ def _upsert_word_card(
                    SET current_meaning   = ?,
                        pos               = ?,
                        ai_analysis_id    = ?,
-                       occurrence_count  = occurrence_count + 1,
                        archived_at       = NULL
                    WHERE id = ?""",
                 (meaning, pos, cache_id, existing["id"]),
             )
-            return existing["id"], False
+            card_id = existing["id"]
+            created = False
+        else:
+            card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos,
+                    created_at, last_reviewed_at, review_count,
+                    mastery_state, ef, interval_days, repetitions, due_at,
+                    occurrence_count, user_note, ai_analysis_id)
+                   VALUES (?, ?, ?, ?, ?, ?,
+                           ?, NULL, 0,
+                           ?, ?, ?, ?, ?,
+                           1, '', ?)""",
+                (
+                    lemma, surface_form, lt, sentence_id,
+                    meaning, pos,
+                    now,
+                    MasteryState.NEW.value,
+                    SM2_DEFAULT_EF,
+                    SM2_INITIAL_INTERVAL_DAYS,
+                    SM2_INITIAL_REPETITIONS,
+                    now,
+                    cache_id,
+                ),
+            ).lastrowid
+            created = True
 
-        card_id: int = conn.execute(
-            """INSERT INTO word_cards
-               (lemma, surface_form, lexical_type, first_sentence_id,
-                current_meaning, pos,
-                created_at, last_reviewed_at, review_count,
-                mastery_state, ef, interval_days, repetitions, due_at,
-                occurrence_count, user_note, ai_analysis_id)
-               VALUES (?, ?, ?, ?, ?, ?,
-                       ?, NULL, 0,
-                       ?, ?, ?, ?, ?,
-                       1, '', ?)""",
-            (
-                lemma, surface_form, lt, sentence_id,
-                meaning, pos,
-                now,
-                MasteryState.NEW.value,
-                SM2_DEFAULT_EF,
-                SM2_INITIAL_INTERVAL_DAYS,
-                SM2_INITIAL_REPETITIONS,
-                now,
-                cache_id,
-            ),
-        ).lastrowid
-    return card_id, True
+    record_word_card_source(db, card_id, sentence_id, surface_form, is_primary=created)
+    return card_id, created
 
 
 def _sentence_error_codes(data: dict) -> tuple[str, ...]:
@@ -296,8 +300,9 @@ def _word_analysis_schema(prompt_version: str) -> dict:
         "v1": WORD_ANALYSIS_SCHEMA,
         "v2": WORD_ANALYSIS_SCHEMA_V2,
         "v3": WORD_ANALYSIS_SCHEMA_V3,
+        "v4": WORD_ANALYSIS_SCHEMA_V4,
     }
-    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V3)
+    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V4)
 
 
 def _sync_sentence_card_errors(

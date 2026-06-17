@@ -27,6 +27,7 @@ from app.importers.epub_importer import (
     _SECTION_APPENDIX,
     _SECTION_BACKMATTER,
     _SECTION_CHAPTER,
+    _SECTION_FRONTMATTER,
     _asset_extension,
     _build_toc_map,
     _build_asset_sources,
@@ -35,7 +36,6 @@ from app.importers.epub_importer import (
     _definition_block_from_dt,
     _direct_text,
     _extract_chapters,
-    _extract_metadata,
     _extract_paragraphs,
     _extract_text_blocks,
     _heading_from_soup,
@@ -255,6 +255,33 @@ class TestTocAndChapterClassification:
         assert cover.chapter_number is None
         assert titlepage.section_kind == "frontmatter"
         assert titlepage.chapter_number is None
+
+    def test_classifies_part_title_as_non_counted_section(self) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter("Part One: The Language of Money", soup, 1)
+
+        assert classification.section_kind == _SECTION_FRONTMATTER
+        assert classification.chapter_number is None
+
+    def test_classifies_short_bodymatter_part_page_as_non_counted_section(
+        self,
+    ) -> None:
+        soup = BeautifulSoup(
+            """
+            <html><body>
+              <section epub:type="bodymatter">
+                <p>Rich Dad Poor Dad for Teens PART TWO RICH DAD'S MONEY SECRETS</p>
+              </section>
+            </body></html>
+            """,
+            "lxml",
+        )
+
+        classification = _classify_chapter("Part002", soup, 2)
+
+        assert classification.section_kind == _SECTION_FRONTMATTER
+        assert classification.chapter_number is None
 
     def test_classifies_chapter_from_fallback_when_no_semantics(self) -> None:
         soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
@@ -932,6 +959,57 @@ class TestImportEpubChapters:
         assert rows[0]["section_kind"] == "frontmatter"
         assert rows[0]["chapter_number"] is None
         assert rows[1]["section_kind"] == "chapter"
+        assert rows[1]["chapter_number"] == 1
+
+    def test_part_page_does_not_consume_body_chapter_number(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        ep = make_epub_with_sections(
+            tmp_path,
+            "part-page.epub",
+            sections=[
+                {
+                    "title": "Part One: The Language of Money",
+                    "file_name": "Part001.xhtml",
+                    "epub_type": "bodymatter",
+                    "body_html": (
+                        "<p>Part One divider text with enough words to import here.</p>"
+                    ),
+                },
+                {
+                    "title": "Chapter One: A New Way of Learning",
+                    "file_name": "Chapter001.xhtml",
+                    "epub_type": "chapter",
+                    "body_html": (
+                        "<p>Body chapter text with enough words to import here.</p>"
+                    ),
+                },
+            ],
+        )
+
+        result = import_epub(db, ep)
+
+        assert result.chapter_count == 1
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT idx, title, section_kind, chapter_number
+                     FROM chapters
+                    WHERE book_id = ?
+                    ORDER BY idx""",
+                (result.book_id,),
+            ).fetchall()
+            total_chapters = conn.execute(
+                "SELECT total_chapters FROM books WHERE id = ?",
+                (result.book_id,),
+            ).fetchone()["total_chapters"]
+
+        assert total_chapters == 1
+        assert [row["idx"] for row in rows] == [1, 2]
+        assert rows[0]["title"] == "Part One: The Language of Money"
+        assert rows[0]["section_kind"] == _SECTION_FRONTMATTER
+        assert rows[0]["chapter_number"] is None
+        assert rows[1]["title"] == "Chapter One: A New Way of Learning"
+        assert rows[1]["section_kind"] == _SECTION_CHAPTER
         assert rows[1]["chapter_number"] == 1
 
     def test_nested_toc_entries_do_not_overwrite_document_title(

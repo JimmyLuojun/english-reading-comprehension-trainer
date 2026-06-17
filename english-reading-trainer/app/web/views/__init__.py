@@ -48,6 +48,7 @@ from app.web.views.cards import (
     _cards_return_script,
     _note_edit_cell,
     _ai_meaning_cell,
+    _word_card_sources_page,
 )
 
 from app.web.views.review import (
@@ -122,5 +123,6 @@ __all__ = [
     "_strip_appendix_ordinal",
     "_strip_section_ordinal",
     "_word_cards_by_sentence",
+    "_word_card_sources_page",
     "_word_cards_table",
 ]

@@ -16,7 +16,12 @@ from app.web.http_utils import (
     _unlink_silent,
 )
 from app.web.models import UploadTooLargeError
-from app.web.services.imports import ImportOutcome, import_epub_file, import_text_bytes
+from app.web.services.imports import (
+    ImportOutcome,
+    import_epub_file,
+    import_pdf_file,
+    import_text_bytes,
+)
 from app.web.utils import _format_mb
 from app.web.views import (
     _duplicate_page,
@@ -54,6 +59,26 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
                 return _do_import_epub(db_factory(), tmp_path, title, author)
+            finally:
+                _unlink_silent(tmp_path)
+
+        if filename.endswith(".pdf"):
+            try:
+                tmp_path, size = await _save_upload_to_temp(
+                    file,
+                    suffix=".pdf",
+                    max_bytes=fastapi_app._MAX_PDF_IMPORT_BYTES,
+                )
+            except UploadTooLargeError as exc:
+                return _error_page(
+                    f"Uploaded PDF exceeds {_format_mb(exc.max_bytes)} MB limit.",
+                    status_code=413,
+                )
+            if size == 0:
+                _unlink_silent(tmp_path)
+                return _error_page("Uploaded file is empty.", status_code=400)
+            try:
+                return _do_import_pdf(db_factory(), tmp_path, title, author)
             finally:
                 _unlink_silent(tmp_path)
 
@@ -113,6 +138,21 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
     ) -> Any:
         return _import_outcome_response(
             import_epub_file(
+                db,
+                file_path,
+                form_title=form_title,
+                author=author,
+            )
+        )
+
+    def _do_import_pdf(
+        db: DatabaseConnection,
+        file_path: str | Path,
+        form_title: str,
+        author: str,
+    ) -> Any:
+        return _import_outcome_response(
+            import_pdf_file(
                 db,
                 file_path,
                 form_title=form_title,

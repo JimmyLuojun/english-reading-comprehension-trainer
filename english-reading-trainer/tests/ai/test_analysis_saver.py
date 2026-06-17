@@ -108,7 +108,7 @@ _VALID_WORD_JSON = json.dumps({
     "confidence": 0.9,
 })
 
-_VALID_WORD_JSON_V3 = json.dumps({
+_VALID_WORD_JSON_V4 = json.dumps({
     "lemma": "fox",
     "lexical_type": "word",
     "pos": "noun",
@@ -119,6 +119,11 @@ _VALID_WORD_JSON_V3 = json.dumps({
     "vs_simpler": [
         {"simpler": "animal", "difference": "Animal is broader; fox names the species and its familiar connotations."}
     ],
+    "learner_note_check": {
+        "status": "not_provided",
+        "feedback": "",
+        "corrected_understanding": "",
+    },
     "morphology": {"root": "", "family": ["foxy", "foxlike"]},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
@@ -406,13 +411,17 @@ class TestSaveWordAnalysisHappyPath:
             ).fetchone()
         assert row["pos"] == "noun"
 
-    def test_v3_json_with_chinese_meaning_is_valid(self, db: DatabaseConnection, sid: int):
+    def test_v4_json_with_learner_note_check_is_valid(
+        self,
+        db: DatabaseConnection,
+        sid: int,
+    ):
         r = save_word_analysis(
             db,
             sid,
             "fox",
-            _VALID_WORD_JSON_V3,
-            prompt_version="v3",
+            _VALID_WORD_JSON_V4,
+            prompt_version="v4",
         )
 
         assert r.is_valid is True
@@ -441,9 +450,27 @@ class TestSaveWordAnalysisUpdate:
         r2 = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
         assert r1.card_id == r2.card_id
 
-    def test_occurrence_count_increments(self, db: DatabaseConnection, sid: int):
+    def test_same_sentence_does_not_increment_occurrence_count(
+        self, db: DatabaseConnection, sid: int
+    ):
         r1 = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
         save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT occurrence_count FROM word_cards WHERE id = ?", (r1.card_id,)
+            ).fetchone()
+        assert row["occurrence_count"] == 1
+
+    def test_different_sentence_increments_occurrence_count(
+        self, db: DatabaseConnection, sid: int
+    ):
+        r1 = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
+        with db.get_connection() as conn:
+            second_sid = conn.execute(
+                "SELECT id FROM sentences WHERE id != ? ORDER BY id LIMIT 1",
+                (sid,),
+            ).fetchone()["id"]
+        save_word_analysis(db, second_sid, "fox", _VALID_WORD_JSON)
         with db.get_connection() as conn:
             row = conn.execute(
                 "SELECT occurrence_count FROM word_cards WHERE id = ?", (r1.card_id,)

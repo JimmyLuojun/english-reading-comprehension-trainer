@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.ai.llm_word_analyzer import WordAnalysisResult, analyze_word
+from app.ai.llm_word_analyzer import analyze_word
 from app.db_connection import DatabaseConnection
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
@@ -40,6 +40,11 @@ _VALID_WORD_RESPONSE = json.dumps({
     "vs_simpler": [
         {"simpler": "reduce", "difference": "Reduce is neutral; mitigate implies deliberate remediation."},
     ],
+    "learner_note_check": {
+        "status": "correct",
+        "feedback": "你的理解正确。",
+        "corrected_understanding": "",
+    },
     "morphology": {"root": "mitis", "family": ["mitigation"]},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
@@ -136,6 +141,21 @@ class TestAnalyzeWordLLMSuccess:
             analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL)
         assert mock.call_count == 1
 
+    def test_learner_note_rendered_into_prompt(self, db: DatabaseConnection) -> None:
+        with _mock_llm([_VALID_WORD_RESPONSE]) as mock:
+            analyze_word(
+                db,
+                _SURFACE,
+                _SENTENCE,
+                learner_note="我认为是减轻影响",
+                model=_MODEL,
+            )
+
+        prompt, model = mock.call_args.args
+        assert model == _MODEL
+        assert "LEARNER NOTE ABOUT THIS ITEM" in prompt
+        assert "我认为是减轻影响" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Retry on invalid
@@ -184,3 +204,25 @@ class TestWordContentHash:
         with _mock_llm([]) as mock:
             analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL)
         mock.assert_not_called()
+
+    def test_different_learner_notes_have_different_cache_entries(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_WORD_RESPONSE]):
+            r1 = analyze_word(
+                db,
+                _SURFACE,
+                _SENTENCE,
+                learner_note="减轻影响",
+                model=_MODEL,
+            )
+        with _mock_llm([_VALID_WORD_RESPONSE]):
+            r2 = analyze_word(
+                db,
+                _SURFACE,
+                _SENTENCE,
+                learner_note="完全解决问题",
+                model=_MODEL,
+            )
+
+        assert r1.cache_id != r2.cache_id

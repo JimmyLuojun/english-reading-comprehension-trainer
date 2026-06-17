@@ -8,6 +8,7 @@ enumeration from db_models.VALID_ERROR_CODES.
 WORD_ANALYSIS_SCHEMA    — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2 — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3 — v3 prompt, adds Chinese meaning for reader panel
+WORD_ANALYSIS_SCHEMA_V4 — v4 prompt, adds learner-note feedback
 """
 
 from app.db_models import VALID_ERROR_CODES
@@ -283,5 +284,41 @@ WORD_ANALYSIS_SCHEMA_V3: dict = {
     "properties": {
         **WORD_ANALYSIS_SCHEMA_V2["properties"],
         "chinese_meaning": {"type": "string", "minLength": 1},
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Word / phrase / collocation analysis schema v4
+# Adds learner-note feedback to the v3 learner-facing Chinese meaning.
+# ---------------------------------------------------------------------------
+
+WORD_ANALYSIS_SCHEMA_V4: dict = {
+    **WORD_ANALYSIS_SCHEMA_V3,
+    "required": [
+        "lemma", "lexical_type", "pos", "meaning_in_context", "chinese_meaning",
+        "register", "why_this_word", "vs_simpler", "learner_note_check",
+        "morphology", "predicted_error_types", "confidence",
+    ],
+    "properties": {
+        **WORD_ANALYSIS_SCHEMA_V3["properties"],
+        "learner_note_check": {
+            "type": "object",
+            "required": ["status", "feedback", "corrected_understanding"],
+            "additionalProperties": False,
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "not_provided",
+                        "correct",
+                        "partly_correct",
+                        "incorrect",
+                        "not_enough_information",
+                    ],
+                },
+                "feedback": {"type": "string"},
+                "corrected_understanding": {"type": "string"},
+            },
+        },
     },
 }

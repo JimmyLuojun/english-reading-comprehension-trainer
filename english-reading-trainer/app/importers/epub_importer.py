@@ -124,6 +124,24 @@ _EXTRACTABLE_DESCENDANT_TAGS = (
 _TEXT_BACKED_BLOCK_KINDS = frozenset({_KIND_PROSE, _KIND_PRE, _KIND_TABLE})
 
 _CHAPTER_TITLE_RE = re.compile(r"^\s*(?:chapter\s+)?(\d+)(?:[\s.:)-]+|$)", re.I)
+_PART_TITLE_RE = re.compile(
+    r"^\s*part\s*(?:"
+    r"\d+|[ivxlcdm]+|"
+    r"one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty"
+    r")(?:[\s.:)-]+|$)",
+    re.I,
+)
+_PART_SEPARATOR_TEXT_RE = re.compile(
+    r"\bpart\s+(?:"
+    r"\d+|[ivxlcdm]+|"
+    r"one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty"
+    r")\b",
+    re.I,
+)
 _APPENDIX_TITLE_RE = re.compile(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)")
 _FRONTMATTER_TYPES = {
     "acknowledgments",
@@ -560,6 +578,8 @@ def _classify_chapter(
     epub_types = _epub_type_tokens(soup)
     parsed_number = _chapter_number_from_title(title)
 
+    if "part" in epub_types or _is_part_separator(title, soup, epub_types):
+        return ChapterClassification(_SECTION_FRONTMATTER)
     if "chapter" in epub_types or parsed_number is not None:
         return ChapterClassification(
             _SECTION_CHAPTER,
@@ -599,6 +619,27 @@ def _chapter_number_from_title(title: str) -> int | None:
     if not match:
         return None
     return int(match.group(1))
+
+
+def _is_part_separator(
+    title: str,
+    soup: BeautifulSoup,
+    epub_types: set[str],
+) -> bool:
+    """Return True for body part divider pages that should not count as chapters."""
+    if _is_part_title(title) or _is_part_title(_heading_from_soup(soup)):
+        return True
+    if "bodymatter" not in epub_types:
+        return False
+
+    body_text = " ".join((soup.get_text(" ", strip=True) or "").split())
+    if len(body_text) > 180:
+        return False
+    return bool(_PART_SEPARATOR_TEXT_RE.search(body_text))
+
+
+def _is_part_title(title: str) -> bool:
+    return bool(_PART_TITLE_RE.match(title))
 
 
 def _is_frontmatter_title(title: str) -> bool:

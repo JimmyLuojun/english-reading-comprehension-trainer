@@ -11,7 +11,7 @@ def _import_forms() -> str:
     <section class="toolbar">
       <div>
         <h1>Import</h1>
-        <p class="muted">Add a TXT or EPUB file, or paste text directly. You jump straight to the reader after import.</p>
+        <p class="muted">Add a TXT, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.</p>
       </div>
     </section>
     <section class="band">
@@ -21,8 +21,8 @@ def _import_forms() -> str:
         <input id="file-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="file-author">Author (optional)</label>
         <input id="file-author" name="author">
-        <label for="file-input">TXT or EPUB file</label>
-        <input id="file-input" type="file" name="file" accept=".txt,.epub,text/plain,application/epub+zip" required>
+        <label for="file-input">TXT, EPUB, or PDF file</label>
+        <input id="file-input" type="file" name="file" accept=".txt,.epub,.pdf,text/plain,application/epub+zip,application/pdf" required>
         <button type="submit">Import file</button>
       </form>
     </section>

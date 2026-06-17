@@ -20,6 +20,7 @@ from app.db_connection import DatabaseConnection
 from app.web.config import (
     _DEFAULT_DB,
     _MAX_EPUB_IMPORT_BYTES,
+    _MAX_PDF_IMPORT_BYTES,
     _MAX_TEXT_IMPORT_BYTES,
     _MIGRATIONS,
     _PROJECT_ROOT,
@@ -38,6 +39,7 @@ from app.web.routers.review import register_review_routes
 
 __all__ = [
     "_MAX_EPUB_IMPORT_BYTES",
+    "_MAX_PDF_IMPORT_BYTES",
     "_MAX_TEXT_IMPORT_BYTES",
     "_update_word_card_analysis_id",
     "analyze_sentence",

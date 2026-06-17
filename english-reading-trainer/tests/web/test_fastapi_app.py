@@ -27,6 +27,7 @@ from tests.importers.epub_builder import (
     make_epub_with_image,
     make_epub_with_sections,
 )
+from tests.importers.pdf_builder import make_text_pdf
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
@@ -244,7 +245,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 6
+        assert count == 7
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -1390,7 +1391,7 @@ class TestReadingAndMarking:
         assert payload["ok"] is True
         assert payload["surface_form"] == "cat"
         assert payload["sentence_id"] == sentence_ids[0]
-        assert payload["active_prompt_version"] == "v3"
+        assert payload["active_prompt_version"] == "v4"
         assert payload["is_stale"] is True
         assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
         assert payload["analysis"]["chinese_meaning"] == "小型家养猫科动物"
@@ -1420,6 +1421,8 @@ class TestReadingAndMarking:
         assert 'id="analysis-sentence-sections"' in response.text
         assert "requestWordAnalysis" in response.text
         assert "markAnalysisSelection" in response.text
+        assert "context_text" in response.text
+        assert "analysisContextFromRange" in response.text
         assert "registerWordCard" in response.text
         assert "rebuildGlossaryRegex" in response.text
         assert '"X-Requested-With": "fetch"' in response.text
@@ -1567,6 +1570,8 @@ class TestReadingAndMarking:
         assert "Sentence Cards" in response.text
         assert "cat" in response.text
         assert 'id="card-' in response.text
+        assert 'data-delete-word-card="' in response.text
+        assert ">Delete</button>" in response.text
         assert "glossary_return_url" in response.text
         assert "Back to reading" in response.text
 
@@ -1635,6 +1640,58 @@ class TestReadingAndMarking:
         assert response.text.count(f'href="{source_href}"') >= 2
         assert 'data-speak-text="cat"' in response.text
 
+    def test_word_card_sources_page_adds_source_and_sets_primary(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "cat",
+                "lexical_type": "word",
+            },
+        )
+        card_id = _word_card_id(db, "cat")
+
+        response = client.get(f"/cards/word/{card_id}/sources")
+
+        assert response.status_code == 200
+        assert "Sources: cat" in response.text
+        assert "Find Occurrences" in response.text
+        assert "Primary" in response.text
+
+        response = client.post(
+            f"/cards/word/{card_id}/sources",
+            data={"sentence_id": str(sentence_ids[1])},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            card = conn.execute(
+                "SELECT occurrence_count FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+            source_id = conn.execute(
+                "SELECT id FROM word_card_sources WHERE card_id = ? AND sentence_id = ?",
+                (card_id, sentence_ids[1]),
+            ).fetchone()["id"]
+        assert card["occurrence_count"] == 2
+
+        response = client.post(
+            f"/cards/word/{card_id}/sources/{source_id}/primary",
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            card = conn.execute(
+                "SELECT first_sentence_id FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert card["first_sentence_id"] == sentence_ids[1]
+
     def test_cards_page_note_input_preserves_current_meaning(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -1664,7 +1721,7 @@ class TestReadingAndMarking:
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         import json
-        _, sentence_ids = _seed_book(db, tmp_path)
+        book_id, sentence_ids = _seed_book(db, tmp_path)
         client.post(
             "/mark/word",
             data={
@@ -1694,6 +1751,10 @@ class TestReadingAndMarking:
         assert "▶ Reveal" in response.text
         assert "hover-popover-panel" in response.text
         assert "relating to being or existence" in response.text
+        assert (
+            f'href="/read/{book_id}?chapter=1&amp;word_card={card_id}#sentence-{sentence_ids[0]}"'
+            in response.text
+        )
 
     def test_cards_page_word_note_cell_has_edit_elements(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -2165,6 +2226,7 @@ class TestImportRoutes:
         assert "/import/file" in response.text
         assert "/import/paste" in response.text
         assert ".epub" in response.text
+        assert ".pdf" in response.text
 
     def test_import_nav_link_present(self, client: TestClient) -> None:
         response = client.get("/")
@@ -2462,6 +2524,86 @@ class TestImportRoutes:
         assert response.status_code == 413
         assert "Uploaded EPUB exceeds 1 MB limit" in response.text
         assert list(tmp_path.glob("*.epub")) == []
+
+    # --- POST /import/file (PDF) ---
+
+    def test_import_pdf_file_success_redirects_to_read(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        pdf_path = make_text_pdf(tmp_path, "test.pdf", title="My PDF Book")
+        pdf_bytes = pdf_path.read_bytes()
+
+        response = client.post(
+            "/import/file",
+            files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "My PDF Book", "author": "Author One"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/read/")
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, source_format FROM books LIMIT 1").fetchone()
+        assert row["title"] == "My PDF Book"
+        assert row["source_format"] == "pdf"
+
+    def test_import_pdf_file_duplicate_returns_409(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        pdf_path = make_text_pdf(tmp_path, "dup.pdf")
+        pdf_bytes = pdf_path.read_bytes()
+
+        client.post(
+            "/import/file",
+            files={"file": ("dup.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "First", "author": ""},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/file",
+            files={"file": ("dup2.pdf", pdf_bytes, "application/pdf")},
+            data={"title": "Second", "author": ""},
+        )
+
+        assert response.status_code == 409
+        assert "Already imported" in response.text
+
+    def test_import_pdf_file_oversized_returns_413_and_removes_temp(
+        self,
+        client: TestClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import app.web.fastapi_app as fastapi_app
+
+        real_named_temporary_file = tempfile.NamedTemporaryFile
+
+        def named_temporary_file_in_tmp(*args, **kwargs):
+            kwargs["dir"] = tmp_path
+            return real_named_temporary_file(*args, **kwargs)
+
+        monkeypatch.setattr(fastapi_app, "_MAX_PDF_IMPORT_BYTES", 1024 * 1024)
+        monkeypatch.setattr(
+            fastapi_app.tempfile,
+            "NamedTemporaryFile",
+            named_temporary_file_in_tmp,
+        )
+
+        response = client.post(
+            "/import/file",
+            files={
+                "file": (
+                    "big.pdf",
+                    b"A" * (1024 * 1024 + 1),
+                    "application/pdf",
+                )
+            },
+            data={"title": "Big"},
+        )
+
+        assert response.status_code == 413
+        assert "Uploaded PDF exceeds 1 MB limit" in response.text
+        assert list(tmp_path.glob("*.pdf")) == []
 
 
 # ---------------------------------------------------------------------------

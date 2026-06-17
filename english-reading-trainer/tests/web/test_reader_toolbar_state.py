@@ -16,6 +16,7 @@ import time
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import pytest
 from fastapi.testclient import TestClient
@@ -773,7 +774,10 @@ def test_analysis_panel_ai_analysis_marks_then_returns_to_previous_analysis(
     browser: Browser,
     reader_url: str,
 ) -> None:
+    word_analysis_requests: list[dict[str, list[str]]] = []
+
     def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        word_analysis_requests.append(parse_qs(route.request.post_data or ""))
         card_id = int(route.request.url.rstrip("/").rsplit("/", 1)[-1])
         route.fulfill(
             status=200,
@@ -796,7 +800,7 @@ def test_analysis_panel_ai_analysis_marks_then_returns_to_previous_analysis(
                 },
                 "cache_id": 1,
                 "prompt_version": "v3",
-                "active_prompt_version": "v3",
+                "active_prompt_version": "v4",
                 "from_cache": False,
                 "is_stale": False,
             }),
@@ -847,6 +851,7 @@ def test_analysis_panel_ai_analysis_marks_then_returns_to_previous_analysis(
         "previousText": "Back to sentence analysis",
         "wordSectionsHidden": False,
     }
+    assert word_analysis_requests[0]["context_text"] == ["The feline rested."]
     assert restored_state == {
         "previousHidden": True,
         "simplified": "The feline rested.",
@@ -991,7 +996,7 @@ def test_word_analysis_nested_explain_can_return_to_previous_analysis(
             },
             "cache_id": calls["count"],
             "prompt_version": "v3",
-            "active_prompt_version": "v3",
+            "active_prompt_version": "v4",
             "from_cache": False,
             "is_stale": False,
         }
@@ -1094,7 +1099,7 @@ def test_word_analysis_notes_do_not_fallback_to_definition(
                 },
                 "cache_id": 1,
                 "prompt_version": "v3",
-                "active_prompt_version": "v3",
+                "active_prompt_version": "v4",
                 "from_cache": False,
                 "is_stale": False,
             }),
@@ -1119,3 +1124,66 @@ def test_word_analysis_notes_do_not_fallback_to_definition(
         "definition": "a small domestic feline",
         "note": "",
     }
+
+
+def test_word_detail_explain_saves_pending_note_before_analysis(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        card_id = int(route.request.url.rstrip("/").rsplit("/", 1)[-1])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": card_id,
+                "sentence_id": 1,
+                "lemma": "cat",
+                "surface_form": "Cat",
+                "lexical_type": "word",
+                "analysis": {
+                    "meaning_in_context": "a small domestic feline",
+                    "chinese_meaning": "猫",
+                    "register": "common",
+                    "why_this_word": "It names the animal.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "cat", "family": ["catlike"]},
+                    "predicted_error_types": ["L01"],
+                },
+                "cache_id": 1,
+                "prompt_version": "v3",
+                "active_prompt_version": "v4",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
+    for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
+        page.locator("[data-word-card]").click()
+        page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
+        page.locator("#toolbar-word-detail-note").fill("content A")
+        page.locator("#toolbar-word-detail-explain").click()
+        page.wait_for_function(
+            'document.getElementById("word-panel-note").value === "content A"'
+        )
+        notes_state = page.evaluate(
+            """() => ({
+              panelNote: document.getElementById("word-panel-note").value,
+              spanNote: document.querySelector("[data-word-card]").dataset.note,
+            })"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT user_note FROM word_cards WHERE lemma = ?",
+            ("cat",),
+        ).fetchone()
+
+    assert notes_state == {
+        "panelNote": "content A",
+        "spanNote": "content A",
+    }
+    assert row["user_note"] == "content A"

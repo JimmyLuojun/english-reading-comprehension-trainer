@@ -7,6 +7,16 @@ from typing import Any
 
 from app.web.views.layout import _escape
 
+_CHAPTER_ORDINAL_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:chapter\s+)?\d+|"
+    r"chapter\s+(?:[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty)"
+    r")(?:[\s.:)-]+)",
+    re.I,
+)
+
 def _books_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No books imported yet.</p>'
@@ -89,7 +99,7 @@ def _section_label(row: dict[str, Any]) -> str:
     return title or kind.title()
 
 def _strip_section_ordinal(title: str) -> str:
-    return re.sub(r"^\s*(?:chapter\s+)?\d+(?:[\s.:)-]+)", "", title, flags=re.I).strip()
+    return _CHAPTER_ORDINAL_RE.sub("", title).strip()
 
 def _appendix_letter(title: str) -> str:
     match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title, re.I)

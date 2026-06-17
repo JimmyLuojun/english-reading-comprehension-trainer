@@ -39,13 +39,14 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{_note_edit_cell(card)}</td>"
         f"<td>{_ai_meaning_cell(card)}</td>"
         f"<td>{_source_link(card.get('first_book_title') or '—', card.get('source_href'))}</td>"
+        f"<td>{_word_card_actions_cell(card)}</td>"
         "</tr>"
         for card in cards
     )
     return (
         "<table><thead><tr>"
         "<th>ID</th><th>Word/Phrase</th><th>Type</th><th>State</th><th>Occ.</th>"
-        "<th>Notes</th><th>AI Meaning</th><th>Source</th>"
+        "<th>Notes</th><th>AI Meaning</th><th>Source</th><th>Actions</th>"
         "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
@@ -95,4 +96,103 @@ def _ai_meaning_cell(card: dict[str, Any]) -> str:
         "▶ Reveal",
         f'<p class="hover-popover-text">{_escape(ai_meaning)}</p>',
         align="right",
+    )
+
+def _word_card_actions_cell(card: dict[str, Any]) -> str:
+    card_id = card["id"]
+    label = _escape(card.get("surface_form") or f"card {card_id}")
+    return (
+        '<button type="button" class="small danger word-card-delete" '
+        f'data-delete-word-card="{card_id}" data-delete-label="{label}">'
+        "Delete"
+        "</button>"
+        f' <a class="button small" href="/cards/word/{card_id}/sources">Sources</a>'
+    )
+
+
+def _word_card_sources_page(
+    card: dict[str, Any],
+    sources: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+) -> str:
+    return (
+        '<section class="toolbar">'
+        "<div>"
+        f"<h1>Sources: {_escape(card['surface_form'])}</h1>"
+        f'<p class="muted">{_escape(card["lexical_type"])} · '
+        f'{len(sources)} recorded source{"s" if len(sources) != 1 else ""}</p>'
+        "</div>"
+        '<a class="button" href="/cards">Back to Cards</a>'
+        "</section>"
+        '<section class="band">'
+        "<h2>Recorded Sources</h2>"
+        f"{_word_card_sources_table(sources)}"
+        "<h2>Find Occurrences</h2>"
+        f"{_word_card_candidates_table(card['id'], candidates)}"
+        "</section>"
+    )
+
+
+def _word_card_sources_table(sources: list[dict[str, Any]]) -> str:
+    if not sources:
+        return '<p class="empty">No recorded sources.</p>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{_source_link(source.get('book_title') or '—', source.get('source_href'))}</td>"
+        f"<td>{source['chapter_idx']}</td>"
+        f"<td>{_escape(source['sentence_text'])}</td>"
+        f"<td>{'Primary' if source['is_primary'] else _set_primary_source_form(source)}</td>"
+        "</tr>"
+        for source in sources
+    )
+    return (
+        "<table><thead><tr>"
+        "<th>Book</th><th>Chapter</th><th>Sentence</th><th>Primary</th>"
+        "</tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _word_card_candidates_table(
+    card_id: int,
+    candidates: list[dict[str, Any]],
+) -> str:
+    if not candidates:
+        return '<p class="empty">No matching sentences found.</p>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{_source_link(candidate.get('book_title') or '—', candidate.get('source_href'))}</td>"
+        f"<td>{candidate['chapter_idx']}</td>"
+        f"<td>{_escape(candidate['sentence_text'])}</td>"
+        f"<td>{_candidate_action(card_id, candidate)}</td>"
+        "</tr>"
+        for candidate in candidates
+    )
+    return (
+        "<table><thead><tr>"
+        "<th>Book</th><th>Chapter</th><th>Sentence</th><th>Action</th>"
+        "</tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _set_primary_source_form(source: dict[str, Any]) -> str:
+    return (
+        f'<form method="post" action="/cards/word/{source["card_id"]}/sources/'
+        f'{source["id"]}/primary" class="inline-form">'
+        '<button type="submit" class="small">Set primary</button>'
+        "</form>"
+    )
+
+
+def _candidate_action(card_id: int, candidate: dict[str, Any]) -> str:
+    if candidate["is_primary"]:
+        return "Primary"
+    if candidate["is_recorded"]:
+        return "Recorded"
+    return (
+        f'<form method="post" action="/cards/word/{card_id}/sources" class="inline-form">'
+        f'<input type="hidden" name="sentence_id" value="{candidate["sentence_id"]}">'
+        '<button type="submit" class="small">Add source</button>'
+        "</form>"
     )

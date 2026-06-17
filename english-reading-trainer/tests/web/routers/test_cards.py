@@ -16,3 +16,6 @@ def test_register_card_routes_adds_card_endpoints() -> None:
     assert ("DELETE", "/mark/word/{card_id}") in paths
     assert ("PATCH", "/mark/word/{card_id}") in paths
     assert ("GET", "/cards") in paths
+    assert ("GET", "/cards/word/{card_id}/sources") in paths
+    assert ("POST", "/cards/word/{card_id}/sources") in paths
+    assert ("POST", "/cards/word/{card_id}/sources/{source_id}/primary") in paths

@@ -18,6 +18,7 @@ from typing import Optional
 class SourceFormat(str, Enum):
     TXT  = "txt"
     EPUB = "epub"
+    PDF  = "pdf"
 
 
 class SectionKind(str, Enum):

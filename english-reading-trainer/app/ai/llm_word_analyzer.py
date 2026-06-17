@@ -14,6 +14,7 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
+    WORD_ANALYSIS_SCHEMA_V4,
 )
 from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
@@ -22,12 +23,13 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PROMPT_NAME = "word_analysis"
-_PROMPT_VERSION = "v3"
+_PROMPT_VERSION = "v4"
 
 _SCHEMAS = {
     "v1": WORD_ANALYSIS_SCHEMA,
     "v2": WORD_ANALYSIS_SCHEMA_V2,
     "v3": WORD_ANALYSIS_SCHEMA_V3,
+    "v4": WORD_ANALYSIS_SCHEMA_V4,
 }
 
 _RETRY_SUFFIX = (
@@ -55,6 +57,7 @@ def analyze_word(
     surface_form: str,
     sentence_text: str,
     context: str = "",
+    learner_note: str = "",
     related_cards: str = "",
     learner_profile: str = "",
     model: str | None = None,
@@ -74,9 +77,11 @@ def analyze_word(
     """
     model = get_ai_provider_settings(model).model
     # Include surface_form in hash so same word in different sentences
-    # can share a cache entry, but explicit context changes produce new ones.
+    # can share a cache entry, but explicit context or learner-note changes
+    # produce new entries.
     content_hash = compute_content_hash(
-        surface_form + " | " + sentence_text, context
+        surface_form + " | " + sentence_text,
+        "\n\n".join([context, f"LEARNER NOTE: {learner_note}"]),
     )
 
     cached = get_cached(db, content_hash, prompt_version, model)
@@ -94,6 +99,7 @@ def analyze_word(
         "surface_form":   surface_form,
         "sentence":       sentence_text,
         "context":        context or "(none)",
+        "learner_note":   learner_note or "(none)",
         "related_cards":  related_cards or "(none)",
         "learner_profile": learner_profile or "(none)",
     })

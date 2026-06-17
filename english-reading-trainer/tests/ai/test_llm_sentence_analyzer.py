@@ -114,6 +114,24 @@ class TestRender:
         assert _render(template, {}) == template
 
 
+def test_analyze_sentence_defaults_to_sentence_model(
+    db: DatabaseConnection,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("TRAINER_SENTENCE_MODEL", raising=False)
+    monkeypatch.delenv("TRAINER_PRO_MODEL", raising=False)
+    monkeypatch.setattr(
+        "app.ai.ai_provider_config._DEFAULT_ENV_FILE",
+        tmp_path / "missing.env",
+    )
+
+    with _mock_llm([_VALID_RESPONSE]) as mock:
+        analyze_sentence(db, _SENTENCE)
+
+    assert mock.call_args.args[1] == "deepseek-v4-pro"
+
+
 # ---------------------------------------------------------------------------
 # analyze_sentence — cache hit
 # ---------------------------------------------------------------------------

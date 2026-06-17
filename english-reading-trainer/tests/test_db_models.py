@@ -103,6 +103,7 @@ class TestEnumerations:
     def test_source_format_values(self) -> None:
         assert SourceFormat.TXT.value == "txt"
         assert SourceFormat.EPUB.value == "epub"
+        assert SourceFormat.PDF.value == "pdf"
 
     def test_lexical_type_values(self) -> None:
         assert LexicalType.WORD.value == "word"
@@ -125,5 +126,5 @@ class TestEnumerations:
 
     def test_error_layer_values(self) -> None:
         expected = {"grammar", "lexical", "discourse"}
-        actual = {l.value for l in ErrorLayer}
+        actual = {layer.value for layer in ErrorLayer}
         assert actual == expected

@@ -9,12 +9,18 @@ from pathlib import Path
 import pytest
 
 from app.cards.word_card_service import (
+    WordCardSourceNotFoundError,
+    add_word_card_source,
     WordCardNotFoundError,
     archive_word_card,
     create_or_update_word_card,
+    find_word_card_occurrence_candidates,
     get_word_card,
     get_word_card_by_lemma,
+    list_word_card_sources,
     list_word_cards,
+    record_word_card_source,
+    set_primary_word_card_source,
     update_word_card_note,
 )
 from app.db_connection import DatabaseConnection
@@ -183,7 +189,9 @@ class TestUpdateWordCard:
         card_id2, _ = create_or_update_word_card(db, sid, "claim")
         assert card_id1 == card_id2
 
-    def test_occurrence_count_incremented(self, db: DatabaseConnection) -> None:
+    def test_repeated_same_sentence_does_not_increment_occurrence_count(
+        self, db: DatabaseConnection
+    ) -> None:
         sid = _seed_sentence(db, "n")
         card_id, _ = create_or_update_word_card(db, sid, "claim")
         create_or_update_word_card(db, sid, "claim")
@@ -191,18 +199,20 @@ class TestUpdateWordCard:
             row = conn.execute(
                 "SELECT occurrence_count FROM word_cards WHERE id = ?", (card_id,)
             ).fetchone()
-        assert row["occurrence_count"] == 2
+        assert row["occurrence_count"] == 1
 
-    def test_three_occurrences(self, db: DatabaseConnection) -> None:
+    def test_different_sentences_increment_occurrence_count(
+        self, db: DatabaseConnection
+    ) -> None:
         sid = _seed_sentence(db, "o")
+        sid2 = _seed_sentence(db, "o2")
         card_id, _ = create_or_update_word_card(db, sid, "argue")
-        for _ in range(2):
-            create_or_update_word_card(db, sid, "argue")
+        create_or_update_word_card(db, sid2, "argue")
         with db.get_connection() as conn:
             row = conn.execute(
                 "SELECT occurrence_count FROM word_cards WHERE id = ?", (card_id,)
             ).fetchone()
-        assert row["occurrence_count"] == 3
+        assert row["occurrence_count"] == 2
 
     def test_case_insensitive_deduplication(self, db: DatabaseConnection) -> None:
         sid = _seed_sentence(db, "p")
@@ -283,9 +293,12 @@ class TestListWordCards:
 
     def test_ordered_by_occurrence_desc(self, db: DatabaseConnection) -> None:
         sid = _seed_sentence(db, "x")
+        sid2 = _seed_sentence(db, "x2")
+        sid3 = _seed_sentence(db, "x3")
+        sid4 = _seed_sentence(db, "x4")
         create_or_update_word_card(db, sid, "frequent")
-        for _ in range(3):
-            create_or_update_word_card(db, sid, "frequent")
+        for next_sid in (sid2, sid3, sid4):
+            create_or_update_word_card(db, next_sid, "frequent")
         create_or_update_word_card(db, sid, "rare")
         cards = list_word_cards(db)
         assert cards[0]["lemma"] == "frequent"
@@ -345,12 +358,107 @@ class TestListWordCards:
             )
         cards = list_word_cards(db)
         assert cards[0]["ai_meaning"] == "basic and elementary"
+        assert (
+            cards[0]["source_href"]
+            == f"/read/{cards[0]['source_book_id']}?chapter=1&word_card={card_id}#sentence-{sid}"
+        )
 
     def test_ai_meaning_none_when_no_analysis(self, db: DatabaseConnection) -> None:
         sid = _seed_sentence(db, "no-ai")
         create_or_update_word_card(db, sid, "ontological")
         cards = list_word_cards(db)
         assert cards[0]["ai_meaning"] is None
+
+
+class TestWordCardSources:
+    def test_create_records_primary_source(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "source-record")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        sources = list_word_card_sources(db, card_id)
+
+        assert len(sources) == 1
+        assert sources[0]["sentence_id"] == sid
+        assert sources[0]["is_primary"] == 1
+        assert sources[0]["source_href"].endswith(f"#sentence-{sid}")
+
+    def test_record_source_returns_false_for_duplicate(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-duplicate")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        inserted = record_word_card_source(db, card_id, sid, "Mitigate")
+
+        assert inserted is False
+        assert len(list_word_card_sources(db, card_id)) == 1
+
+    def test_add_source_increments_occurrence_count(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-add-a")
+        sid2 = _seed_sentence(db, "source-add-b")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        inserted = add_word_card_source(db, card_id, sid2)
+
+        assert inserted is True
+        with db.get_connection() as conn:
+            count = conn.execute(
+                "SELECT occurrence_count FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["occurrence_count"]
+        assert count == 2
+
+    def test_find_occurrence_candidates_marks_recorded_and_primary(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-candidate-a")
+        sid2 = _seed_sentence(db, "source-candidate-b")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentences SET text = 'This can mitigate risk.' WHERE id = ?",
+                (sid,),
+            )
+            conn.execute(
+                "UPDATE sentences SET text = 'Mitigate the issue.' WHERE id = ?",
+                (sid2,),
+            )
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        candidates = find_word_card_occurrence_candidates(db, card_id)
+
+        by_id = {candidate["sentence_id"]: candidate for candidate in candidates}
+        assert by_id[sid]["is_recorded"] == 1
+        assert by_id[sid]["is_primary"] == 1
+        assert by_id[sid2]["is_recorded"] == 0
+
+    def test_set_primary_updates_first_sentence_id(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-primary-a")
+        sid2 = _seed_sentence(db, "source-primary-b")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+        add_word_card_source(db, card_id, sid2)
+        source_id = [
+            source for source in list_word_card_sources(db, card_id)
+            if source["sentence_id"] == sid2
+        ][0]["id"]
+
+        set_primary_word_card_source(db, card_id, source_id)
+
+        card = get_word_card(db, card_id)
+        assert card is not None
+        assert card["first_sentence_id"] == sid2
+        sources = list_word_card_sources(db, card_id)
+        assert [source for source in sources if source["is_primary"]][0]["id"] == source_id
+
+    def test_set_primary_missing_source_raises(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "source-missing")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+
+        with pytest.raises(WordCardSourceNotFoundError):
+            set_primary_word_card_source(db, card_id, 99999)
 
 
 class TestArchiveWordCard:

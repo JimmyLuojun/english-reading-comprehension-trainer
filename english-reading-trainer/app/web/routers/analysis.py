@@ -15,6 +15,11 @@ from app.web.queries import (
 )
 from app.web.services.analysis import analyze_sentence_for_reader, analyze_word_card_for_reader
 
+
+def _truthy_form_value(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
     @web_app.get("/analysis/sentence/{sentence_id}")
     def get_sentence_analysis(sentence_id: int) -> JSONResponse:
@@ -40,6 +45,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             db_factory(),
             sentence_id,
             user_translation=form.get("user_translation"),
+            prefer_pro=_truthy_form_value(form.get("prefer_pro")),
         )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
@@ -56,8 +62,14 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         return JSONResponse(payload)
 
     @web_app.post("/analysis/word/{card_id}")
-    async def analyze_word_endpoint(card_id: int) -> JSONResponse:
-        outcome = analyze_word_card_for_reader(db_factory(), card_id)
+    async def analyze_word_endpoint(card_id: int, request: Request) -> JSONResponse:
+        form = await _read_form(request)
+        outcome = analyze_word_card_for_reader(
+            db_factory(),
+            card_id,
+            context_text=form.get("context_text", ""),
+            prefer_pro=_truthy_form_value(form.get("prefer_pro")),
+        )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
         return JSONResponse(outcome.payload)

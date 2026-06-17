@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from app.ai.ai_provider_config import get_ai_provider_settings
+from app.ai.ai_provider_config import get_ai_provider_settings, get_pro_analysis_model
 from app.ai.analysis_saver import save_sentence_analysis
 from app.cards.sentence_card_service import save_sentence_translation
 from app.cards.word_card_service import get_word_card
@@ -45,6 +45,7 @@ def analyze_sentence_for_reader(
     sentence_id: int,
     *,
     user_translation: str | None,
+    prefer_pro: bool = False,
 ) -> AnalysisOutcome:
     """Analyze a sentence, save the result, and return its reader payload."""
     import app.web.fastapi_app as fastapi_app
@@ -58,6 +59,7 @@ def analyze_sentence_for_reader(
             db,
             sentence["text"],
             user_translation=sentence.get("user_translation") or None,
+            model=get_pro_analysis_model() if prefer_pro else None,
         )
         if not result.is_valid:
             return AnalysisOutcome(
@@ -94,6 +96,9 @@ def analyze_sentence_for_reader(
 def analyze_word_card_for_reader(
     db: DatabaseConnection,
     card_id: int,
+    *,
+    context_text: str = "",
+    prefer_pro: bool = False,
 ) -> AnalysisOutcome:
     """Analyze a word card, attach the cache id, and return its reader payload."""
     import app.web.fastapi_app as fastapi_app
@@ -107,6 +112,9 @@ def analyze_word_card_for_reader(
             db,
             surface_form=card["surface_form"],
             sentence_text=sentence["text"],
+            context=context_text.strip(),
+            learner_note=(card.get("user_note") or "").strip(),
+            model=get_pro_analysis_model() if prefer_pro else None,
             allow_stale=False,
         )
         if not result.is_valid:

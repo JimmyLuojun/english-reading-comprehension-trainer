@@ -55,3 +55,48 @@ def test_import_epub_file_maps_import_errors(monkeypatch, tmp_path: Path) -> Non
 
     assert outcome.error == "bad epub"
     assert outcome.status_code == 400
+
+
+def test_import_pdf_file_maps_duplicate_to_existing_book(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "dup.pdf"
+    pdf_path.write_bytes(b"%PDF")
+
+    monkeypatch.setattr(imports, "calculate_pdf_file_hash", lambda path: "hash")
+
+    def raise_duplicate(*args, **kwargs):
+        raise imports.EpubDuplicateBookError()
+
+    monkeypatch.setattr(imports, "import_pdf", raise_duplicate)
+    monkeypatch.setattr(imports, "_lookup_book_id_by_hash", lambda db, file_hash: 55)
+
+    outcome = imports.import_pdf_file(
+        object(),
+        pdf_path,
+        form_title="",
+        author="",
+    )
+
+    assert outcome.duplicate_book_id == 55
+    assert outcome.status_code == 409
+
+
+def test_import_pdf_file_maps_import_errors(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "bad.pdf"
+    pdf_path.write_bytes(b"not really pdf")
+
+    monkeypatch.setattr(imports, "calculate_pdf_file_hash", lambda path: "hash")
+
+    def raise_value_error(*args, **kwargs):
+        raise ValueError("bad pdf")
+
+    monkeypatch.setattr(imports, "import_pdf", raise_value_error)
+
+    outcome = imports.import_pdf_file(
+        object(),
+        pdf_path,
+        form_title="",
+        author="",
+    )
+
+    assert outcome.error == "bad pdf"
+    assert outcome.status_code == 400

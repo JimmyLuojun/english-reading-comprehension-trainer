@@ -13,7 +13,7 @@ Pipeline per call:
 Environment variables:
   OPENAI_API_KEY   — API key (required unless using a local base_url)
   OPENAI_BASE_URL  — override endpoint (defaults to DeepSeek)
-  TRAINER_MODEL    — default model name (defaults to "deepseek-chat")
+  TRAINER_SENTENCE_MODEL — sentence model name (defaults to "deepseek-v4-pro")
 """
 
 import json
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA
-from app.ai.ai_provider_config import get_ai_provider_settings
+from app.ai.ai_provider_config import get_ai_provider_settings, get_sentence_analysis_model
 from app.ai.ai_response_cache import CachedEntry, compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
 from app.db_connection import DatabaseConnection
@@ -70,7 +70,7 @@ def analyze_sentence(
         FileNotFoundError  — prompt template not found on disk
         RuntimeError       — LLM call failed (non-validation error)
     """
-    model = get_ai_provider_settings(model).model
+    model = get_sentence_analysis_model(model)
     cleaned_translation = _clean_optional_translation(user_translation)
     content_hash = compute_content_hash(sentence_text, context, cleaned_translation)
 

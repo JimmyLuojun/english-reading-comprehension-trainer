@@ -7,7 +7,6 @@ All tests use real SQLite — no mocking.
 """
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
 from tests.importers.epub_builder import make_epub, make_epub_with_sections
+from tests.importers.pdf_builder import make_empty_pdf, make_text_pdf
 
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 runner = CliRunner()
@@ -106,7 +106,7 @@ class TestBooksList:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 6
+        assert count == 7
         assert active_count == 4
 
     def test_shows_imported_book(self, db: DatabaseConnection, tmp_path: Path) -> None:
@@ -182,6 +182,61 @@ class TestImportEpubCmd:
     def test_missing_file_exits_with_error(self, db: DatabaseConnection, tmp_path: Path) -> None:
         result = runner.invoke(app, ["books", "import", "epub", str(tmp_path / "no.epub")])
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# books import pdf
+# ---------------------------------------------------------------------------
+
+class TestImportPdfCmd:
+    def test_successful_import(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        pdf = make_text_pdf(tmp_path, "test.pdf", title="PDF Book", author="Author")
+
+        result = runner.invoke(app, ["books", "import", "pdf", str(pdf)])
+
+        assert result.exit_code == 0
+        assert "PDF Book" in result.output
+        assert "sentences" in result.output
+
+    def test_override_title(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        pdf = make_text_pdf(tmp_path, "test2.pdf")
+
+        result = runner.invoke(
+            app, ["books", "import", "pdf", str(pdf), "--title", "Custom PDF"]
+        )
+
+        assert result.exit_code == 0
+        assert "Custom PDF" in result.output
+
+    def test_duplicate_import_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        pdf = make_text_pdf(tmp_path, "dup.pdf")
+        runner.invoke(app, ["books", "import", "pdf", str(pdf), "--title", "First"])
+
+        result = runner.invoke(app, ["books", "import", "pdf", str(pdf), "--title", "Second"])
+
+        assert result.exit_code != 0
+        assert "already imported" in result.output.lower() or "skip" in result.output.lower()
+
+    def test_missing_file_exits_with_error(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["books", "import", "pdf", str(tmp_path / "no.pdf")])
+
+        assert result.exit_code != 0
+
+    def test_empty_text_pdf_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        pdf = make_empty_pdf(tmp_path)
+
+        result = runner.invoke(app, ["books", "import", "pdf", str(pdf)])
+
+        assert result.exit_code != 0
+        assert "no extractable text" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -377,12 +432,14 @@ class TestMarkWord:
         )
         assert result.exit_code != 0
 
-    def test_duplicate_increments_occurrence(self, db: DatabaseConnection, tmp_path: Path) -> None:
+    def test_duplicate_reports_existing_source_handling(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
         _, sid = _seed_book_and_sentence(db, tmp_path)
         runner.invoke(app, ["mark", "word", str(sid), "cat"])
         result = runner.invoke(app, ["mark", "word", str(sid), "cat"])
         assert result.exit_code == 0
-        assert "increment" in result.output.lower() or "occurrence" in result.output.lower()
+        assert "source recorded" in result.output.lower()
 
     def test_missing_sentence_exits_with_error(self, db: DatabaseConnection) -> None:
         result = runner.invoke(app, ["mark", "word", "9999", "word"])
@@ -424,7 +481,7 @@ class TestCardsSentences:
         result = runner.invoke(app, ["cards", "sentences", "--limit", "2"])
         assert result.exit_code == 0
         # Only 2 data rows (plus header)
-        lines = [l for l in result.output.splitlines() if "new" in l]
+        lines = [line for line in result.output.splitlines() if "new" in line]
         assert len(lines) <= 2
 
 

@@ -9,7 +9,10 @@ def test_import_forms_expose_file_and_paste_flows() -> None:
     html = _import_forms()
 
     assert 'action="/import/file"' in html
-    assert 'accept=".txt,.epub,text/plain,application/epub+zip"' in html
+    assert ".txt" in html
+    assert ".epub" in html
+    assert ".pdf" in html
+    assert "application/pdf" in html
     assert 'action="/import/paste"' in html
 
 

@@ -1,4 +1,4 @@
-"""Browser script for card note editing and pronunciation."""
+"""Browser script for card note editing, deletion, and pronunciation."""
 
 from __future__ import annotations
 
@@ -39,6 +39,26 @@ def _def_edit_script() -> str:
     utterance.voice = pronunciationVoice || pickPronunciationVoice();
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
+  }
+
+  function deleteWordCard(button) {
+    var cardId = button.dataset.deleteWordCard;
+    if (!cardId) return;
+    var label = button.dataset.deleteLabel || 'this word card';
+    if (!window.confirm('Delete "' + label + '" from Cards?')) return;
+    button.disabled = true;
+    button.textContent = 'Deleting...';
+    fetch('/mark/word/' + encodeURIComponent(cardId) + '?return_to=/cards', {
+      method: 'DELETE'
+    }).then(function (response) {
+      if (!response.ok) throw new Error('Delete failed');
+      var row = button.closest('tr');
+      if (row) row.remove();
+    }).catch(function () {
+      button.disabled = false;
+      button.textContent = 'Delete';
+      window.alert('Could not delete this word card.');
+    });
   }
 
   if (supportsSpeech()) {
@@ -87,6 +107,12 @@ def _def_edit_script() -> str:
     if (speakButton) {
       e.preventDefault();
       speakText(speakButton.dataset.speakText || '');
+      return;
+    }
+    var deleteButton = target.closest ? target.closest('button[data-delete-word-card]') : null;
+    if (deleteButton) {
+      e.preventDefault();
+      deleteWordCard(deleteButton);
       return;
     }
     if (target.classList.contains('note-text') || target.classList.contains('note-edit-btn')) {

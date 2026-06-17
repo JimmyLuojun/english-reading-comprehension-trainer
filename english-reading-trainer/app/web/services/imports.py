@@ -9,6 +9,7 @@ from pathlib import Path
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import DuplicateBookError as EpubDuplicateBookError
 from app.importers.epub_importer import calculate_epub_file_hash, import_epub
+from app.importers.pdf_importer import calculate_pdf_file_hash, import_pdf
 from app.importers.txt_importer import DuplicateBookError, import_text
 from app.web.queries import _lookup_book_id_by_hash
 from app.web.utils import _resolve_title
@@ -62,6 +63,30 @@ def import_epub_file(
     try:
         file_hash = calculate_epub_file_hash(file_path)
         result = import_epub(
+            db,
+            file_path,
+            title=form_title.strip() or None,
+            author=author.strip() or None,
+        )
+    except EpubDuplicateBookError:
+        existing_id = _lookup_book_id_by_hash(db, file_hash)
+        return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
+    except (ValueError, FileNotFoundError) as exc:
+        return ImportOutcome(error=str(exc), status_code=400)
+    return ImportOutcome(book_id=result.book_id)
+
+
+def import_pdf_file(
+    db: DatabaseConnection,
+    file_path: str | Path,
+    *,
+    form_title: str,
+    author: str,
+) -> ImportOutcome:
+    """Import a PDF file and return a routing-neutral outcome."""
+    try:
+        file_hash = calculate_pdf_file_hash(file_path)
+        result = import_pdf(
             db,
             file_path,
             title=form_title.strip() or None,

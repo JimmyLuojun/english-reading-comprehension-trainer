@@ -10,5 +10,9 @@ def test_css_contains_reader_and_popover_selectors() -> None:
 
     assert ".reader-sentence" in css
     assert ".hover-popover-panel" in css
+    assert "bottom: calc(100% + 8px)" in css
+    assert "right: 0" in css
     assert ".analysis-panel" in css
+    assert "#toolbar-analysis-word-status" in css
     assert ".speak-button" in css
+    assert ".word-card-delete" in css

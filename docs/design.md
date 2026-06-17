@@ -75,6 +75,7 @@
 
 - [PDF import ADR](decisions/2026-06-17-pdf-import.md)：PDF 归一化为句子锚点，不做 PDF viewer 主路径。
 - [FastAPI web split ADR](decisions/2026-06-17-fastapi-web-split.md)：Web UI 按 routes / queries / views 拆分。
+- [DeepSeek V4 model routing ADR](decisions/2026-06-17-deepseek-v4-model-routing.md)：普通分析默认 Flash，句子分析和手动 Pro 重分析使用 Pro。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。

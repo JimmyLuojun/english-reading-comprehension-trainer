@@ -28,7 +28,6 @@ Usage examples:
 
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -47,6 +46,7 @@ from app.cards.word_card_service import (
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
 from app.importers.epub_importer import import_epub
+from app.importers.pdf_importer import import_pdf
 from app.importers.txt_importer import DuplicateBookError, import_txt
 from app.profile.learner_profile_generator import (
     ProfileInputError,
@@ -133,7 +133,7 @@ def books_list() -> None:
 
 
 # ---------------------------------------------------------------------------
-# books import txt / epub
+# books import txt / epub / pdf
 # ---------------------------------------------------------------------------
 
 @import_app.command("txt")
@@ -176,6 +176,44 @@ def import_epub_cmd(
     try:
         result = import_epub(
             db, path,
+            title=title or None,
+            author=author or None,
+            language=language,
+        )
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except DuplicateBookError as e:
+        typer.echo(f"Skipped (already imported): {e}", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT title, author FROM books WHERE id = ?", (result.book_id,)
+        ).fetchone()
+    typer.echo(
+        f"Imported '{row['title']}' by {row['author'] or '(unknown)'} "
+        f"(book id={result.book_id}): "
+        f"{result.chapter_count} chapters, {result.sentence_count} sentences."
+    )
+
+
+@import_app.command("pdf")
+def import_pdf_cmd(
+    path: Path = typer.Argument(..., help="Path to .pdf file"),
+    title: str = typer.Option("", "--title", "-t", help="Override title from PDF metadata"),
+    author: str = typer.Option("", "--author", "-a", help="Override author from PDF metadata"),
+    language: str = typer.Option("en", "--language", "-l", help="Language code"),
+) -> None:
+    """Import a selectable-text PDF book."""
+    db = _get_db()
+    try:
+        result = import_pdf(
+            db,
+            path,
             title=title or None,
             author=author or None,
             language=language,
@@ -417,7 +455,7 @@ def mark_word(
     else:
         typer.echo(
             f"Word already tracked (id={card_id}): "
-            f"'{surface_form}' — occurrence count incremented."
+            f"'{surface_form}' — source recorded if this location is new."
         )
     typer.echo(f"  From: \"{sent_row['text'][:80]}\"")
 

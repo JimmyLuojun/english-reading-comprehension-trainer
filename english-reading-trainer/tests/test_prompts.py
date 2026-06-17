@@ -29,6 +29,7 @@ PROMPT_FILES = {
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
+WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 
 # Required template variables per prompt
 REQUIRED_VARS = {
@@ -110,7 +111,11 @@ class TestPromptFilesExist:
             f"{name} is {size} bytes — exceeds {MAX_PROMPT_BYTES} byte limit"
         )
 
-    def test_current_word_prompt_v3_exists(self) -> None:
+    def test_current_word_prompt_v4_exists(self) -> None:
+        assert WORD_ANALYSIS_V4.exists()
+        assert WORD_ANALYSIS_V4.stat().st_size <= MAX_PROMPT_BYTES
+
+    def test_historical_word_prompt_v3_exists(self) -> None:
         assert WORD_ANALYSIS_V3.exists()
         assert WORD_ANALYSIS_V3.stat().st_size <= MAX_PROMPT_BYTES
 
@@ -244,6 +249,13 @@ class TestJSONSchemaFieldsInPrompts:
         text = WORD_ANALYSIS_V3.read_text(encoding="utf-8")
         assert "version: v3" in text
         assert "chinese_meaning" in text
+
+    def test_word_prompt_v4_contains_learner_note_check(self) -> None:
+        text = WORD_ANALYSIS_V4.read_text(encoding="utf-8")
+        assert "{{ learner_note }}" in text
+        assert "learner_note_check" in text
+        assert "not_provided" in text
+        assert "Do not let the learner note override" in text
 
 
 # ---------------------------------------------------------------------------

@@ -295,6 +295,9 @@ def _css() -> str:
       font-size: 14px;
       white-space: nowrap;
     }
+    #toolbar-analysis-word-status {
+      flex-basis: 100%;
+    }
     .word-detail-panel {
       display: grid;
       gap: 8px;
@@ -638,7 +641,9 @@ def _css() -> str:
       white-space: normal;
     }
     .hover-popover-right .hover-popover-panel {
+      top: auto;
       right: 0;
+      bottom: calc(100% + 8px);
       left: auto;
     }
     .hover-popover:hover .hover-popover-panel,
@@ -689,4 +694,11 @@ def _css() -> str:
     .note-edit-btn { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0 2px; opacity: 0.5; }
     .note-edit-btn:hover { opacity: 1; color: var(--accent); }
     .note-input { border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; font: inherit; font-size: 13px; min-width: 140px; }
+    .word-card-delete {
+      min-width: 64px;
+    }
+    .word-card-delete[disabled] {
+      cursor: progress;
+      opacity: 0.65;
+    }
     """

@@ -216,6 +216,8 @@ def _word_due_sql() -> str:
             COALESCE(b.title, '') AS source_book_title,
             CASE
                 WHEN s.id IS NULL OR c.idx IS NULL THEN ''
+                WHEN wc.ai_analysis_id IS NOT NULL
+                  THEN '/read/' || s.book_id || '?chapter=' || c.idx || '&word_card=' || wc.id || '#sentence-' || s.id
                 ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
             END AS source_href,
             (

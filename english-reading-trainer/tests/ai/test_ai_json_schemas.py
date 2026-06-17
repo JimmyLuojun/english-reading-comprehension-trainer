@@ -13,6 +13,7 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
+    WORD_ANALYSIS_SCHEMA_V4,
 )
 from app.db_models import VALID_ERROR_CODES
 
@@ -83,6 +84,15 @@ VALID_WORD_V2 = {
 VALID_WORD_V3 = {
     **VALID_WORD_V2,
     "chinese_meaning": "减轻不良影响",
+}
+
+VALID_WORD_V4 = {
+    **VALID_WORD_V3,
+    "learner_note_check": {
+        "status": "correct",
+        "feedback": "你的理解正确。",
+        "corrected_understanding": "",
+    },
 }
 
 
@@ -428,3 +438,38 @@ class TestWordSchemaV3InvalidInstances:
     def test_v2_word_rejected_by_v3_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate(VALID_WORD_V2, WORD_ANALYSIS_SCHEMA_V3)
+
+
+# ---------------------------------------------------------------------------
+# WORD_ANALYSIS_SCHEMA_V4
+# ---------------------------------------------------------------------------
+
+class TestWordSchemaV4Structure:
+    def test_v4_schema_is_dict(self) -> None:
+        assert isinstance(WORD_ANALYSIS_SCHEMA_V4, dict)
+
+    def test_v4_requires_learner_note_check(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V4["required"]
+        assert "learner_note_check" in required
+        assert "learner_note_check" in WORD_ANALYSIS_SCHEMA_V4["properties"]
+
+    def test_v4_preserves_v3_chinese_meaning(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V4["required"]
+        assert "chinese_meaning" in required
+        assert "chinese_meaning" in WORD_ANALYSIS_SCHEMA_V4["properties"]
+
+
+class TestWordSchemaV4ValidInstances:
+    def test_valid_v4_word_passes(self) -> None:
+        _validate(VALID_WORD_V4, WORD_ANALYSIS_SCHEMA_V4)
+
+
+class TestWordSchemaV4InvalidInstances:
+    def test_missing_learner_note_check_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_WORD_V4.items() if k != "learner_note_check"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V4)
+
+    def test_v3_word_rejected_by_v4_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_WORD_V3, WORD_ANALYSIS_SCHEMA_V4)

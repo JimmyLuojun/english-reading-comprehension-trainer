@@ -77,6 +77,11 @@ __pycache__/
 .venv/
 venv/
 
+# Local application data
+english-reading-trainer/data/*.db
+english-reading-trainer/data/*.db-*
+english-reading-trainer/data/assets/
+
 # =============================================================================
 # BUILD OUTPUTS
 # =============================================================================

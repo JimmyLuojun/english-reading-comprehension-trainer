@@ -4,17 +4,6 @@ CREATE TABLE schema_migrations (
                     applied_at  TEXT    NOT NULL
                 );
 CREATE TABLE sqlite_sequence(name,seq);
-CREATE TABLE books (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    title           TEXT    NOT NULL,
-    author          TEXT    NOT NULL DEFAULT '',
-    language        TEXT    NOT NULL DEFAULT 'en',
-    source_format   TEXT    NOT NULL CHECK(source_format IN ('txt', 'epub')),
-    file_hash       TEXT    NOT NULL UNIQUE,
-    imported_at     TEXT    NOT NULL,   -- ISO-8601
-    total_chapters  INTEGER NOT NULL DEFAULT 0,
-    total_sentences INTEGER NOT NULL DEFAULT 0
-);
 CREATE TABLE chapters (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -201,3 +190,31 @@ CREATE INDEX idx_chapter_blocks_book
     ON chapter_blocks(book_id);
 CREATE INDEX idx_chapter_blocks_chapter
     ON chapter_blocks(chapter_id, idx);
+CREATE TABLE IF NOT EXISTS "books" (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    title           TEXT    NOT NULL,
+    author          TEXT    NOT NULL DEFAULT '',
+    language        TEXT    NOT NULL DEFAULT 'en',
+    source_format   TEXT    NOT NULL CHECK(source_format IN ('txt', 'epub', 'pdf')),
+    file_hash       TEXT    NOT NULL UNIQUE,
+    imported_at     TEXT    NOT NULL,
+    total_chapters  INTEGER NOT NULL DEFAULT 0,
+    total_sentences INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE word_card_sources (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
+    sentence_id     INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+    surface_form    TEXT    NOT NULL,
+    source_key      TEXT    NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0, 1)),
+    created_at      TEXT    NOT NULL,
+    UNIQUE(card_id, sentence_id, source_key)
+);
+CREATE INDEX idx_word_card_sources_card
+    ON word_card_sources(card_id);
+CREATE INDEX idx_word_card_sources_sentence
+    ON word_card_sources(sentence_id);
+CREATE UNIQUE INDEX idx_word_card_sources_one_primary
+    ON word_card_sources(card_id)
+    WHERE is_primary = 1;

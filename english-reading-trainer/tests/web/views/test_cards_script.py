@@ -11,3 +11,12 @@ def test_def_edit_script_contains_note_edit_contracts() -> None:
     assert "note-edit-btn" in script
     assert "PATCH" in script
     assert "user_note" in script
+
+
+def test_def_edit_script_contains_word_delete_contracts() -> None:
+    script = _def_edit_script()
+
+    assert "data-delete-word-card" in script
+    assert "DELETE" in script
+    assert "/mark/word/" in script
+    assert "row.remove()" in script

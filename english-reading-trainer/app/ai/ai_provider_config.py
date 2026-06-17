@@ -13,8 +13,16 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_ENV_FILE = _PROJECT_ROOT / ".env"
 _DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
-_DEFAULT_MODEL = "deepseek-chat"
-_ENV_KEYS = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "TRAINER_MODEL")
+_DEFAULT_MODEL = "deepseek-v4-flash"
+_DEFAULT_SENTENCE_MODEL = "deepseek-v4-pro"
+_DEFAULT_PRO_MODEL = "deepseek-v4-pro"
+_ENV_KEYS = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "TRAINER_MODEL",
+    "TRAINER_SENTENCE_MODEL",
+    "TRAINER_PRO_MODEL",
+)
 
 
 @dataclass(frozen=True)
@@ -63,3 +71,20 @@ def get_ai_provider_settings(model: str | None = None) -> AIProviderSettings:
         base_url=os.environ.get("OPENAI_BASE_URL", _DEFAULT_BASE_URL),
         model=model or os.environ.get("TRAINER_MODEL", _DEFAULT_MODEL),
     )
+
+
+def get_sentence_analysis_model(model: str | None = None) -> str:
+    """Return the model used for sentence-level AI diagnosis."""
+    load_ai_provider_env()
+    return (
+        model
+        or os.environ.get("TRAINER_SENTENCE_MODEL")
+        or os.environ.get("TRAINER_PRO_MODEL")
+        or _DEFAULT_SENTENCE_MODEL
+    )
+
+
+def get_pro_analysis_model(model: str | None = None) -> str:
+    """Return the high-accuracy model for explicit Pro reanalysis."""
+    load_ai_provider_env()
+    return model or os.environ.get("TRAINER_PRO_MODEL", _DEFAULT_PRO_MODEL)
