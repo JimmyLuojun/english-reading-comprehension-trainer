@@ -138,6 +138,118 @@ def test_analyze_word_card_for_reader_uses_pro_model_when_requested(monkeypatch)
     assert captured["model"] == "deepseek-test-pro"
 
 
+def test_analyze_word_card_for_reader_falls_back_to_saved_payload_on_invalid_response(
+    monkeypatch,
+) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 10,
+            "surface_form": "cat",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": ""},
+    )
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_word",
+        lambda *args, **kwargs: SimpleNamespace(is_valid=False),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"ok": True, "card_id": card_id, "is_stale": False},
+    )
+
+    outcome = analysis.analyze_word_card_for_reader(object(), 1)
+
+    assert outcome.is_error is False
+    assert outcome.payload["is_stale"] is True
+    assert outcome.payload["from_cache"] is True
+    assert outcome.payload["retry"] is True
+    assert "failed validation" in outcome.payload["warning"]
+
+
+def test_analyze_word_card_for_reader_keeps_502_without_saved_payload_on_invalid_response(
+    monkeypatch,
+) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 10,
+            "surface_form": "cat",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": ""},
+    )
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_word",
+        lambda *args, **kwargs: SimpleNamespace(is_valid=False),
+    )
+    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", lambda db, card_id: None)
+
+    outcome = analysis.analyze_word_card_for_reader(object(), 1)
+
+    assert outcome.status_code == 502
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "AI response failed validation.",
+        "retry": True,
+    }
+
+
+def test_analyze_word_card_for_reader_falls_back_to_saved_payload_on_runtime_error(
+    monkeypatch,
+) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 10,
+            "surface_form": "cat",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": ""},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"ok": True, "card_id": card_id, "is_stale": False},
+    )
+
+    def fail_analyze_word(*args, **kwargs):
+        raise RuntimeError("LLM call failed: timeout")
+
+    monkeypatch.setattr(fastapi_app, "analyze_word", fail_analyze_word)
+
+    outcome = analysis.analyze_word_card_for_reader(object(), 1)
+
+    assert outcome.is_error is False
+    assert outcome.payload["is_stale"] is True
+    assert outcome.payload["warning"] == "LLM call failed: timeout"
+
+
 def test_analyze_word_card_for_reader_passes_analysis_context(monkeypatch) -> None:
     import app.web.fastapi_app as fastapi_app
 

@@ -1398,6 +1398,46 @@ class TestReadingAndMarking:
         assert payload["card_id"] == card_id
         assert payload["analysis"]["lemma"] == "cat"
 
+    def test_post_word_analysis_falls_back_to_saved_payload_when_new_ai_invalid(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        from app.ai.llm_word_analyzer import WordAnalysisResult
+
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={"sentence_id": str(sentence_ids[0]), "surface_form": "cat",
+                  "lexical_type": "word", "return_to": "/cards"},
+        )
+        card_id = _word_card_id(db, "cat")
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('h_fallback', 'v1', 'test', ?, 1, '2026-01-01T00:00:00+00:00')""",
+                (json.dumps(_VALID_WORD_ANALYSIS),),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+        mock_result = WordAnalysisResult(
+            data={}, cache_id=999, from_cache=False,
+            is_stale=False, is_valid=False,
+        )
+
+        with patch("app.web.fastapi_app.analyze_word", return_value=mock_result):
+            response = client.post(f"/analysis/word/{card_id}")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["card_id"] == card_id
+        assert payload["is_stale"] is True
+        assert payload["retry"] is True
+        assert "failed validation" in payload["warning"]
+        assert payload["analysis"]["lemma"] == "cat"
+
     def test_get_word_analysis_returns_saved_payload(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:

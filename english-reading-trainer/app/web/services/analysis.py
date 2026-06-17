@@ -19,6 +19,10 @@ from app.web.queries import (
     _fetch_word_analysis_payload,
 )
 
+_WORD_ANALYSIS_FALLBACK_WARNING = (
+    "New AI response failed validation. Showing previous saved analysis."
+)
+
 
 @dataclass(frozen=True)
 class AnalysisOutcome:
@@ -93,6 +97,22 @@ def analyze_sentence_for_reader(
     return AnalysisOutcome(payload=payload)
 
 
+def _fallback_word_analysis_payload(
+    db: DatabaseConnection,
+    card_id: int,
+    *,
+    warning: str = _WORD_ANALYSIS_FALLBACK_WARNING,
+) -> dict[str, Any] | None:
+    payload = _fetch_word_analysis_payload(db, card_id)
+    if payload is None:
+        return None
+    payload["is_stale"] = True
+    payload["from_cache"] = True
+    payload["retry"] = True
+    payload["warning"] = warning
+    return payload
+
+
 def analyze_word_card_for_reader(
     db: DatabaseConnection,
     card_id: int,
@@ -118,6 +138,9 @@ def analyze_word_card_for_reader(
             allow_stale=False,
         )
         if not result.is_valid:
+            payload = _fallback_word_analysis_payload(db, card_id)
+            if payload is not None:
+                return AnalysisOutcome(payload=payload)
             return AnalysisOutcome(
                 error="AI response failed validation.",
                 status_code=502,
@@ -126,7 +149,12 @@ def analyze_word_card_for_reader(
         fastapi_app._update_word_card_analysis_id(db, card_id, result.cache_id)
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
-    except (FileNotFoundError, RuntimeError) as exc:
+    except RuntimeError as exc:
+        payload = _fallback_word_analysis_payload(db, card_id, warning=str(exc))
+        if payload is not None:
+            return AnalysisOutcome(payload=payload)
+        return AnalysisOutcome(error=str(exc), status_code=502, retry=True)
+    except FileNotFoundError as exc:
         return AnalysisOutcome(error=str(exc), status_code=502, retry=True)
 
     payload = _fetch_word_analysis_payload(db, card_id)

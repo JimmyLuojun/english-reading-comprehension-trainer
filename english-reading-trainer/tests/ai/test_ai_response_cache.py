@@ -166,6 +166,34 @@ class TestSaveToCache:
             ).fetchone()[0]
         assert count == 1
 
+    def test_valid_response_replaces_existing_invalid_row(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("invalid then valid.")
+        cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, "bad json", False)
+        cid2 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)
+
+        assert cid1 == cid2
+        result = get_cached(db, h, _PROMPT_V1, _MODEL)
+        assert result is not None
+        assert result.is_valid is True
+        assert result.data == json.loads(_SAMPLE_RESPONSE)
+
+    def test_invalid_response_does_not_replace_existing_valid_row(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("valid then invalid.")
+        cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)
+        cid2 = save_to_cache(db, h, _PROMPT_V1, _MODEL, "bad json", False)
+
+        assert cid1 == cid2
+        result = get_cached(db, h, _PROMPT_V1, _MODEL)
+        assert result is not None
+        assert result.is_valid is True
+        assert result.data == json.loads(_SAMPLE_RESPONSE)
+
     def test_different_prompt_version_creates_new_row(self, db: DatabaseConnection) -> None:
         h = compute_content_hash("version test sentence.")
         cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)

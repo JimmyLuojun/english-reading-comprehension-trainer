@@ -269,3 +269,12 @@ def test_word_analysis_renders_learner_note_check_without_overwriting_notes() ->
     assert 'status !== "not_provided"' in render_word
     assert "wordPanelNote.value = distinctUserNote" in render_word
     assert "wordPanelNote.value = check" not in render_word
+
+
+def test_word_analysis_renders_payload_warning_before_stale_message() -> None:
+    script = _selection_script()
+    render_word = script[script.index("function renderWordAnalysis"):]
+    render_word = render_word[: render_word.index("async function saveAnalysisMeaningIfEmpty")]
+
+    assert "panelStatus.textContent = payload.warning" in render_word
+    assert 'payload.is_stale ? "Analysis is stale. Reanalyze when ready."' in render_word

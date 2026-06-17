@@ -1448,7 +1448,8 @@ def _selection_script() -> str:
         setWordMode();
         openPanel();
         panelStatus.className = "analysis-status";
-        panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
+        panelStatus.textContent = payload.warning
+          || (payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "");
         panelRetry.hidden = false;
         if (panelRetryPro) panelRetryPro.hidden = false;
         panelMeta.textContent = [

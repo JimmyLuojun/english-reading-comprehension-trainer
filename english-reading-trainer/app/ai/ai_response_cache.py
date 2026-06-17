@@ -121,20 +121,26 @@ def save_to_cache(
     is_valid: bool,
 ) -> int:
     """
-    Insert a new cache entry. Returns the new row id.
+    Insert a new cache entry. Returns the cache row id.
 
-    Uses INSERT OR IGNORE on the UNIQUE(content_hash, prompt_version, model)
-    constraint so duplicate saves are silently dropped and the existing id
-    is returned instead.
+    The UNIQUE(content_hash, prompt_version, model) constraint means a failed
+    LLM attempt can occupy the same key as a later retry. Keep valid cached
+    entries stable, but allow a later valid response to replace an invalid row.
     """
     now = datetime.now(timezone.utc).isoformat()
 
     with db.get_connection() as conn:
         conn.execute(
-            """INSERT OR IGNORE INTO ai_cache
+            """INSERT INTO ai_cache
                (content_hash, prompt_version, model,
                 response_json, is_valid, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(content_hash, prompt_version, model)
+               DO UPDATE SET
+                   response_json = excluded.response_json,
+                   is_valid = excluded.is_valid,
+                   created_at = excluded.created_at
+               WHERE ai_cache.is_valid = 0""",
             (content_hash, prompt_version, model,
              response_json, 1 if is_valid else 0, now),
         )
