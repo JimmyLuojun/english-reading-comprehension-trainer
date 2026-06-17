@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.cards.similar_card_finder import (
+    SimilarSentenceMistake,
+    find_similar_sentence_mistakes,
+)
 from app.db_connection import DatabaseConnection
 from app.web.config import (
     _DEFAULT_SENTENCE_PROMPT_VERSION,
@@ -58,6 +62,10 @@ def _fetch_sentence_analysis_payload(
         db,
         row["user_translation"] or None,
     )
+    similar_mistakes = [
+        _serialize_similar_mistake(item)
+        for item in find_similar_sentence_mistakes(db, row["card_id"])
+    ]
     return {
         "ok": True,
         "sentence_id": sentence_id,
@@ -71,6 +79,7 @@ def _fetch_sentence_analysis_payload(
         "is_stale": row["prompt_version"] != active_version,
         "from_cache": True,
         "analysis": analysis,
+        "similar_mistakes": similar_mistakes,
     }
 
 
@@ -119,6 +128,21 @@ def _update_word_card_analysis_id(
             "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
             (cache_id, card_id),
         )
+
+
+def _serialize_similar_mistake(item: SimilarSentenceMistake) -> dict[str, Any]:
+    return {
+        "card_id": item.card_id,
+        "sentence_id": item.sentence_id,
+        "match_layer": item.match_layer,
+        "score": item.score,
+        "shared_error_codes": list(item.shared_error_codes),
+        "sentence_text": item.sentence_text,
+        "user_translation": item.user_translation,
+        "diagnosis_evidence": list(item.diagnosis_evidence),
+        "confidence": item.confidence,
+    }
+
 
 def _fetch_cache_metadata(
     db: DatabaseConnection,

@@ -16,8 +16,9 @@
   - 不允许"无测试合入"。新增或修改函数时同步加/改测试，测试随代码一起 commit。
   - 外部依赖（LLM 调用、SQLite 写入、文件系统、网络）默认 mock，但**数据库迁移和 SQL schema 必须用真实 SQLite 集成测试**，不能 mock。
   - 测试框架：`pytest`。覆盖率工具：`pytest-cov`，目标 ≥ 90% 行覆盖、关键模块（`sm2_scheduler` / `ai_response_cache` / `json_output_validator`）100%。
-  - 测试必须可独立运行（`pytest tests/`），不依赖外部网络或环境变量。
-  - Web 代码变更后运行 `python -m ruff check app/web`，防止拆分后遗留未使用导入、缺失名称和不清晰依赖。
+  - 本项目所有 Python 测试、ruff、脚本验证都必须使用 `english-reading-trainer/.venv/bin/python -m ...`，不要使用裸 `python`、`pytest`、`ruff`，避免跑到 miniconda base 或系统 Python。验证结果必须报告实际使用的 `sys.executable`，尤其在依赖导入失败时。
+  - 测试必须可独立运行（`english-reading-trainer/.venv/bin/python -m pytest tests/`），不依赖外部网络或环境变量。
+  - Web 代码变更后运行 `english-reading-trainer/.venv/bin/python -m ruff check app/web`，防止拆分后遗留未使用导入、缺失名称和不清晰依赖。
 
 ## Shared Memory
 

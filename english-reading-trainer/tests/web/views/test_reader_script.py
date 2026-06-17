@@ -224,6 +224,23 @@ def test_translated_sentence_double_click_shortcut_preserves_word_card_priority(
     assert "openTranslatedSentenceShortcut(sentence);" in double_click
 
 
+def test_sentence_analysis_renders_similar_past_mistakes() -> None:
+    script = _selection_script()
+    render_payload = script[script.index("function renderAnalysisPayload"):]
+    render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
+    render_similar = script[script.index("function renderSimilarMistakes"):]
+    render_similar = render_similar[: render_similar.index("function updateSentenceAnalysisState")]
+
+    assert "const ERROR_CHECK_TIPS = {" in script
+    assert "renderSimilarMistakes(payload, analysis);" in render_payload
+    assert "const mistakes = payload.similar_mistakes || [];" in render_similar
+    assert "Same diagnosed error code in an active translated Review sentence." in render_similar
+    assert "mistake.shared_error_codes || []" in render_similar
+    assert 'comparisonLine("Current", evidenceTextForCode(analysis.diagnosis_evidence, code))' in render_similar
+    assert 'comparisonLine("Past", evidenceTextForCode(mistake.diagnosis_evidence, code))' in render_similar
+    assert 'comparisonLine("Next check", tip)' in render_similar
+
+
 def test_word_detail_explain_saves_edits_before_analysis() -> None:
     script = _selection_script()
     save_helper = script[script.index("async function saveWordDetailEdits"):]

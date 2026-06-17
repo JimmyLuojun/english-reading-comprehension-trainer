@@ -518,6 +518,42 @@ def _css() -> str:
       border-color: #2563eb;
       color: #1d4ed8;
     }
+    .similar-mistakes {
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .similar-mistakes h4 {
+      margin: 0 0 4px;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .similar-mistake {
+      margin-top: 10px;
+      border: 1px solid #dbeafe;
+      border-radius: 8px;
+      padding: 10px;
+      background: #f8fafc;
+    }
+    .similar-mistake-source {
+      margin: 2px 0 0;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .similar-mistake-comparison {
+      display: grid;
+      gap: 4px;
+      margin-top: 8px;
+    }
+    .similar-mistake-line {
+      margin: 0;
+      line-height: 1.45;
+      color: var(--text);
+    }
+    .similar-mistake-line strong {
+      color: var(--muted);
+      font-weight: 600;
+    }
     .analysis-panel-actions {
       display: flex;
       gap: 8px;

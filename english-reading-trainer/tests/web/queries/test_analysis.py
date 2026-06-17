@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.ai.analysis_saver import save_sentence_analysis
 from app.cards.sentence_card_service import create_sentence_card, save_sentence_translation
 from app.cards.word_card_service import create_or_update_word_card
 from app.db_connection import DatabaseConnection
@@ -36,6 +37,18 @@ def _seed_sentence(db: DatabaseConnection, tmp_path: Path) -> int:
         ).fetchone()["id"]
 
 
+def _seed_sentences(db: DatabaseConnection, tmp_path: Path, text: str) -> list[int]:
+    source = tmp_path / "sentences.txt"
+    source.write_text(text, encoding="utf-8")
+    book = import_txt(db, source, title="Book", author="")
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM sentences WHERE book_id = ? ORDER BY idx",
+            (book.book_id,),
+        ).fetchall()
+    return [row["id"] for row in rows]
+
+
 def _insert_cache(db: DatabaseConnection, payload: dict[str, object]) -> int:
     with db.get_connection() as conn:
         return conn.execute(
@@ -44,6 +57,33 @@ def _insert_cache(db: DatabaseConnection, payload: dict[str, object]) -> int:
                VALUES ('hash', 'v1', 'model', ?, 1, '2026-06-17T00:00:00+00:00')""",
             (json.dumps(payload),),
         ).lastrowid
+
+
+def _diagnosed_payload(code: str, evidence: str) -> dict[str, object]:
+    return {
+        "subject_skeleton": "The contrast matters",
+        "clauses": [
+            {
+                "type": "main",
+                "text": "the contrast matters",
+                "role": "main predication",
+            }
+        ],
+        "modifiers": [],
+        "logic_markers": [
+            {"marker": "although", "function": "concession"},
+        ],
+        "anaphora": [],
+        "simplified_en": "The contrast matters.",
+        "chinese_gloss": "重点在对比关系。",
+        "predicted_error_types": [],
+        "diagnosis_basis": "user_translation",
+        "diagnosed_error_types": [code],
+        "diagnosis_evidence": [
+            {"error_type": code, "evidence": evidence},
+        ],
+        "confidence": 0.9,
+    }
 
 
 def test_fetch_sentence_for_analysis_and_missing_error(tmp_path: Path) -> None:
@@ -106,6 +146,51 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
 
     assert word_payload["surface_form"] == "cat"
     assert word_payload["analysis"] == {"ok": True}
+
+
+def test_sentence_analysis_payload_includes_similar_translation_mistakes(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_ids = _seed_sentences(
+        db,
+        tmp_path,
+        (
+            "Although it rained, we left. "
+            "While the premise sounds simple, the conclusion differs."
+        ),
+    )
+    save_sentence_translation(db, sentence_ids[0], "我这次误读了对比。")
+    save_sentence_translation(db, sentence_ids[1], "我之前也误读了对比。")
+    save_sentence_analysis(
+        db,
+        sentence_ids[0],
+        json.dumps(_diagnosed_payload("D02", "Current contrast evidence.")),
+    )
+    save_sentence_analysis(
+        db,
+        sentence_ids[1],
+        json.dumps(_diagnosed_payload("D02", "Past contrast evidence.")),
+    )
+
+    payload = _fetch_sentence_analysis_payload(db, sentence_ids[0])
+
+    assert payload is not None
+    assert len(payload["similar_mistakes"]) == 1
+    mistake = payload["similar_mistakes"][0]
+    assert mistake["sentence_id"] == sentence_ids[1]
+    assert mistake["match_layer"] == "error_tag"
+    assert mistake["score"] == 0.6
+    assert mistake["shared_error_codes"] == ["D02"]
+    assert mistake["sentence_text"] == (
+        "While the premise sounds simple, the conclusion differs."
+    )
+    assert mistake["user_translation"] == "我之前也误读了对比。"
+    assert mistake["diagnosis_evidence"] == [
+        {"error_type": "D02", "evidence": "Past contrast evidence."},
+    ]
+    assert mistake["confidence"] == 0.9
 
 
 def test_active_prompt_versions_fallback_when_registry_empty(tmp_path: Path) -> None:

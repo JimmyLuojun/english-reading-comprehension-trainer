@@ -22,14 +22,19 @@ Coverage areas:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
 
+from app.ai.analysis_saver import save_sentence_analysis
+from app.cards.sentence_card_service import save_sentence_translation
 from app.cards.similar_card_finder import (
     SimilarCard,
+    SimilarSentenceMistake,
     find_similar_cards_for_word_card,
+    find_similar_sentence_mistakes,
     find_similar_word_cards,
 )
 from app.db_connection import DatabaseConnection
@@ -103,6 +108,102 @@ def _link_error(db: DatabaseConnection, card_id: int, error_code: str) -> None:
         )
 
 
+def _seed_sentence_ids(
+    db: DatabaseConnection,
+    tmp_path: Path,
+    text: str,
+) -> list[int]:
+    source = tmp_path / "sentences.txt"
+    source.write_text(text, encoding="utf-8")
+    result = import_txt(db, source, title="Sentence Test")
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM sentences WHERE book_id = ? ORDER BY idx",
+            (result.book_id,),
+        ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def _diagnosed_sentence_payload(
+    code: str,
+    evidence: str,
+    *,
+    confidence: float = 0.9,
+) -> dict[str, object]:
+    return {
+        "subject_skeleton": "The contrast matters",
+        "clauses": [
+            {
+                "type": "main",
+                "text": "the contrast matters",
+                "role": "main predication",
+            }
+        ],
+        "modifiers": [],
+        "logic_markers": [
+            {"marker": "although", "function": "concession"},
+        ],
+        "anaphora": [],
+        "simplified_en": "The contrast matters.",
+        "chinese_gloss": "重点在对比关系。",
+        "predicted_error_types": [],
+        "diagnosis_basis": "user_translation",
+        "diagnosed_error_types": [code],
+        "diagnosis_evidence": [
+            {"error_type": code, "evidence": evidence},
+        ],
+        "confidence": confidence,
+    }
+
+
+def _predicted_sentence_payload(
+    code: str,
+    *,
+    confidence: float = 0.9,
+) -> dict[str, object]:
+    return {
+        "subject_skeleton": "The contrast matters",
+        "clauses": [
+            {
+                "type": "main",
+                "text": "the contrast matters",
+                "role": "main predication",
+            }
+        ],
+        "modifiers": [],
+        "logic_markers": [],
+        "anaphora": [],
+        "simplified_en": "The contrast matters.",
+        "chinese_gloss": "重点在对比关系。",
+        "predicted_error_types": [code],
+        "diagnosis_basis": "predicted",
+        "diagnosed_error_types": [],
+        "diagnosis_evidence": [],
+        "confidence": confidence,
+    }
+
+
+def _save_sentence_diagnosis(
+    db: DatabaseConnection,
+    sentence_id: int,
+    payload: dict[str, object],
+    *,
+    translation: str = "我误读了这句话。",
+) -> int:
+    if translation:
+        save_sentence_translation(db, sentence_id, translation)
+    result = save_sentence_analysis(
+        db,
+        sentence_id,
+        json.dumps(payload),
+        model="test-model",
+        prompt_version="v1",
+    )
+    assert result.is_valid
+    assert result.card_id is not None
+    return result.card_id
+
+
 # ---------------------------------------------------------------------------
 # SimilarCard dataclass
 # ---------------------------------------------------------------------------
@@ -121,6 +222,25 @@ class TestSimilarCardDataclass:
         assert sc.surface_form == "fox"
         assert sc.lemma == "fox"
         assert sc.current_meaning == "a cunning animal"
+
+    def test_sentence_mistake_fields_accessible(self):
+        mistake = SimilarSentenceMistake(
+            card_id=1,
+            sentence_id=2,
+            match_layer="error_tag",
+            score=0.6,
+            shared_error_codes=("D02",),
+            sentence_text="Although it rained, we left.",
+            user_translation="虽然下雨，我们离开了。",
+            diagnosis_evidence=(
+                {"error_type": "D02", "evidence": "missed contrast"},
+            ),
+            confidence=0.9,
+        )
+        assert mistake.card_id == 1
+        assert mistake.match_layer == "error_tag"
+        assert mistake.shared_error_codes == ("D02",)
+        assert mistake.confidence == 0.9
 
     def test_score_ordering(self):
         a = SimilarCard(1, "word", "surface", 1.0, "fox", "fox", "")
@@ -258,9 +378,9 @@ class TestErrorTagMatch:
 
     def test_no_error_tags_no_layer3_results(self, db: DatabaseConnection, sentence_id: int):
         # Card without any error tags — Layer 3 should not match via it
-        card_a = _insert_word_card(db, sentence_id, "fox", "fox", "")
+        _insert_word_card(db, sentence_id, "fox", "fox", "")
         # No _link_error call
-        card_b = _insert_word_card(db, sentence_id, "dog", "dog", "a domestic animal")
+        _insert_word_card(db, sentence_id, "dog", "dog", "a domestic animal")
 
         results = find_similar_word_cards(db, "fox", exclude_lemma="fox")
         error_tag_matches = [r for r in results if r.match_layer == "error_tag"]
@@ -375,7 +495,7 @@ class TestLimit:
 class TestFindSimilarCardsForWordCard:
     def test_delegates_to_find_similar(self, db: DatabaseConnection, sentence_id: int):
         card_a = _insert_word_card(db, sentence_id, "fox", "fox", "a wild animal")
-        card_b = _insert_word_card(db, sentence_id, "foxes", "foxes", "plural fox")
+        _insert_word_card(db, sentence_id, "foxes", "foxes", "plural fox")
         results = find_similar_cards_for_word_card(db, card_a)
         assert isinstance(results, list)
 
@@ -392,3 +512,162 @@ class TestFindSimilarCardsForWordCard:
         card_id = _insert_word_card(db, sentence_id, "fox", "fox", "")
         result = find_similar_cards_for_word_card(db, card_id)
         assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# Sentence-card diagnosed mistake matching
+# ---------------------------------------------------------------------------
+
+class TestSimilarSentenceMistakes:
+    def test_shared_diagnosed_error_tag_finds_active_translated_sentence(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(
+            db,
+            tmp_path,
+            (
+                "Although it rained, we left. "
+                "While the premise sounds simple, the conclusion differs."
+            ),
+        )
+        current_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload(
+                "D02",
+                "Current translation missed the contrast after although.",
+            ),
+        )
+        candidate_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[1],
+            _diagnosed_sentence_payload(
+                "D02",
+                "Past translation also treated the contrast as continuation.",
+            ),
+            translation="我之前也误读了对比。",
+        )
+
+        results = find_similar_sentence_mistakes(db, current_card)
+
+        assert [result.card_id for result in results] == [candidate_card]
+        assert results[0].sentence_id == sentence_ids[1]
+        assert results[0].shared_error_codes == ("D02",)
+        assert results[0].diagnosis_evidence == (
+            {
+                "error_type": "D02",
+                "evidence": "Past translation also treated the contrast as continuation.",
+            },
+        )
+
+    def test_sentence_mistakes_exclude_archived_missing_translation_and_predicted_basis(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(
+            db,
+            tmp_path,
+            (
+                "Although it rained, we left. "
+                "While the premise sounds simple, the conclusion differs. "
+                "Although she was tired, she kept working. "
+                "However, the answer changed."
+            ),
+        )
+        current_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload("D02", "Current contrast error."),
+        )
+        archived_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[1],
+            _diagnosed_sentence_payload("D02", "Archived contrast error."),
+        )
+        no_translation_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[2],
+            _diagnosed_sentence_payload("D02", "No translation contrast error."),
+            translation="",
+        )
+        predicted_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[3],
+            _predicted_sentence_payload("D02"),
+            translation="这句有译文但不是用户译文诊断。",
+        )
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentence_cards SET archived_at = '2026-06-17T00:00:00+00:00' WHERE id = ?",
+                (archived_card,),
+            )
+            conn.execute(
+                "UPDATE sentence_cards SET user_translation = '' WHERE id = ?",
+                (no_translation_card,),
+            )
+
+        results = find_similar_sentence_mistakes(db, current_card)
+
+        excluded_ids = {archived_card, no_translation_card, predicted_card}
+        assert excluded_ids.isdisjoint({result.card_id for result in results})
+
+    def test_sentence_mistakes_require_confident_current_and_candidate(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(
+            db,
+            tmp_path,
+            (
+                "Although it rained, we left. "
+                "While the premise sounds simple, the conclusion differs. "
+                "Although she was tired, she kept working."
+            ),
+        )
+        low_current = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload(
+                "D02",
+                "Low confidence current contrast error.",
+                confidence=0.74,
+            ),
+        )
+        _save_sentence_diagnosis(
+            db,
+            sentence_ids[1],
+            _diagnosed_sentence_payload("D02", "Confident candidate error."),
+        )
+
+        assert find_similar_sentence_mistakes(db, low_current) == []
+
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentence_cards SET archived_at = '2026-06-17T00:00:00+00:00' WHERE sentence_id = ?",
+                (sentence_ids[1],),
+            )
+
+        high_current = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload("D02", "Confident current error."),
+        )
+        _save_sentence_diagnosis(
+            db,
+            sentence_ids[2],
+            _diagnosed_sentence_payload(
+                "D02",
+                "Low confidence candidate contrast error.",
+                confidence=0.5,
+            ),
+        )
+
+        assert find_similar_sentence_mistakes(db, high_current) == []
+
+    def test_unknown_sentence_card_raises(self, db: DatabaseConnection):
+        with pytest.raises(ValueError, match="Sentence card id=999 not found"):
+            find_similar_sentence_mistakes(db, 999)

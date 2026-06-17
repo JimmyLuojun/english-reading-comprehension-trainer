@@ -105,6 +105,27 @@ def _selection_script() -> str:
         X00: "X00 其他",
       };
 
+      const ERROR_CHECK_TIPS = {
+        G01: "先找完整主语边界，再找真正的主句谓语。",
+        G02: "先确认后置修饰语修饰哪个名词，再翻译主句动作。",
+        G03: "先分清每个从句的起止位置，再判断它在主句里承担什么成分。",
+        G04: "先还原正常语序，再判断强调或倒装改变了哪个焦点。",
+        G05: "先判断非谓语是在修饰名词、补充动作，还是表示目的/结果。",
+        G06: "先补出被省略或替代的成分，再连回前文。",
+        G07: "先把并列项一一配对，确认它们共享同一个语法角色。",
+        L01: "先根据上下文限定词义，不要直接套最熟悉的义项。",
+        L02: "先检查它是否是假朋友或形近词，再确认词性和语境义。",
+        L03: "先把搭配整体理解，再决定动词、名词或介词之间的关系。",
+        L04: "先用词根词族辅助判断，再回到上下文验证。",
+        L05: "先检查是否是固定短语或习语，不要逐词硬译。",
+        L06: "先用句中功能判断学术词的大方向，再精修中文表达。",
+        D01: "先回指最近且语义匹配的实体，再检查数和逻辑是否一致。",
+        D02: "先找让步/对比两边，重点通常落在主句或转折后的信息。",
+        D03: "先判断连词表达原因、结果还是推论，再翻译逻辑方向。",
+        D04: "先判断句子真正强调的新信息，不要把背景信息当重点。",
+        D05: "先把 this/these/such 等衔接词连回前文整件事或概念。",
+      };
+
       let activeSentenceId = null;
       let activeSentenceTranslation = "";
       let activeWordCardId = null;
@@ -1232,6 +1253,7 @@ def _selection_script() -> str:
         applyGlossaryHighlights(gloss);
         applyGlossaryHighlights(skeleton);
         renderDiagnosis(analysis);
+        renderSimilarMistakes(payload, analysis);
       }
 
       function renderDiagnosis(analysis) {
@@ -1275,6 +1297,71 @@ def _selection_script() -> str:
           button.addEventListener("click", () => highlightEvidence(text));
           diagnosis.append(button);
         }
+      }
+
+      function renderSimilarMistakes(payload, analysis) {
+        const mistakes = payload.similar_mistakes || [];
+        if (!mistakes.length) return;
+        const section = document.createElement("div");
+        section.className = "similar-mistakes";
+        const title = document.createElement("h4");
+        title.textContent = "Similar past mistake";
+        section.append(title);
+        const intro = document.createElement("p");
+        intro.className = "analysis-text muted";
+        intro.textContent = "Same diagnosed error code in an active translated Review sentence.";
+        section.append(intro);
+
+        for (const mistake of mistakes) {
+          const item = document.createElement("article");
+          item.className = "similar-mistake";
+          const codes = mistake.shared_error_codes || [];
+          const codeLine = document.createElement("p");
+          codeLine.className = "analysis-codes";
+          codeLine.textContent = codes.map((code) => ERROR_CODE_LABELS[code] || code).join("  ·  ");
+          item.append(codeLine);
+
+          const source = document.createElement("p");
+          source.className = "similar-mistake-source";
+          source.textContent = mistake.sentence_text || "";
+          item.append(source);
+
+          if (mistake.user_translation) {
+            const translation = document.createElement("p");
+            translation.className = "analysis-translation";
+            translation.textContent = `Your past translation: ${mistake.user_translation}`;
+            item.append(translation);
+          }
+
+          for (const code of codes) {
+            const comparison = document.createElement("div");
+            comparison.className = "similar-mistake-comparison";
+            comparison.append(
+              comparisonLine("Current", evidenceTextForCode(analysis.diagnosis_evidence, code)),
+              comparisonLine("Past", evidenceTextForCode(mistake.diagnosis_evidence, code)),
+            );
+            const tip = ERROR_CHECK_TIPS[code];
+            if (tip) comparison.append(comparisonLine("Next check", tip));
+            item.append(comparison);
+          }
+
+          section.append(item);
+        }
+        diagnosis.append(section);
+      }
+
+      function evidenceTextForCode(evidence, code) {
+        const found = (evidence || []).find((item) => item.error_type === code);
+        return found?.evidence || "No detailed evidence saved.";
+      }
+
+      function comparisonLine(label, text) {
+        const line = document.createElement("p");
+        line.className = "similar-mistake-line";
+        const strong = document.createElement("strong");
+        strong.textContent = `${label}: `;
+        line.append(strong, document.createTextNode(text || ""));
+        return line;
       }
 
       function updateSentenceAnalysisState(sentenceId, payload) {

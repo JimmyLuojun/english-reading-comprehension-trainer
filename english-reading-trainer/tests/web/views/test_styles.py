@@ -19,3 +19,5 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert ".speak-button" in css
     assert ".word-card-delete" in css
     assert "max-height: min(52vh, 360px)" in css
+    assert ".similar-mistakes" in css
+    assert ".similar-mistake-comparison" in css
