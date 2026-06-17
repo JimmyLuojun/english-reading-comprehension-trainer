@@ -115,6 +115,7 @@ def _selection_script() -> str:
       let panelMode = "sentence";
       let translationEditorOpen = false;
       let progressTimer = null;
+      let toolbarHideTimer = null;
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
 
@@ -237,7 +238,23 @@ def _selection_script() -> str:
         analysisOpen.hidden = true;
       }
 
+      function clearScheduledToolbarHide() {
+        if (toolbarHideTimer !== null) {
+          window.clearTimeout(toolbarHideTimer);
+          toolbarHideTimer = null;
+        }
+      }
+
+      function scheduleToolbarHide(delay) {
+        clearScheduledToolbarHide();
+        toolbarHideTimer = window.setTimeout(() => {
+          toolbarHideTimer = null;
+          hideToolbar();
+        }, delay);
+      }
+
       function hideToolbar() {
+        clearScheduledToolbarHide();
         hideAllPanels();
         toolbar.hidden = true;
         activeSentenceId = null;
@@ -377,6 +394,7 @@ def _selection_script() -> str:
       }
 
       function positionToolbar(anchor) {
+        clearScheduledToolbarHide();
         toolbar.hidden = false;
         requestAnimationFrame(() => {
           const toolbarRect = toolbar.getBoundingClientRect();
@@ -435,6 +453,7 @@ def _selection_script() -> str:
         analysisWordSentenceId.value = activeAnalysisSourceSentenceId;
         analysisWordSurfaceForm.value = selectedText;
         if (analysisWordStatus) analysisWordStatus.textContent = "";
+        setAnalysisWordButtonsDisabled(false);
         setVisible(analysisWordForm, true);
         showToolbar(range);
       }
@@ -527,9 +546,7 @@ def _selection_script() -> str:
           }
           if (analysisWordStatus) analysisWordStatus.textContent = "Saved";
           window.getSelection()?.removeAllRanges();
-          window.setTimeout(() => {
-            hideToolbar();
-          }, 650);
+          scheduleToolbarHide(650);
         } catch (error) {
           if (analysisWordStatus) analysisWordStatus.textContent = `Save failed: ${error}`;
         } finally {

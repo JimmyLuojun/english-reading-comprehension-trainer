@@ -248,6 +248,33 @@ def _select_text_until_panel(page: Page, sentence_index: int, text: str, panel_i
     page.wait_for_function(f'!document.getElementById("{panel_id}").hidden')
 
 
+def _select_analysis_text(page: Page, selector: str, text: str) -> None:
+    page.evaluate(
+        """({selector, text}) => {
+          const root = document.querySelector(selector);
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let node = walker.nextNode();
+          while (node) {
+            const index = node.nodeValue.indexOf(text);
+            if (index >= 0) {
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + text.length);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+              return;
+            }
+            node = walker.nextNode();
+          }
+          throw new Error(`Text not found: ${text}`);
+        }""",
+        {"selector": selector, "text": text},
+    )
+    page.wait_for_timeout(60)
+
+
 def _new_page(browser: Browser, url: str) -> Iterator[Page]:
     page = browser.new_page()
     page.goto(url)
@@ -653,6 +680,58 @@ def test_analysis_panel_mark_phrase_keeps_current_analysis(
     }
     assert row is not None
     assert row["lexical_type"] == "phrase"
+
+
+def test_analysis_panel_new_selection_survives_previous_saved_hide_timer(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        _select_analysis_text(page, "#analysis-simplified", "feline")
+        page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
+        page.locator('[data-analysis-mark="phrase"]').click()
+        page.wait_for_function(
+            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+        )
+
+        _select_analysis_text(page, "#analysis-simplified", "rested")
+        page.wait_for_timeout(800)
+        state = page.evaluate(
+            """() => ({
+              toolbarHidden: document.getElementById("selection-toolbar").hidden,
+              analysisWordHidden: document.getElementById("toolbar-analysis-word-form").hidden,
+              buttonsDisabled: Array.from(
+                document.querySelectorAll("#toolbar-analysis-word-form button")
+              ).some((button) => button.disabled),
+              surfaceForm: document.getElementById("toolbar-analysis-word-surface-form").value,
+            })"""
+        )
+        page.locator('[data-analysis-mark="collocation"]').click()
+        page.wait_for_function(
+            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+        )
+
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT lemma, lexical_type
+               FROM word_cards
+               WHERE lemma IN ('feline', 'rested') AND archived_at IS NULL
+               ORDER BY lemma"""
+        ).fetchall()
+
+    assert state == {
+        "toolbarHidden": False,
+        "analysisWordHidden": False,
+        "buttonsDisabled": False,
+        "surfaceForm": "rested",
+    }
+    assert [(row["lemma"], row["lexical_type"]) for row in rows] == [
+        ("feline", "phrase"),
+        ("rested", "collocation"),
+    ]
 
 
 def test_analysis_panel_ai_analysis_marks_then_returns_to_previous_analysis(
