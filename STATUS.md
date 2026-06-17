@@ -1,6 +1,6 @@
 # Project Status
 
-Updated: 2026-06-17
+Updated: 2026-06-18
 
 ## Current State
 
@@ -20,6 +20,7 @@ Updated: 2026-06-17
 - Reader sentence analysis now shows a deterministic `Similar past mistake` section when the current Check translation diagnosis shares confident error codes with active translated Review sentence cards; it reuses `error_types`, `sentence_card_errors`, and saved `diagnosis_evidence` instead of adding a second mistake taxonomy.
 - Root `Makefile` now provides shared verification entry points (`make test`, `make test-web`, `make ruff-web`) that always use `english-reading-trainer/.venv/bin/python`, keeping Claude/Codex/local runs out of miniconda base or system Python.
 - Reader Word Analysis now falls back to the previous saved valid analysis when a fresh POST analysis fails validation or the LLM call fails, and marks the fallback stale with a warning instead of returning 502 when a saved analysis exists. AI cache writes now allow a later valid response to replace an earlier invalid row for the same key.
+- Sentence Analysis now surfaces editable `Your translation` and `Takeaway` fields in the reader panel, with Takeaway stored in the existing `sentence_cards.user_note` column. Cards shows a Takeaway column, sentence Text links deep-link back to `/read/{book_id}?chapter={idx}&sentence_id={id}&panel=analysis`, and Books navigation can resume the last-read book through the existing per-book reader progress.
 - `docs/design.md` is now a 117-line architecture map and index instead of a continuously growing implementation log.
 - Web source files and mirrored tests now align for all non-`__init__.py` files under `app/`; router tests verify route registration, while query/view/helper tests cover stable contracts.
 - `python -m ruff check app/web` is part of the Web change verification contract.
@@ -64,3 +65,5 @@ Updated: 2026-06-17
 - 2026-06-17: Similar past mistake reminders completed: targeted finder/query/view/style tests passed, `tests/web -q` passed, `python -m ruff check app/web app/cards/similar_card_finder.py tests/cards/test_similar_card_finder.py tests/web/queries/test_analysis.py tests/web/views/test_reader_script.py tests/web/views/test_styles.py` passed, `git diff --check` passed, and full `.venv/bin/python -m pytest tests/ -q` passed with the existing FastAPI TestClient deprecation warning.
 - 2026-06-17: Shared local verification entry points added: `make ruff-web` printed `/Users/junluo/Documents/英语阅读理解专项训练项目/english-reading-trainer/.venv/bin/python` and passed; `make test` printed the same interpreter and passed with the existing FastAPI TestClient deprecation warning.
 - 2026-06-17: Reader Word Analysis 502 fallback fix completed: targeted pytest for AI cache/Web service/FastAPI route/reader script passed, targeted ruff passed, `git diff --check` passed, `make test` passed using `/Users/junluo/Documents/英语阅读理解专项训练项目/english-reading-trainer/.venv/bin/python` with the existing FastAPI TestClient deprecation warning, and `make ruff-web` passed with the same interpreter.
+- 2026-06-18: Sentence Takeaway and reader-return UX completed: targeted pytest for sentence card service, Web queries/routes/views/FastAPI route passed; targeted ruff passed; `git diff --check` passed; `make test` passed using `/Users/junluo/Documents/英语阅读理解专项训练项目/english-reading-trainer/.venv/bin/python` with the existing FastAPI TestClient deprecation warning; `make ruff-web` passed with the same interpreter; browser smoke check on `http://127.0.0.1:8001` confirmed Cards Takeaway/deep links, Books resume script, and reader deep-link panel fields.
+- 2026-06-18: Sentence panel study-field order adjusted: targeted reader view/script tests passed, targeted ruff passed, and browser smoke check on `http://127.0.0.1:8001` confirmed `Subject skeleton` appears above `Your translation` and `Takeaway`.

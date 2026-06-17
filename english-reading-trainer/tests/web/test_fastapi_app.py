@@ -1001,6 +1001,29 @@ class TestReadingAndMarking:
         assert row["user_translation"] is None
         assert row["translation_created_at"] is None
 
+    def test_update_sentence_note_endpoint_uses_user_note(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+
+        response = client.patch(
+            f"/mark/sentence/{sentence_ids[0]}",
+            data={"user_note": "hash into 是整体搭配"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_note, user_translation, archived_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_note"] == "hash into 是整体搭配"
+        assert row["user_translation"] is None
+        assert row["archived_at"] is not None
+
     def test_analyze_sentence_endpoint_saves_analysis_and_errors(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:

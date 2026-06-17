@@ -500,6 +500,18 @@ def _css() -> str:
       color: var(--text);
       font-size: 14px;
     }
+    .sentence-study-section textarea {
+      width: 100%;
+      min-height: 76px;
+      resize: vertical;
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 9px;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.45;
+    }
     .word-notes-actions {
       display: flex;
       align-items: center;

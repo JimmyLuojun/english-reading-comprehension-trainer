@@ -18,6 +18,7 @@ def _fetch_chapter_sentences(
             """SELECT s.id, s.idx, s.text, s.paragraph_id, p.idx AS paragraph_idx,
                       CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card,
                       COALESCE(st.user_translation, '') AS user_translation,
+                      COALESCE(st.user_note, '') AS user_note,
                       sc.ai_analysis_id,
                       ac.prompt_version AS analysis_prompt_version,
                       ac.model AS analysis_model,

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from app.web.views.layout import _active, _date, _escape, _html_page, _metric
+from app.web.views.layout import (
+    _active,
+    _date,
+    _escape,
+    _html_page,
+    _metric,
+    _reader_resume_script,
+)
 
 
 def test_html_page_escapes_title_and_marks_active_nav() -> None:
@@ -13,6 +20,15 @@ def test_html_page_escapes_title_and_marks_active_nav() -> None:
     assert "&lt;Title&gt; - English Reading Trainer" in body
     assert '<body class="reader">' in body
     assert '<a class="active" href="/books">Books</a>' in body
+    assert "reader:last-book-id" in body
+
+
+def test_reader_resume_script_redirects_books_nav_to_last_book() -> None:
+    script = _reader_resume_script()
+
+    assert 'nav a[href="/books"]' in script
+    assert "reader:last-book-id" in script
+    assert 'window.location.href = "/read/"' in script
 
 
 def test_formatting_helpers() -> None:

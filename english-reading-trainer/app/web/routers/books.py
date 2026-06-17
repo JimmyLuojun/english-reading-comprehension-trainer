@@ -17,6 +17,7 @@ from app.web.queries import (
 )
 from app.web.services.books import delete_book_and_assets
 from app.web.views import (
+    _books_continue_script,
     _books_table,
     _chapters_table,
     _escape,
@@ -37,6 +38,7 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
           </div>
         </section>
         """
+        body += _books_continue_script()
         body += _books_table(rows)
         return _html_page("Books", body, active="books")
 

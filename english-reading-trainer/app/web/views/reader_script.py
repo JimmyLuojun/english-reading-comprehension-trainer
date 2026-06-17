@@ -64,6 +64,12 @@ def _selection_script() -> str:
       const gloss = document.getElementById("analysis-gloss");
       const skeleton = document.getElementById("analysis-skeleton");
       const diagnosis = document.getElementById("analysis-diagnosis");
+      const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
+      const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
+      const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
+      const sentencePanelNote = document.getElementById("sentence-panel-note");
+      const sentencePanelNoteSave = document.getElementById("sentence-panel-note-save");
+      const sentencePanelNoteStatus = document.getElementById("sentence-panel-note-status");
       const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
       const wordAnalysisMeaningZh = document.getElementById("analysis-word-meaning-zh");
       const wordRegister = document.getElementById("analysis-word-register");
@@ -80,7 +86,10 @@ def _selection_script() -> str:
       const bookId = reader.dataset.bookId || "";
       const chapterIdx = Number.parseInt(reader.dataset.chapterIdx || "1", 10);
       const progressKey = bookId ? `reader:progress:book:${bookId}` : "";
-      const initialWordCardId = new URLSearchParams(window.location.search).get("word_card") || "";
+      const initialParams = new URLSearchParams(window.location.search);
+      const initialWordCardId = initialParams.get("word_card") || "";
+      const initialSentenceId = initialParams.get("sentence_id") || "";
+      const initialPanel = initialParams.get("panel") || "";
       const MAX_ANALYSIS_CONTEXT_TEXT = 1600;
 
       const ERROR_CODE_LABELS = {
@@ -149,6 +158,10 @@ def _selection_script() -> str:
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
+
+      if (bookId) {
+        window.localStorage.setItem("reader:last-book-id", bookId);
+      }
 
       const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
       const normalizeContextText = (value) => normalizeText(String(value || "")).slice(0, MAX_ANALYSIS_CONTEXT_TEXT);
@@ -518,6 +531,14 @@ def _selection_script() -> str:
         sentence.dataset.analysisStale = "0";
         sentence.classList.remove("translated", "marked", "analyzed", "analyzed-stale");
         sentence.removeAttribute("title");
+      }
+
+      function updateSentenceNote(sentenceId, note) {
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        if (sentence) sentence.dataset.note = note || "";
+        if (activeAnalysisPayload && String(activeAnalysisPayload.sentence_id || "") === String(sentenceId)) {
+          activeAnalysisPayload.user_note = note || "";
+        }
       }
 
       function showWordDetail(span) {
@@ -1181,6 +1202,10 @@ def _selection_script() -> str:
         gloss.textContent = "";
         skeleton.textContent = "";
         diagnosis.replaceChildren();
+        if (sentencePanelTranslation) sentencePanelTranslation.value = "";
+        if (sentencePanelNote) sentencePanelNote.value = "";
+        if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
       }
 
       function setPanelLoadingWord(message) {
@@ -1227,6 +1252,42 @@ def _selection_script() -> str:
         if (panelRetryPro) panelRetryPro.hidden = !retryable;
       }
 
+      function setSentenceStudyFields(payload) {
+        if (sentencePanelTranslation) {
+          sentencePanelTranslation.value = payload.user_translation || "";
+        }
+        if (sentencePanelNote) {
+          sentencePanelNote.value = payload.user_note || "";
+        }
+        if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
+      }
+
+      function renderSentenceStudyPanel(sentence, message) {
+        hideToolbar();
+        const sentenceId = sentence?.dataset.sentenceId || "";
+        activeAnalysisPayload = {
+          sentence_id: sentenceId,
+          user_translation: sentence?.dataset.translation || "",
+          user_note: sentence?.dataset.note || "",
+        };
+        activeAnalysisLabel = "sentence";
+        activeAnalysisSentenceId = sentenceId;
+        activeAnalysisSourceSentenceId = sentenceId;
+        setSentenceMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = message || "";
+        panelMeta.textContent = "";
+        panelRetry.hidden = !sentenceId;
+        if (panelRetryPro) panelRetryPro.hidden = !sentenceId;
+        simplified.textContent = "";
+        gloss.textContent = "";
+        skeleton.textContent = "";
+        diagnosis.replaceChildren();
+        setSentenceStudyFields(activeAnalysisPayload);
+      }
+
       function renderAnalysisPayload(payload) {
         const analysis = payload.analysis || {};
         hideToolbar();
@@ -1240,6 +1301,7 @@ def _selection_script() -> str:
         panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
         panelRetry.hidden = false;
         if (panelRetryPro) panelRetryPro.hidden = false;
+        setSentenceStudyFields(payload);
         panelMeta.textContent = [
           `prompt ${payload.prompt_version || "unknown"}`,
           payload.model || "model unknown",
@@ -1371,6 +1433,7 @@ def _selection_script() -> str:
         sentence.dataset.analysisId = payload.cache_id || "";
         sentence.dataset.analysisStale = payload.is_stale ? "1" : "0";
         sentence.dataset.translation = payload.user_translation || sentence.dataset.translation || "";
+        sentence.dataset.note = payload.user_note || sentence.dataset.note || "";
         sentence.classList.add("marked");
         if (sentence.dataset.translation.trim()) {
           sentence.classList.add("translated");
@@ -1420,6 +1483,54 @@ def _selection_script() -> str:
           renderAnalysisPayload(payload);
         } catch (error) {
           renderAnalysisError(`Analysis failed: ${error}`, true);
+        }
+      }
+
+      async function savePanelTranslation() {
+        const sentenceId = activeAnalysisSentenceId;
+        const value = (sentencePanelTranslation?.value || "").trim();
+        if (!sentenceId) return;
+        if (!value) {
+          if (sentencePanelTranslationStatus) {
+            sentencePanelTranslationStatus.textContent = "Enter a translation first.";
+          }
+          return;
+        }
+        if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saving...";
+        const body = new URLSearchParams({ user_translation: value, return_to: returnTo });
+        try {
+          const response = await fetch(`/mark/sentence/${sentenceId}/translation`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          if (!response.ok) throw new Error("Save failed");
+          markSentenceTranslated(document.getElementById(`sentence-${sentenceId}`), value);
+          activeSentenceTranslation = value;
+          if (activeAnalysisPayload) activeAnalysisPayload.user_translation = value;
+          if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saved";
+        } catch (error) {
+          if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = `Save failed: ${error}`;
+        }
+      }
+
+      async function savePanelNote() {
+        const sentenceId = activeAnalysisSentenceId;
+        const value = (sentencePanelNote?.value || "").trim();
+        if (!sentenceId) return;
+        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saving...";
+        const body = new URLSearchParams({ user_note: value });
+        try {
+          const response = await fetch(`/mark/sentence/${sentenceId}`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          if (!response.ok) throw new Error("Save failed");
+          updateSentenceNote(sentenceId, value);
+          if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saved";
+        } catch (error) {
+          if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = `Save failed: ${error}`;
         }
       }
 
@@ -1606,6 +1717,22 @@ def _selection_script() -> str:
         }
       }
 
+      function openInitialSentenceAnalysis() {
+        if (initialPanel !== "analysis" || !initialSentenceId) return;
+        const sentence = document.getElementById(`sentence-${initialSentenceId}`);
+        if (!sentence) return;
+        window.setTimeout(() => {
+          sentence.scrollIntoView({ block: "center" });
+          activeSentenceId = sentence.dataset.sentenceId;
+          activeSentenceTranslation = sentence.dataset.translation || "";
+          if (sentence.dataset.analysisId) {
+            loadSavedAnalysis(sentence.dataset.sentenceId);
+            return;
+          }
+          renderSentenceStudyPanel(sentence, "No saved AI analysis yet.");
+        }, 0);
+      }
+
       function clearEvidenceHighlight() {
         reader.querySelectorAll(".analysis-highlight").forEach((node) => {
           node.replaceWith(document.createTextNode(node.textContent || ""));
@@ -1700,6 +1827,12 @@ def _selection_script() -> str:
       if (panelPrevious) {
         panelPrevious.addEventListener("click", restorePreviousAnalysis);
       }
+      if (sentencePanelTranslationSave) {
+        sentencePanelTranslationSave.addEventListener("click", savePanelTranslation);
+      }
+      if (sentencePanelNoteSave) {
+        sentencePanelNoteSave.addEventListener("click", savePanelNote);
+      }
       function showGlossaryWordDetail(hit) {
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed) return;
@@ -1793,7 +1926,7 @@ def _selection_script() -> str:
         if (panelMode === "word" && activeAnalysisWordCardId) {
           requestWordAnalysis(activeAnalysisWordCardId);
         } else if (activeAnalysisSentenceId) {
-          requestAnalysis(activeAnalysisSentenceId, null);
+          requestAnalysis(activeAnalysisSentenceId, sentencePanelTranslation?.value || null);
         }
       });
       if (panelRetryPro) {
@@ -1801,7 +1934,11 @@ def _selection_script() -> str:
           if (panelMode === "word" && activeAnalysisWordCardId) {
             requestWordAnalysis(activeAnalysisWordCardId, { preferPro: true });
           } else if (activeAnalysisSentenceId) {
-            requestAnalysis(activeAnalysisSentenceId, null, { preferPro: true });
+            requestAnalysis(
+              activeAnalysisSentenceId,
+              sentencePanelTranslation?.value || null,
+              { preferPro: true },
+            );
           }
         });
       }
@@ -1918,6 +2055,8 @@ def _selection_script() -> str:
       restoreReaderProgress();
       if (initialWordCardId) {
         window.setTimeout(() => loadSavedWordAnalysis(initialWordCardId), 0);
+      } else {
+        openInitialSentenceAnalysis();
       }
     })();
     """

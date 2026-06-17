@@ -44,13 +44,14 @@ def test_reader_queries_fetch_sentences_and_blocks(tmp_path: Path) -> None:
                VALUES (?, ?, 1, 'prose', ?, '')""",
             (book.book_id, chapter_id, paragraph_id),
         )
-    create_sentence_card(db, sentence_id, user_translation="一句话。")
+    create_sentence_card(db, sentence_id, user_note="先找主谓", user_translation="一句话。")
 
     sentences = _fetch_chapter_sentences(db, chapter_id)
     blocks = _fetch_chapter_blocks(db, chapter_id)
 
     assert sentences[0]["has_card"] == 1
     assert sentences[0]["user_translation"] == "一句话。"
+    assert sentences[0]["user_note"] == "先找主谓"
     assert blocks[0]["kind"] == "prose"
     assert _fetch_active_word_cards(db) == []
 

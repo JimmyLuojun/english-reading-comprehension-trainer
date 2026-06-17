@@ -4,7 +4,6 @@ Tests for app/cards/sentence_card_service.py.
 All tests use real SQLite (tmp_path). No mocking.
 """
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -19,6 +18,7 @@ from app.cards.sentence_card_service import (
     get_sentence_card_by_sentence,
     list_sentence_cards,
     save_sentence_translation,
+    update_sentence_card_note,
 )
 from app.db_connection import DatabaseConnection
 from app.db_models import SM2_DEFAULT_EF, SM2_INITIAL_INTERVAL_DAYS, SM2_INITIAL_REPETITIONS
@@ -242,6 +242,9 @@ class TestListSentenceCards:
         create_sentence_card(db, sid)
         cards = list_sentence_cards(db)
         assert cards[0]["sentence_text"] == "Hello world."
+        assert cards[0]["source_href"].startswith("/read/")
+        assert f"sentence_id={sid}" in cards[0]["source_href"]
+        assert cards[0]["source_href"].endswith(f"#sentence-{sid}")
 
     def test_book_id_filter(self, db: DatabaseConnection) -> None:
         # book 1
@@ -498,3 +501,40 @@ class TestDeleteSentenceTranslation:
 
         with pytest.raises(ValueError, match="No saved translation"):
             delete_sentence_translation(db, sid)
+
+
+class TestUpdateSentenceCardNote:
+    def test_updates_existing_sentence_card_note(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db)
+        card_id = save_sentence_translation(db, sid, "我的译文")
+
+        updated_id = update_sentence_card_note(db, sid, "搭配 hash into 要按整体理解")
+
+        assert updated_id == card_id
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_note, archived_at FROM sentence_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["user_note"] == "搭配 hash into 要按整体理解"
+        assert row["archived_at"] is not None
+
+    def test_creates_archived_note_only_record(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db)
+
+        card_id = update_sentence_card_note(db, sid, "这句要先找主谓")
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_note, user_translation, archived_at
+                     FROM sentence_cards
+                    WHERE id = ?""",
+                (card_id,),
+            ).fetchone()
+        assert row["user_note"] == "这句要先找主谓"
+        assert row["user_translation"] is None
+        assert row["archived_at"] is not None
+
+    def test_invalid_sentence_id_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            update_sentence_card_note(db, 99999, "note")

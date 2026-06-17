@@ -199,6 +199,7 @@ def _reader_sentence_span(
         f'data-sentence-id="{row["id"]}" '
         f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
         f'data-translation="{_escape(row.get("user_translation", ""))}" '
+        f'data-note="{_escape(row.get("user_note", ""))}" '
         f'data-analysis-id="{_escape(row.get("ai_analysis_id") or "")}" '
         f'data-analysis-stale="{int(row.get("analysis_is_stale") or 0)}">'
         f'{text}</span>'
@@ -364,6 +365,22 @@ def _analysis_panel() -> str:
         <section class="analysis-section">
           <h3>Subject skeleton</h3>
           <p id="analysis-skeleton" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section sentence-study-section">
+          <h3>Your translation</h3>
+          <textarea id="sentence-panel-translation" rows="4" placeholder="Edit your Chinese understanding"></textarea>
+          <div class="word-notes-actions">
+            <button id="sentence-panel-translation-save" type="button">Save translation</button>
+            <span id="sentence-panel-translation-status" class="toolbar-status" aria-live="polite"></span>
+          </div>
+        </section>
+        <section class="analysis-section sentence-study-section">
+          <h3>Takeaway</h3>
+          <textarea id="sentence-panel-note" rows="3" placeholder="What did I learn from this sentence?"></textarea>
+          <div class="word-notes-actions">
+            <button id="sentence-panel-note-save" type="button">Save takeaway</button>
+            <span id="sentence-panel-note-status" class="toolbar-status" aria-live="polite"></span>
+          </div>
         </section>
       </div>
       <div id="analysis-word-sections" hidden>

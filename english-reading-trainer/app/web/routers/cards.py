@@ -13,6 +13,7 @@ from app.cards.sentence_card_service import (
     delete_sentence_translation,
     list_sentence_cards,
     save_sentence_translation,
+    update_sentence_card_note,
 )
 from app.cards.word_card_service import (
     WordCardNotFoundError,
@@ -96,6 +97,23 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         except (SentenceCardNotFoundError, ValueError) as exc:
             return _error_page(str(exc), status_code=400)
         return _redirect(return_to)
+
+    @web_app.patch("/mark/sentence/{sentence_id}")
+    async def update_sentence_note_endpoint(
+        sentence_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        db = db_factory()
+        try:
+            card_id = update_sentence_card_note(
+                db,
+                sentence_id,
+                user_note=form.get("user_note", ""),
+            )
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+        return JSONResponse({"ok": True, "card_id": card_id})
 
     @web_app.post("/mark/word")
     async def mark_word(request: Request) -> Any:

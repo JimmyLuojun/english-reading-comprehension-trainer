@@ -66,12 +66,20 @@ def test_sentence_cards_table_escapes_translation() -> None:
                 "mastery_state": "new",
                 "due_at": "2026-06-17T00:00:00",
                 "user_translation": "<translation>",
+                "user_note": "<takeaway>",
                 "sentence_text": "Sentence",
+                "source_href": "/read/1?chapter=2&sentence_id=3&panel=analysis#sentence-3",
             }
         ]
     )
 
+    assert "<th>Takeaway</th>" in html
     assert "&lt;translation&gt;" in html
+    assert "&lt;takeaway&gt;" in html
+    assert (
+        'href="/read/1?chapter=2&amp;sentence_id=3&amp;panel=analysis#sentence-3"'
+        in html
+    )
 
 
 def test_word_card_sources_page_renders_sources_candidates_and_forms() -> None:

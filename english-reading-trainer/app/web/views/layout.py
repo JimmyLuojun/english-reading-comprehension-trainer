@@ -40,6 +40,7 @@ def _html_page(
   </nav>
   <main>{body}</main>
   <script>{_def_edit_script()}</script>
+  <script>{_reader_resume_script()}</script>
 </body>
 </html>""",
         status_code=status_code,
@@ -62,3 +63,25 @@ def _active(current: str, expected: str) -> str:
 
 def _escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
+
+def _reader_resume_script() -> str:
+    return """
+(function () {
+  function lastBookId() {
+    try {
+      return window.localStorage.getItem("reader:last-book-id") || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest('nav a[href="/books"]') : null;
+    if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    var bookId = lastBookId();
+    if (!bookId) return;
+    event.preventDefault();
+    window.location.href = "/read/" + encodeURIComponent(bookId);
+  });
+}());
+"""

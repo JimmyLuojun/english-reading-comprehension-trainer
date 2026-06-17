@@ -25,7 +25,9 @@ def _fetch_sentence_for_analysis(
 ) -> dict[str, Any]:
     with db.get_connection() as conn:
         row = conn.execute(
-            """SELECT s.id, s.text, COALESCE(sc.user_translation, '') AS user_translation
+            """SELECT s.id, s.text,
+                      COALESCE(sc.user_translation, '') AS user_translation,
+                      COALESCE(sc.user_note, '') AS user_note
                  FROM sentences s
                  LEFT JOIN sentence_cards sc
                    ON sc.sentence_id = s.id
@@ -43,7 +45,7 @@ def _fetch_sentence_analysis_payload(
 ) -> dict[str, Any] | None:
     with db.get_connection() as conn:
         row = conn.execute(
-            """SELECT sc.id AS card_id, sc.user_translation,
+            """SELECT sc.id AS card_id, sc.user_translation, sc.user_note,
                       ac.id AS cache_id, ac.prompt_version, ac.model,
                       ac.response_json, ac.is_valid, ac.created_at
                  FROM sentences s
@@ -72,6 +74,7 @@ def _fetch_sentence_analysis_payload(
         "card_id": row["card_id"],
         "cache_id": row["cache_id"],
         "user_translation": row["user_translation"] or "",
+        "user_note": row["user_note"] or "",
         "prompt_version": row["prompt_version"],
         "active_prompt_version": active_version,
         "model": row["model"],

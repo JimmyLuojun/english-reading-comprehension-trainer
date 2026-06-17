@@ -180,6 +180,44 @@ def delete_sentence_translation(db: DatabaseConnection, sentence_id: int) -> int
     return existing["id"]
 
 
+def update_sentence_card_note(
+    db: DatabaseConnection,
+    sentence_id: int,
+    user_note: str = "",
+) -> int:
+    """
+    Store the learner's takeaway note for *sentence_id* and return the card id.
+
+    Notes use sentence_cards.user_note. Creating a note-only record keeps it
+    archived so a takeaway alone does not add the sentence to Review.
+    """
+    cleaned_note = user_note.strip()
+    with db.get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
+        ).fetchone():
+            raise ValueError(f"Sentence id={sentence_id} not found.")
+
+        existing = conn.execute(
+            "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+            (sentence_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE sentence_cards SET user_note = ? WHERE id = ?",
+                (cleaned_note, existing["id"]),
+            )
+            return existing["id"]
+
+        return _insert_sentence_card(
+            conn,
+            sentence_id=sentence_id,
+            user_note=cleaned_note,
+            user_translation=None,
+            archived_at=_utcnow(),
+        )
+
+
 def get_sentence_card(
     db: DatabaseConnection, card_id: int
 ) -> dict[str, Any] | None:
@@ -222,9 +260,14 @@ def list_sentence_cards(
     with db.get_connection() as conn:
         if book_id is not None:
             rows = conn.execute(
-                """SELECT sc.*, s.text AS sentence_text
+                """SELECT sc.*, s.text AS sentence_text,
+                          s.book_id, c.idx AS chapter_idx,
+                          '/read/' || s.book_id || '?chapter=' || c.idx ||
+                          '&sentence_id=' || s.id || '&panel=analysis#sentence-' ||
+                          s.id AS source_href
                    FROM sentence_cards sc
                    JOIN sentences s ON sc.sentence_id = s.id
+                   JOIN chapters c ON c.id = s.chapter_id
                    WHERE s.book_id = ? AND sc.archived_at IS NULL
                    ORDER BY sc.created_at DESC
                    LIMIT ? OFFSET ?""",
@@ -232,9 +275,14 @@ def list_sentence_cards(
             ).fetchall()
         else:
             rows = conn.execute(
-                """SELECT sc.*, s.text AS sentence_text
+                """SELECT sc.*, s.text AS sentence_text,
+                          s.book_id, c.idx AS chapter_idx,
+                          '/read/' || s.book_id || '?chapter=' || c.idx ||
+                          '&sentence_id=' || s.id || '&panel=analysis#sentence-' ||
+                          s.id AS source_href
                    FROM sentence_cards sc
                    JOIN sentences s ON sc.sentence_id = s.id
+                   JOIN chapters c ON c.id = s.chapter_id
                    WHERE sc.archived_at IS NULL
                    ORDER BY sc.created_at DESC
                    LIMIT ? OFFSET ?""",

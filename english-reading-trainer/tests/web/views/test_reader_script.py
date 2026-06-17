@@ -69,11 +69,48 @@ def test_source_word_card_param_loads_saved_word_analysis() -> None:
     load_saved = load_saved[: load_saved.index("function clearEvidenceHighlight")]
     boot = script[script.index("restoreReaderProgress();"):]
 
-    assert 'new URLSearchParams(window.location.search).get("word_card")' in script
+    assert 'initialParams.get("word_card")' in script
     assert 'fetch(`/analysis/word/${cardId}`)' in load_saved
     assert "renderWordAnalysis(payload);" in load_saved
     assert "if (initialWordCardId)" in boot
     assert "loadSavedWordAnalysis(initialWordCardId)" in boot
+
+
+def test_sentence_deep_link_opens_analysis_panel_without_auto_ai() -> None:
+    script = _selection_script()
+    opener = script[script.index("function openInitialSentenceAnalysis"):]
+    opener = opener[: opener.index("function clearEvidenceHighlight")]
+    boot = script[script.index("restoreReaderProgress();"):]
+
+    assert 'initialParams.get("sentence_id")' in script
+    assert 'initialParams.get("panel")' in script
+    assert 'if (initialPanel !== "analysis" || !initialSentenceId) return;' in opener
+    assert "sentence.scrollIntoView({ block: \"center\" });" in opener
+    assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in opener
+    assert 'renderSentenceStudyPanel(sentence, "No saved AI analysis yet.");' in opener
+    assert "openInitialSentenceAnalysis();" in boot
+
+
+def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
+    script = _selection_script()
+    render_payload = script[script.index("function renderAnalysisPayload"):]
+    render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
+    save_translation = script[script.index("async function savePanelTranslation"):]
+    save_translation = save_translation[: save_translation.index("async function savePanelNote")]
+    save_note = script[script.index("async function savePanelNote"):]
+    save_note = save_note[: save_note.index("function renderVsSimpler")]
+    retry = script[script.index('panelRetry.addEventListener("click"'):]
+    retry = retry[: retry.index("async function saveWordDetailEdits")]
+
+    assert 'document.getElementById("sentence-panel-translation")' in script
+    assert 'document.getElementById("sentence-panel-note")' in script
+    assert "setSentenceStudyFields(payload);" in render_payload
+    assert "payload.user_note || \"\"" in script
+    assert 'fetch(`/mark/sentence/${sentenceId}/translation`' in save_translation
+    assert 'fetch(`/mark/sentence/${sentenceId}`' in save_note
+    assert 'method: "PATCH"' in save_note
+    assert "updateSentenceNote(sentenceId, value);" in save_note
+    assert "sentencePanelTranslation?.value || null" in retry
 
 
 def test_reader_script_supports_pro_reanalysis_button() -> None:
@@ -84,7 +121,8 @@ def test_reader_script_supports_pro_reanalysis_button() -> None:
     assert 'document.getElementById("analysis-panel-retry-pro")' in script
     assert 'body.set("prefer_pro", "1");' in request_word
     assert 'requestWordAnalysis(activeAnalysisWordCardId, { preferPro: true });' in script
-    assert 'requestAnalysis(activeAnalysisSentenceId, null, { preferPro: true });' in script
+    assert "sentencePanelTranslation?.value || null" in script
+    assert "{ preferPro: true }" in script
 
 
 def test_analysis_toolbar_actions_run_on_pointerdown_before_click() -> None:

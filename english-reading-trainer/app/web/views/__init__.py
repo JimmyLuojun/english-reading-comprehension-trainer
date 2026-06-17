@@ -9,6 +9,7 @@ from app.web.views.layout import (
 )
 
 from app.web.views.books import (
+    _books_continue_script,
     _books_table,
     _delete_book_form,
     _chapters_table,
@@ -83,6 +84,7 @@ __all__ = [
     "_ai_meaning_cell",
     "_analysis_panel",
     "_appendix_letter",
+    "_books_continue_script",
     "_books_table",
     "_cards_return_script",
     "_chapters_table",

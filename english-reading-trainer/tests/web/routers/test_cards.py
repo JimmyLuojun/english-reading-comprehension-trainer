@@ -12,6 +12,7 @@ def test_register_card_routes_adds_card_endpoints() -> None:
     assert ("POST", "/mark/sentence/{sentence_id}") in paths
     assert ("POST", "/mark/sentence/{sentence_id}/translation") in paths
     assert ("DELETE", "/mark/sentence/{sentence_id}") in paths
+    assert ("PATCH", "/mark/sentence/{sentence_id}") in paths
     assert ("POST", "/mark/word") in paths
     assert ("DELETE", "/mark/word/{card_id}") in paths
     assert ("PATCH", "/mark/word/{card_id}") in paths

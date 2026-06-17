@@ -20,11 +20,16 @@ def _sentence_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{_escape(_date(card['due_at']))}</td>"
         f"<td>{_escape((card.get('user_translation') or '')[:80])}</td>"
-        f"<td>{_escape(card['sentence_text'][:100])}</td>"
+        f"<td>{_escape((card.get('user_note') or '')[:80])}</td>"
+        f"<td>{_sentence_source_link(card)}</td>"
         "</tr>"
         for card in cards
     )
-    return f"<table><thead><tr><th>ID</th><th>State</th><th>Due</th><th>Translation</th><th>Text</th></tr></thead><tbody>{rows}</tbody></table>"
+    return (
+        "<table><thead><tr><th>ID</th><th>State</th><th>Due</th>"
+        "<th>Translation</th><th>Takeaway</th><th>Text</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
 
 def _word_cards_table(cards: list[dict[str, Any]]) -> str:
     if not cards:
@@ -50,6 +55,15 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
         "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
+
+
+def _sentence_source_link(card: dict[str, Any]) -> str:
+    text = _escape(str(card.get("sentence_text") or "")[:100])
+    href = str(card.get("source_href") or "").strip()
+    if not href:
+        return text
+    return f'<a class="source-link" href="{_escape(href)}">{text}</a>'
+
 
 def _cards_return_script() -> str:
     return """

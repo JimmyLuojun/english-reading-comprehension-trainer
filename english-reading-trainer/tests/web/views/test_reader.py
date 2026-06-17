@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.web.views.reader import (
+    _analysis_panel,
     _group_sentence_paragraphs,
     _highlight_word_cards,
     _reader_boundary_link,
@@ -50,6 +51,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
             "has_analysis": 1,
             "analysis_is_stale": 1,
             "user_translation": "<translation>",
+            "user_note": "<takeaway>",
             "ai_analysis_id": 9,
         },
         2,
@@ -59,6 +61,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
     assert 'class="reader-sentence marked translated analyzed-stale"' in html
     assert 'title="Translation saved"' in html
     assert 'data-translation="&lt;translation&gt;"' in html
+    assert 'data-note="&lt;takeaway&gt;"' in html
     assert 'data-word-card="3"' in html
 
 
@@ -89,6 +92,18 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
     assert 'id="toolbar-translation-delete"' in html
     assert "Delete translation" in html
     assert "hidden" in html
+
+
+def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
+    html = _analysis_panel()
+
+    assert 'id="sentence-panel-translation"' in html
+    assert "Your translation" in html
+    assert 'id="sentence-panel-note"' in html
+    assert "Takeaway" in html
+    assert "Save takeaway" in html
+    assert html.index("Subject skeleton") < html.index("Your translation")
+    assert html.index("Your translation") < html.index("Takeaway")
 
 
 def test_reader_media_and_boundary_links() -> None:

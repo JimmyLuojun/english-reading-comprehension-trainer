@@ -109,6 +109,19 @@ def test_fetch_sentence_for_analysis_uses_archived_translation(
     assert sentence["user_translation"] == "猫坐着。"
 
 
+def test_fetch_sentence_for_analysis_includes_takeaway_note(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    save_sentence_translation(db, sentence_id, "猫坐着。", user_note="注意 sat 的状态")
+
+    sentence = _fetch_sentence_for_analysis(db, sentence_id)
+
+    assert sentence["user_note"] == "注意 sat 的状态"
+
+
 def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
     db = DatabaseConnection(tmp_path / "test.db")
     db.apply_migrations(MIGRATIONS_DIR)
@@ -129,6 +142,7 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
 
     assert sentence_payload["ok"] is True
     assert sentence_payload["analysis"] == {"ok": True}
+    assert sentence_payload["user_note"] == ""
     assert _fetch_cache_metadata(db, cache_id) == {
         "prompt_version": "v1",
         "model": "model",
