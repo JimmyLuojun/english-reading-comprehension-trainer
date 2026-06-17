@@ -79,6 +79,7 @@ from app.web.queries import (
     _lookup_book_id_by_hash,
     _purge_book_assets_dir,
 )
+from app.web.services.analysis import analyze_sentence_for_reader, analyze_word_card_for_reader
 from app.web.utils import _format_mb, _resolve_title
 from app.web.views import (
     _books_table,
@@ -99,7 +100,6 @@ from app.web.views import (
 )
 
 def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
-    import app.web.fastapi_app as fastapi_app
     @web_app.get("/analysis/sentence/{sentence_id}")
     def get_sentence_analysis(sentence_id: int) -> JSONResponse:
         payload = _fetch_sentence_analysis_payload(db_factory(), sentence_id)
@@ -120,64 +120,15 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         request: Request,
     ) -> JSONResponse:
         form = await _read_form(request)
-        db = db_factory()
-        try:
-            translation = form.get("user_translation")
-            if translation is not None and translation.strip():
-                save_sentence_translation(db, sentence_id, translation)
+        outcome = analyze_sentence_for_reader(
+            db_factory(),
+            sentence_id,
+            user_translation=form.get("user_translation"),
+        )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
 
-            sentence = _fetch_sentence_for_analysis(db, sentence_id)
-            result = fastapi_app.analyze_sentence(
-                db,
-                sentence["text"],
-                user_translation=sentence.get("user_translation") or None,
-            )
-            if not result.is_valid:
-                return JSONResponse(
-                    {
-                        "ok": False,
-                        "error": "AI response failed validation.",
-                        "retry": True,
-                    },
-                    status_code=502,
-                )
-
-            cache_meta = _fetch_cache_metadata(db, result.cache_id)
-            save_sentence_analysis(
-                db,
-                sentence_id,
-                json.dumps(result.data, ensure_ascii=False),
-                model=cache_meta.get("model") or get_ai_provider_settings().model,
-                prompt_version=cache_meta.get("prompt_version")
-                or _active_sentence_prompt_version(
-                    db,
-                    sentence.get("user_translation") or None,
-                ),
-            )
-        except ValueError as exc:
-            return JSONResponse(
-                {"ok": False, "error": str(exc), "retry": False},
-                status_code=400,
-            )
-        except (FileNotFoundError, RuntimeError) as exc:
-            return JSONResponse(
-                {"ok": False, "error": str(exc), "retry": True},
-                status_code=502,
-            )
-
-        payload = _fetch_sentence_analysis_payload(db, sentence_id)
-        if payload is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "error": "Analysis was not saved.",
-                    "retry": True,
-                },
-                status_code=500,
-            )
-        payload["from_cache"] = result.from_cache
-        payload["is_stale"] = bool(payload["is_stale"] or result.is_stale)
-        return JSONResponse(payload)
     @web_app.get("/analysis/word/{card_id}")
     def get_word_analysis(card_id: int) -> JSONResponse:
         payload = _fetch_word_analysis_payload(db_factory(), card_id)
@@ -190,34 +141,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
 
     @web_app.post("/analysis/word/{card_id}")
     async def analyze_word_endpoint(card_id: int) -> JSONResponse:
-        db = db_factory()
-        card = get_word_card(db, card_id)
-        if card is None:
-            return JSONResponse({"ok": False, "error": "Word card not found."}, status_code=404)
-        try:
-            sentence = _fetch_sentence_for_analysis(db, card["first_sentence_id"])
-            result = fastapi_app.analyze_word(
-                db,
-                surface_form=card["surface_form"],
-                sentence_text=sentence["text"],
-                allow_stale=False,
-            )
-            if not result.is_valid:
-                return JSONResponse(
-                    {"ok": False, "error": "AI response failed validation.", "retry": True},
-                    status_code=502,
-                )
-            fastapi_app._update_word_card_analysis_id(db, card_id, result.cache_id)
-        except ValueError as exc:
-            return JSONResponse({"ok": False, "error": str(exc), "retry": False}, status_code=400)
-        except (FileNotFoundError, RuntimeError) as exc:
-            return JSONResponse({"ok": False, "error": str(exc), "retry": True}, status_code=502)
-        payload = _fetch_word_analysis_payload(db, card_id)
-        if payload is None:
-            return JSONResponse(
-                {"ok": False, "error": "Analysis was not saved.", "retry": True},
-                status_code=500,
-            )
-        payload["from_cache"] = result.from_cache
-        payload["is_stale"] = bool(payload["is_stale"] or result.is_stale)
-        return JSONResponse(payload)
+        outcome = analyze_word_card_for_reader(db_factory(), card_id)
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)

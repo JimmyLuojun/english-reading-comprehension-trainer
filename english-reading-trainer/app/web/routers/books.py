@@ -79,6 +79,7 @@ from app.web.queries import (
     _lookup_book_id_by_hash,
     _purge_book_assets_dir,
 )
+from app.web.services.books import delete_book_and_assets
 from app.web.utils import _format_mb, _resolve_title
 from app.web.views import (
     _books_table,
@@ -117,10 +118,9 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
     @web_app.post("/books/{book_id}/delete")
     def delete_book(book_id: int) -> Any:
         db = db_factory()
-        result = _delete_book(db, book_id)
+        result = delete_book_and_assets(db, book_id)
         if result is None:
             return _error_page("Book not found", status_code=404)
-        _purge_book_assets_dir(db, book_id)
         return _redirect("/books")
 
     @web_app.get("/books/{book_id}", response_class=HTMLResponse)

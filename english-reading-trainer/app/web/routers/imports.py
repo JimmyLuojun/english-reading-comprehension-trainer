@@ -79,6 +79,7 @@ from app.web.queries import (
     _lookup_book_id_by_hash,
     _purge_book_assets_dir,
 )
+from app.web.services.imports import ImportOutcome, import_epub_file, import_text_bytes
 from app.web.utils import _format_mb, _resolve_title
 from app.web.views import (
     _books_table,
@@ -140,7 +141,14 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             )
         if not raw.strip():
             return _error_page("Uploaded file is empty.", status_code=400)
-        return _do_import(db_factory(), raw, title, author)
+        return _import_outcome_response(
+            import_text_bytes(
+                db_factory(),
+                raw,
+                form_title=title,
+                author=author,
+            )
+        )
 
     @web_app.post("/import/paste")
     async def import_paste(request: Request) -> Any:
@@ -156,23 +164,21 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             )
         if not text.strip():
             return _error_page("Pasted text is empty.", status_code=400)
-        return _do_import(db_factory(), raw, title, author)
+        return _import_outcome_response(
+            import_text_bytes(
+                db_factory(),
+                raw,
+                form_title=title,
+                author=author,
+            )
+        )
 
-    def _do_import(
-        db: DatabaseConnection,
-        raw: bytes,
-        form_title: str,
-        author: str,
-    ) -> Any:
-        title = _resolve_title(form_title, raw)
-        try:
-            result = import_text(db, raw, title=title, author=author.strip())
-        except DuplicateBookError:
-            existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
-            return _duplicate_page(existing_id)
-        except ValueError as exc:
-            return _error_page(str(exc), status_code=400)
-        return _redirect(f"/read/{result.book_id}")
+    def _import_outcome_response(outcome: ImportOutcome) -> Any:
+        if outcome.is_duplicate:
+            return _duplicate_page(outcome.duplicate_book_id)
+        if outcome.is_error:
+            return _error_page(outcome.error or "Import failed.", status_code=outcome.status_code)
+        return _redirect(f"/read/{outcome.book_id}")
 
     def _do_import_epub(
         db: DatabaseConnection,
@@ -180,17 +186,11 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         form_title: str,
         author: str,
     ) -> Any:
-        try:
-            file_hash = calculate_epub_file_hash(file_path)
-            result = import_epub(
+        return _import_outcome_response(
+            import_epub_file(
                 db,
                 file_path,
-                title=form_title.strip() or None,
-                author=author.strip() or None,
+                form_title=form_title,
+                author=author,
             )
-        except EpubDuplicateBookError:
-            existing_id = _lookup_book_id_by_hash(db, file_hash)
-            return _duplicate_page(existing_id)
-        except (ValueError, FileNotFoundError) as exc:
-            return _error_page(str(exc), status_code=400)
-        return _redirect(f"/read/{result.book_id}")
+        )
