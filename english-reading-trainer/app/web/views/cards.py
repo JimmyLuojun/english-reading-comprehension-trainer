@@ -11,6 +11,7 @@ from app.web.views.components import (
 )
 from app.web.views.layout import _date, _escape
 
+
 def _sentence_cards_table(cards: list[dict[str, Any]]) -> str:
     if not cards:
         return '<p class="empty">No sentence cards.</p>'
@@ -19,8 +20,8 @@ def _sentence_cards_table(cards: list[dict[str, Any]]) -> str:
         f"<td>{card['id']}</td>"
         f"<td>{_escape(card['mastery_state'])}</td>"
         f"<td>{_escape(_date(card['due_at']))}</td>"
-        f"<td>{_escape((card.get('user_translation') or '')[:80])}</td>"
-        f"<td>{_escape((card.get('user_note') or '')[:80])}</td>"
+        f"<td>{_sentence_translation_cell(card)}</td>"
+        f"<td>{_sentence_takeaway_cell(card)}</td>"
         f"<td>{_sentence_source_link(card)}</td>"
         "</tr>"
         for card in cards
@@ -57,8 +58,67 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
     )
 
 
+def _sentence_translation_cell(card: dict[str, Any]) -> str:
+    return _sentence_edit_cell(
+        card,
+        field="translation",
+        value_key="user_translation",
+        placeholder="Edit your Chinese understanding",
+        aria_label="edit translation",
+    )
+
+
+def _sentence_takeaway_cell(card: dict[str, Any]) -> str:
+    return _sentence_edit_cell(
+        card,
+        field="takeaway",
+        value_key="user_note",
+        placeholder="Edit your takeaway",
+        aria_label="edit takeaway",
+    )
+
+
+def _sentence_edit_cell(
+    card: dict[str, Any],
+    *,
+    field: str,
+    value_key: str,
+    placeholder: str,
+    aria_label: str,
+) -> str:
+    sentence_id = card["sentence_id"]
+    value = str(card.get(value_key) or "").strip()
+    escaped_value = _escape(value)
+    display = escaped_value if value else "—"
+    return (
+        f'<div class="sentence-field-cell sentence-field-{field}" '
+        f'data-sentence-id="{sentence_id}" data-sentence-field="{field}">'
+        f'<span class="sentence-field-text" data-sentence-id="{sentence_id}" '
+        f'data-sentence-field="{field}">{display}</span>'
+        '<button type="button" class="note-edit-btn sentence-field-edit-btn" '
+        f'data-sentence-id="{sentence_id}" '
+        f'data-sentence-field="{field}" aria-label="{aria_label}">✎</button>'
+        f'<div class="sentence-field-edit" data-sentence-id="{sentence_id}" '
+        f'data-sentence-field="{field}" hidden>'
+        '<textarea class="sentence-field-input" rows="3" '
+        f'data-sentence-id="{sentence_id}" data-sentence-field="{field}" '
+        f'placeholder="{_escape(placeholder)}">'
+        f"{escaped_value}</textarea>"
+        '<div class="sentence-field-actions">'
+        '<button type="button" class="small sentence-field-save-btn" '
+        f'data-sentence-id="{sentence_id}" data-sentence-field="{field}">Save</button>'
+        '<button type="button" class="small sentence-field-cancel-btn" '
+        f'data-sentence-id="{sentence_id}" data-sentence-field="{field}">Cancel</button>'
+        "</div>"
+        f'<p class="toolbar-status sentence-field-status" data-sentence-id="{sentence_id}" '
+        f'data-sentence-field="{field}" aria-live="polite"></p>'
+        "</div>"
+        "</div>"
+    )
+
+
 def _sentence_source_link(card: dict[str, Any]) -> str:
-    text = _escape(str(card.get("sentence_text") or "")[:100])
+    text = _escape(str(card.get("sentence_text") or ""))
     href = str(card.get("source_href") or "").strip()
     if not href:
         return text

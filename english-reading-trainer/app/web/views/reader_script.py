@@ -47,6 +47,7 @@ def _selection_script() -> str:
       const crossSentenceDelete = document.getElementById("toolbar-cross-sentence-delete");
       const dismissButton = document.getElementById("toolbar-dismiss");
       const panel = document.getElementById("analysis-panel");
+      const panelTab = document.getElementById("analysis-panel-tab");
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
       const panelRetry = document.getElementById("analysis-panel-retry");
@@ -1172,12 +1173,14 @@ def _selection_script() -> str:
 
       function openPanel() {
         panel.hidden = false;
+        if (panelTab) panelTab.hidden = true;
         document.body.classList.add("analysis-open");
         updatePreviousAnalysisButton();
       }
 
       function closePanel() {
         panel.hidden = true;
+        if (panelTab) panelTab.hidden = false;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
         activeAnalysisSourceSentenceId = null;
@@ -1188,6 +1191,29 @@ def _selection_script() -> str:
         reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
           el.classList.remove("word-analysis-active");
         });
+      }
+
+      function openPanelPlaceholder() {
+        setSentenceMode();
+        activeAnalysisSentenceId = null;
+        activeAnalysisSourceSentenceId = null;
+        activeAnalysisPayload = null;
+        activeAnalysisLabel = "";
+        clearAnalysisHistory();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = "Select a sentence or marked word, then choose AI analysis.";
+        panelMeta.textContent = "";
+        panelRetry.hidden = true;
+        if (panelRetryPro) panelRetryPro.hidden = true;
+        simplified.textContent = "";
+        gloss.textContent = "";
+        skeleton.textContent = "";
+        diagnosis.replaceChildren();
+        if (sentencePanelTranslation) sentencePanelTranslation.value = "";
+        if (sentencePanelNote) sentencePanelNote.value = "";
+        if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
       }
 
       function setPanelLoading(message) {
@@ -1824,6 +1850,9 @@ def _selection_script() -> str:
       });
       panelClose.addEventListener("click", closePanel);
       panelReturn.addEventListener("click", closePanel);
+      if (panelTab) {
+        panelTab.addEventListener("click", openPanelPlaceholder);
+      }
       if (panelPrevious) {
         panelPrevious.addEventListener("click", restorePreviousAnalysis);
       }

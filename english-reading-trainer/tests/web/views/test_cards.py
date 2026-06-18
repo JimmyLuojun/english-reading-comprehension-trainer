@@ -7,6 +7,8 @@ from app.web.views.cards import (
     _cards_return_script,
     _note_edit_cell,
     _sentence_cards_table,
+    _sentence_takeaway_cell,
+    _sentence_translation_cell,
     _word_card_sources_page,
     _word_cards_table,
 )
@@ -58,28 +60,53 @@ def test_note_cell_hides_ai_duplicate_and_return_script_links_back() -> None:
     assert "glossary_return_url" in _cards_return_script()
 
 
-def test_sentence_cards_table_escapes_translation() -> None:
+def test_sentence_cards_table_escapes_editable_fields_and_full_text() -> None:
+    full_sentence = "This is a long source sentence that must not be truncated " * 3
     html = _sentence_cards_table(
         [
             {
                 "id": 1,
+                "sentence_id": 3,
                 "mastery_state": "new",
                 "due_at": "2026-06-17T00:00:00",
                 "user_translation": "<translation>",
                 "user_note": "<takeaway>",
-                "sentence_text": "Sentence",
+                "sentence_text": full_sentence,
                 "source_href": "/read/1?chapter=2&sentence_id=3&panel=analysis#sentence-3",
             }
         ]
     )
 
     assert "<th>Takeaway</th>" in html
+    assert 'data-sentence-field="translation"' in html
+    assert 'data-sentence-field="takeaway"' in html
     assert "&lt;translation&gt;" in html
     assert "&lt;takeaway&gt;" in html
+    assert full_sentence in html
     assert (
         'href="/read/1?chapter=2&amp;sentence_id=3&amp;panel=analysis#sentence-3"'
         in html
     )
+
+
+def test_sentence_translation_and_takeaway_cells_use_pencil_edit_controls() -> None:
+    update_cell = _sentence_translation_cell(
+        {"sentence_id": 3, "user_translation": "旧译文"}
+    )
+    add_cell = _sentence_translation_cell({"sentence_id": 4, "user_translation": ""})
+    takeaway_cell = _sentence_takeaway_cell({"sentence_id": 5, "user_note": "复盘要点"})
+
+    assert "旧译文" in update_cell
+    assert "Update translation" not in update_cell
+    assert "Add translation" not in add_cell
+    assert 'class="note-edit-btn sentence-field-edit-btn"' in update_cell
+    assert ">✎</button>" in update_cell
+    assert 'class="sentence-field-input"' in update_cell
+    assert 'placeholder="Edit your Chinese understanding"' in update_cell
+    assert ">—</span>" in add_cell
+    assert "复盘要点" in takeaway_cell
+    assert 'data-sentence-field="takeaway"' in takeaway_cell
+    assert 'placeholder="Edit your takeaway"' in takeaway_cell
 
 
 def test_word_card_sources_page_renders_sources_candidates_and_forms() -> None:

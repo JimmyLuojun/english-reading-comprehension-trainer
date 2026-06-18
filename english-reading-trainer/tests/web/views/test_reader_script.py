@@ -12,6 +12,10 @@ def test_selection_script_contains_reader_toolbar_contracts() -> None:
     assert "toolbar-analysis-word-form" in script
     assert "restoreProgress" in script
     assert "analysisHistory" in script
+    assert 'document.getElementById("analysis-panel-tab")' in script
+    assert "function openPanelPlaceholder()" in script
+    assert 'panelTab.addEventListener("click", openPanelPlaceholder);' in script
+    assert "Select a sentence or marked word, then choose AI analysis." in script
 
 
 def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:

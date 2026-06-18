@@ -47,7 +47,10 @@ def _reader_view(
       data-chapter-idx="{chapter_idx}" data-return-to="{_escape(return_to)}"
       data-restore-progress="{restore_flag}">
       <header class="reader-header">
-        <a class="reader-back" href="/books/{book_id}">Chapters</a>
+        <div class="reader-header-actions" aria-label="Reader navigation">
+          <a class="button small" href="/books">All books</a>
+          <a class="button small" href="/books/{book_id}">Chapters</a>
+        </div>
         <h1 class="reader-title">{_escape(book_title)}</h1>
         <h2 class="reader-chapter">{_escape(section_label)}</h2>
       </header>
@@ -329,6 +332,9 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
 
 def _analysis_panel() -> str:
     return """
+    <button id="analysis-panel-tab" class="analysis-panel-tab" type="button" aria-controls="analysis-panel">
+      Analysis
+    </button>
     <aside id="analysis-panel" class="analysis-panel" hidden aria-live="polite">
       <header class="analysis-panel-header">
         <div>

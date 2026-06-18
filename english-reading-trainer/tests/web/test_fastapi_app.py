@@ -254,6 +254,10 @@ class TestBasicPages:
         assert response.status_code == 200
         assert "Reading Trainer" in response.text
         assert "Due now" in response.text
+        assert 'href="/books" aria-label="Books: 0"' in response.text
+        assert 'href="/cards#sentence-cards" aria-label="Sentence cards: 0"' in response.text
+        assert 'href="/cards#word-cards" aria-label="Word cards: 0"' in response.text
+        assert 'href="/review" aria-label="Due now: 0"' in response.text
 
     def test_books_page_lists_imported_book(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -702,9 +706,13 @@ class TestReadingAndMarking:
         assert 'id="toolbar-analysis-open"' in response.text
         assert 'id="toolbar-translation-editor"' in response.text
         assert 'id="analysis-panel"' in response.text
+        assert 'id="analysis-panel-tab"' in response.text
         assert 'id="analysis-word-meaning-zh"' in response.text
         assert ".analysis-panel {\n      position: fixed;" in response.text
-        assert "width: min(520px, 92vw);" in response.text
+        assert "--analysis-panel-width: 520px" in response.text
+        assert "padding-right: var(--analysis-panel-width);" in response.text
+        assert "width: min(var(--analysis-panel-width), 92vw);" in response.text
+        assert "@media (max-width: 1179px)" in response.text
         assert ".reader-page.analysis-open .reader" not in response.text
         assert "window.prompt" not in response.text
         assert "reader:progress:book:${bookId}" in response.text
@@ -1667,6 +1675,13 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert "Sentence Cards" in response.text
+        assert 'id="sentence-cards"' in response.text
+        assert 'id="word-cards"' in response.text
+        assert "Add translation" not in response.text
+        assert "Update translation" not in response.text
+        assert 'aria-label="edit translation"' in response.text
+        assert 'aria-label="edit takeaway"' in response.text
+        assert 'class="sentence-field-input"' in response.text
         assert "cat" in response.text
         assert 'id="card-' in response.text
         assert 'data-delete-word-card="' in response.text

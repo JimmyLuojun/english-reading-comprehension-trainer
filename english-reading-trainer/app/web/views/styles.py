@@ -17,6 +17,7 @@ def _css() -> str:
       --danger: #b42318;
       --danger-line: #fecdca;
       --danger-bg: #fff1f0;
+      --analysis-panel-width: 520px;
     }
     * { box-sizing: border-box; }
     body {
@@ -76,6 +77,11 @@ def _css() -> str:
       width: 100%;
       margin: 0;
     }
+    @media (min-width: 1180px) {
+      .reader-page main {
+        padding-right: var(--analysis-panel-width);
+      }
+    }
     h1 { margin: 0; font-size: 26px; }
     h2 { margin: 24px 0 10px; font-size: 18px; }
     p { margin: 6px 0; }
@@ -94,13 +100,24 @@ def _css() -> str:
       margin-bottom: 20px;
     }
     .metric {
+      display: block;
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 12px;
+      color: inherit;
+      text-decoration: none;
     }
     .metric span { display: block; color: var(--muted); font-size: 13px; }
     .metric strong { font-size: 24px; }
+    .metric-link:hover, .metric-link:focus {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+    }
+    .metric-link:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     .band {
       background: var(--surface);
       border: 1px solid var(--line);
@@ -137,13 +154,12 @@ def _css() -> str:
     .reader-header {
       margin: 0 0 32px;
     }
-    .reader-back {
-      display: inline-block;
+    .reader-header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       margin-bottom: 18px;
-      color: var(--muted);
-      text-decoration: none;
     }
-    .reader-back:hover { color: var(--accent-strong); }
     .reader-title {
       margin: 0 0 4px;
       font-size: 28px;
@@ -377,7 +393,7 @@ def _css() -> str:
       top: 49px;
       right: 0;
       bottom: 0;
-      width: min(520px, 92vw);
+      width: min(var(--analysis-panel-width), 92vw);
       overflow-y: auto;
       border-left: 1px solid var(--line);
       background: #ffffff;
@@ -385,6 +401,22 @@ def _css() -> str:
       padding: 18px;
     }
     .analysis-panel[hidden] { display: none; }
+    .analysis-panel-tab {
+      position: fixed;
+      z-index: 14;
+      top: 96px;
+      right: 0;
+      border-right: 0;
+      border-radius: 6px 0 0 6px;
+      padding: 10px 8px;
+      color: var(--accent-strong);
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      box-shadow: -8px 0 22px rgba(15, 23, 42, 0.12);
+    }
+    .analysis-open .analysis-panel-tab {
+      display: none;
+    }
     .analysis-panel-header {
       display: flex;
       justify-content: space-between;
@@ -623,6 +655,18 @@ def _css() -> str:
       padding: 12px;
       background: var(--surface);
     }
+    @media (max-width: 1179px) {
+      .analysis-panel {
+        inset: 0;
+        width: 100%;
+        border-left: 0;
+        padding: 16px;
+      }
+      .analysis-panel-header {
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+    }
     @media (max-width: 780px) {
       nav { overflow-x: auto; padding: 10px; }
       main { width: min(100vw - 20px, 1180px); margin-top: 16px; }
@@ -651,16 +695,6 @@ def _css() -> str:
       }
       .translation-editor {
         width: 100%;
-      }
-      .analysis-panel {
-        inset: 0;
-        width: 100%;
-        border-left: 0;
-        padding: 16px;
-      }
-      .analysis-panel-header {
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--line);
       }
     }
     .hover-popover {
@@ -744,6 +778,33 @@ def _css() -> str:
     }
     .speak-text {
       overflow-wrap: anywhere;
+    }
+    .sentence-field-cell {
+      min-width: 260px;
+      max-width: 560px;
+    }
+    .sentence-field-text {
+      display: inline;
+      margin-right: 4px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .sentence-field-edit {
+      margin-top: 6px;
+      display: grid;
+      gap: 6px;
+    }
+    .sentence-field-edit[hidden] {
+      display: none;
+    }
+    .sentence-field-input {
+      width: 100%;
+      min-height: 72px;
+      resize: vertical;
+      border-color: var(--accent);
+    }
+    .sentence-field-status {
+      margin: 0;
     }
     .note-text { cursor: pointer; }
     .note-text:hover { text-decoration: underline dotted; }

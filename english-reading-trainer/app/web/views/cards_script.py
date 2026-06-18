@@ -1,4 +1,4 @@
-"""Browser script for card note editing, deletion, and pronunciation."""
+"""Browser script for card translation/note editing, deletion, and pronunciation."""
 
 from __future__ import annotations
 
@@ -61,6 +61,81 @@ def _def_edit_script() -> str:
     });
   }
 
+  function sentenceFieldElements(sentenceId, field) {
+    return {
+      text: document.querySelector(
+        '.sentence-field-text[data-sentence-id="' + sentenceId + '"][data-sentence-field="' + field + '"]'
+      ),
+      button: document.querySelector(
+        '.sentence-field-edit-btn[data-sentence-id="' + sentenceId + '"][data-sentence-field="' + field + '"]'
+      ),
+      editor: document.querySelector(
+        '.sentence-field-edit[data-sentence-id="' + sentenceId + '"][data-sentence-field="' + field + '"]'
+      ),
+      input: document.querySelector(
+        '.sentence-field-input[data-sentence-id="' + sentenceId + '"][data-sentence-field="' + field + '"]'
+      ),
+      status: document.querySelector(
+        '.sentence-field-status[data-sentence-id="' + sentenceId + '"][data-sentence-field="' + field + '"]'
+      )
+    };
+  }
+
+  function showSentenceFieldEditor(sentenceId, field) {
+    var parts = sentenceFieldElements(sentenceId, field);
+    if (!parts.input || !parts.editor) return;
+    if (parts.status) parts.status.textContent = "";
+    if (parts.text) parts.text.style.display = "none";
+    if (parts.button) parts.button.style.display = "none";
+    parts.editor.hidden = false;
+    parts.input.focus();
+    parts.input.select();
+  }
+
+  function hideSentenceFieldEditor(sentenceId, field) {
+    var parts = sentenceFieldElements(sentenceId, field);
+    if (!parts.editor) return;
+    parts.editor.hidden = true;
+    if (parts.text) parts.text.style.display = "";
+    if (parts.button) parts.button.style.display = "";
+    if (parts.status) parts.status.textContent = "";
+  }
+
+  function sentenceFieldSaveRequest(sentenceId, field, value) {
+    if (field === "translation") {
+      return fetch('/mark/sentence/' + encodeURIComponent(sentenceId) + '/translation', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({user_translation: value, return_to: '/cards'}).toString()
+      });
+    }
+    return fetch('/mark/sentence/' + encodeURIComponent(sentenceId), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({user_note: value}).toString()
+    });
+  }
+
+  function saveSentenceField(sentenceId, field) {
+    var parts = sentenceFieldElements(sentenceId, field);
+    if (!parts.input) return;
+    var value = parts.input.value.trim();
+    if (field === "translation" && !value) {
+      if (parts.status) parts.status.textContent = "Enter a translation first.";
+      return;
+    }
+    if (parts.status) parts.status.textContent = "Saving...";
+    sentenceFieldSaveRequest(sentenceId, field, value).then(function (response) {
+      if (!response.ok) throw new Error('Save failed');
+      if (parts.text) parts.text.textContent = value;
+      parts.input.value = value;
+      if (parts.text && !value) parts.text.textContent = '—';
+      hideSentenceFieldEditor(sentenceId, field);
+    }).catch(function () {
+      if (parts.status) parts.status.textContent = "Could not save.";
+    });
+  }
+
   if (supportsSpeech()) {
     pickPronunciationVoice();
     window.speechSynthesis.addEventListener('voiceschanged', pickPronunciationVoice);
@@ -115,11 +190,51 @@ def _def_edit_script() -> str:
       deleteWordCard(deleteButton);
       return;
     }
-    if (target.classList.contains('note-text') || target.classList.contains('note-edit-btn')) {
+    var sentenceFieldButton = target.closest ? target.closest('.sentence-field-edit-btn') : null;
+    if (sentenceFieldButton) {
+      e.preventDefault();
+      showSentenceFieldEditor(
+        sentenceFieldButton.dataset.sentenceId,
+        sentenceFieldButton.dataset.sentenceField
+      );
+      return;
+    }
+    var sentenceFieldSave = target.closest ? target.closest('.sentence-field-save-btn') : null;
+    if (sentenceFieldSave) {
+      e.preventDefault();
+      saveSentenceField(
+        sentenceFieldSave.dataset.sentenceId,
+        sentenceFieldSave.dataset.sentenceField
+      );
+      return;
+    }
+    var sentenceFieldCancel = target.closest ? target.closest('.sentence-field-cancel-btn') : null;
+    if (sentenceFieldCancel) {
+      e.preventDefault();
+      hideSentenceFieldEditor(
+        sentenceFieldCancel.dataset.sentenceId,
+        sentenceFieldCancel.dataset.sentenceField
+      );
+      return;
+    }
+    if (
+      (target.classList.contains('note-text') || target.classList.contains('note-edit-btn')) &&
+      target.dataset.cardId
+    ) {
       showInput(target.dataset.cardId);
     }
   });
   document.addEventListener('keydown', function (e) {
+    if (e.target.classList.contains('sentence-field-input')) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        saveSentenceField(e.target.dataset.sentenceId, e.target.dataset.sentenceField);
+      }
+      if (e.key === 'Escape') {
+        hideSentenceFieldEditor(e.target.dataset.sentenceId, e.target.dataset.sentenceField);
+      }
+      return;
+    }
     if (!e.target.classList.contains('note-input')) return;
     if (e.key === 'Enter')  { e.preventDefault(); saveInput(e.target.dataset.cardId); }
     if (e.key === 'Escape') {

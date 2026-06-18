@@ -13,6 +13,20 @@ def test_def_edit_script_contains_note_edit_contracts() -> None:
     assert "user_note" in script
 
 
+def test_def_edit_script_contains_translation_edit_contracts() -> None:
+    script = _def_edit_script()
+
+    assert "sentence-field-edit-btn" in script
+    assert "sentence-field-input" in script
+    assert "/mark/sentence/" in script
+    assert "/translation" in script
+    assert "user_translation" in script
+    assert "user_note" in script
+    assert "Enter a translation first." in script
+    assert "Update translation" not in script
+    assert "Add translation" not in script
+
+
 def test_def_edit_script_contains_word_delete_contracts() -> None:
     script = _def_edit_script()
 

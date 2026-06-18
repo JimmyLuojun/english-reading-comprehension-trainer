@@ -9,6 +9,7 @@ from app.web.views.reader import (
     _reader_boundary_link,
     _reader_media_block,
     _reader_sentence_span,
+    _reader_view,
     _selection_toolbar,
     _word_cards_by_sentence,
 )
@@ -94,6 +95,25 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
     assert "hidden" in html
 
 
+def test_reader_view_has_book_and_chapter_navigation() -> None:
+    html = _reader_view(
+        rows=[],
+        return_to="/read/7",
+        chapter_id=9,
+        word_cards=[],
+        book_id=7,
+        book_title="Book",
+        chapter_idx=1,
+        chapter_title="Chapter 1",
+        section_kind="chapter",
+        chapter_number=1,
+        restore_progress=False,
+    )
+
+    assert '<a class="button small" href="/books">All books</a>' in html
+    assert '<a class="button small" href="/books/7">Chapters</a>' in html
+
+
 def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     html = _analysis_panel()
 
@@ -102,6 +122,8 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert 'id="sentence-panel-note"' in html
     assert "Takeaway" in html
     assert "Save takeaway" in html
+    assert 'id="analysis-panel-tab"' in html
+    assert 'aria-controls="analysis-panel"' in html
     assert html.index("Subject skeleton") < html.index("Your translation")
     assert html.index("Your translation") < html.index("Takeaway")
 

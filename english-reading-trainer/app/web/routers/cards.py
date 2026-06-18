@@ -194,9 +194,9 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         </section>
         {_cards_return_script()}
         <section class="band">
-          <h2>Sentence Cards</h2>
+          <h2 id="sentence-cards">Sentence Cards</h2>
           {_sentence_cards_table(sentence_cards)}
-          <h2>Word Cards</h2>
+          <h2 id="word-cards">Word Cards</h2>
           {_word_cards_table(word_cards)}
         </section>
         """

@@ -40,13 +40,13 @@ def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], Databas
           <a class="button primary" href="/review">Start review</a>
         </section>
         <section class="metrics">
-          {_metric("Books", stats["books"])}
+          {_metric("Books", stats["books"], href="/books")}
           {_metric("Sentences", stats["sentences"])}
-          {_metric("Sentence cards", stats["sentence_cards"])}
-          {_metric("Word cards", stats["word_cards"])}
-          {_metric("Due now", stats["due_cards"])}
+          {_metric("Sentence cards", stats["sentence_cards"], href="/cards#sentence-cards")}
+          {_metric("Word cards", stats["word_cards"], href="/cards#word-cards")}
+          {_metric("Due now", stats["due_cards"], href="/review")}
         </section>
-        <section class="band">
+        <section class="band" id="due-queue">
           <div class="split">
             <div>
               <h2>Due Queue</h2>
