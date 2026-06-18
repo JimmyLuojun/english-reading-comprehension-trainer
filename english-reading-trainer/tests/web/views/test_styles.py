@@ -112,6 +112,44 @@ def test_css_reader_body_type_is_larger_without_global_font_change() -> None:
     assert 'font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' in css
 
 
+def test_css_analysis_panel_body_matches_reading_size() -> None:
+    css = _css()
+    analysis_text = _css_block(css, ".analysis-text {", ".glossary-word {")
+
+    # Panel body text matches the reader paragraph size (20px).
+    assert "font-size: 20px;" in analysis_text
+
+
+def test_css_analysis_section_labels_are_prominent_bilingual() -> None:
+    css = _css()
+
+    assert ".section-label-zh {" in css
+    assert ".section-label-en {" in css
+    zh = _css_block(css, ".section-label-zh {", ".analysis-section h4 .section-label-zh")
+    assert "color: var(--accent-strong);" in zh
+    assert "font-size: 16px;" in zh
+    h3 = _css_block(css, ".analysis-section h3 {", ".analysis-section h4 {")
+    assert "border-left: 4px solid var(--accent);" in h3
+
+
+def test_css_word_card_lexical_type_colors_keep_sentence_yellow() -> None:
+    css = _css()
+
+    assert "[data-sentence-id].marked" in css
+    assert "#ffe58a" in css
+    assert '[data-word-card][data-lexical-type="word"]' in css
+    assert '[data-word-card][data-lexical-type="phrase"]' in css
+    assert '[data-word-card][data-lexical-type="collocation"]' in css
+    assert '[data-word-card][data-lexical-type="idiom"]' in css
+    assert "rgba(16, 185, 129" in css
+    assert "rgba(168, 85, 247" in css
+    assert "rgba(249, 115, 22" in css
+    assert '.glossary-word[data-lexical-type="word"]' in css
+    assert '.glossary-word[data-lexical-type="phrase"]' in css
+    assert '.glossary-word[data-lexical-type="collocation"]' in css
+    assert '.glossary-word[data-lexical-type="idiom"]' in css
+
+
 def test_css_visual_refresh_followups_fill_primary_after_shared_hover() -> None:
     css = _css()
     shared_hover_selector = "nav a.active, .button.primary, button:hover, .button:hover"

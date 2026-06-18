@@ -42,16 +42,27 @@ def _review_prompt_cell(item: Any) -> str:
 
 def _review_answer_cell(item: Any, return_to: str) -> str:
     answer = (getattr(item, "answer", "") or "").strip()
+    takeaway = (getattr(item, "takeaway", "") or "").strip()
     ai_meaning = (getattr(item, "ai_meaning", "") or "").strip()
     reveal_parts = []
-    if answer:
-        reveal_parts.append(
-            f'<p class="hover-popover-text"><strong>Your note:</strong> {_escape(answer)}</p>'
-        )
-    if ai_meaning:
-        reveal_parts.append(
-            f'<p class="hover-popover-text"><strong>AI meaning:</strong> {_escape(ai_meaning)}</p>'
-        )
+    if item.card_type == CardType.SENTENCE:
+        if answer:
+            reveal_parts.append(
+                f'<p class="hover-popover-text"><strong>Translation:</strong> {_escape(answer)}</p>'
+            )
+        if takeaway:
+            reveal_parts.append(
+                f'<p class="hover-popover-text"><strong>Takeaway:</strong> {_escape(takeaway)}</p>'
+            )
+    else:
+        if answer:
+            reveal_parts.append(
+                f'<p class="hover-popover-text"><strong>Takeaway:</strong> {_escape(answer)}</p>'
+            )
+        if ai_meaning:
+            reveal_parts.append(
+                f'<p class="hover-popover-text"><strong>AI meaning:</strong> {_escape(ai_meaning)}</p>'
+            )
     reveal = _hover_popover("▶ Reveal", "".join(reveal_parts), align="right") if reveal_parts else ""
     options = "".join(
         f'<button type="submit" name="outcome" value="{outcome.value}">{outcome.value}</button>'

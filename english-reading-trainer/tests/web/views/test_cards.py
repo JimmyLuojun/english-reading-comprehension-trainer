@@ -39,6 +39,8 @@ def test_word_cards_table_renders_notes_ai_and_source() -> None:
     assert "my note" in _note_edit_cell(card)
     assert "Reveal" in _ai_meaning_cell(card)
     assert "/read/1#sentence-1" in html
+    assert "<th>Takeaway</th>" in html
+    assert "<th>Notes</th>" not in html
     assert "<th>Actions</th>" in html
     assert 'data-delete-word-card="1"' in html
     assert 'data-delete-label="cat"' in html

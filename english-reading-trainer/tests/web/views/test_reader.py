@@ -34,12 +34,13 @@ def test_highlight_word_cards_prefers_long_non_overlapping_match() -> None:
     html = _highlight_word_cards(
         "long term memory",
         [
-            {"id": 1, "surface_form": "long", "current_meaning": "", "user_note": ""},
+            {"id": 1, "surface_form": "long", "lexical_type": "word", "current_meaning": "", "user_note": ""},
             {"id": 2, "surface_form": "long term", "current_meaning": "phrase", "user_note": ""},
         ],
     )
 
     assert 'data-word-card="2"' in html
+    assert 'data-lexical-type=""' in html
     assert 'data-word-card="1"' not in html
 
 
@@ -56,7 +57,15 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
             "ai_analysis_id": 9,
         },
         2,
-        [{"id": 3, "surface_form": "cat", "current_meaning": "meaning", "user_note": ""}],
+        [
+            {
+                "id": 3,
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "current_meaning": "meaning",
+                "user_note": "",
+            }
+        ],
     )
 
     assert 'class="reader-sentence marked translated analyzed-stale"' in html
@@ -64,6 +73,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
     assert 'data-translation="&lt;translation&gt;"' in html
     assert 'data-note="&lt;takeaway&gt;"' in html
     assert 'data-word-card="3"' in html
+    assert 'data-lexical-type="word"' in html
 
 
 def test_reader_sentence_span_can_show_translation_without_marked_state() -> None:
@@ -88,11 +98,26 @@ def test_reader_sentence_span_can_show_translation_without_marked_state() -> Non
 
 
 def test_selection_toolbar_contains_delete_translation_action() -> None:
-    html = _selection_toolbar("/read/1", [])
+    html = _selection_toolbar(
+        "/read/1",
+        [
+            {
+                "id": 3,
+                "lemma": "cat",
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            }
+        ],
+    )
 
     assert 'id="toolbar-translation-delete"' in html
     assert "Delete translation" in html
     assert "hidden" in html
+    assert '"lexical_type": "word"' in html
+    assert 'data-analysis-mark="word">Mark word</button>' in html
+    assert 'type="button" name="lexical_type" value="word" data-analysis-mark="word"' in html
 
 
 def test_reader_view_has_book_and_chapter_navigation() -> None:
@@ -136,6 +161,18 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert html.index("Diagnosis") < html.index("Back to whole sentence")
     assert html.index("Back to whole sentence") < html.index("Your translation")
     assert html.index("Your translation") < html.index("Takeaway")
+
+
+def test_analysis_panel_labels_are_bilingual() -> None:
+    html = _analysis_panel()
+    assert '<span class="section-label-zh">简化英文</span>' in html
+    assert '<span class="section-label-en">Simplified English</span>' in html
+    assert '<span class="section-label-zh">中文释义</span>' in html
+    assert '<span class="section-label-en">Chinese meaning</span>' in html
+    assert '<span class="section-label-zh">阅读卡点</span>' in html
+    assert '<span class="section-label-zh">收获</span>' in html
+    # The legacy jargon label must be gone.
+    assert "Chinese gloss" not in html
 
 
 def test_reader_media_and_boundary_links() -> None:

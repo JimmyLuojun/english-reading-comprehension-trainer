@@ -73,6 +73,8 @@ def _insert_sentence_card(
     db: DatabaseConnection,
     *,
     text: str = "A due sentence.",
+    user_translation: str = "",
+    user_note: str = "",
     due_at: datetime = NOW,
     mastery_state: str = "new",
     ef: float = 2.5,
@@ -84,8 +86,9 @@ def _insert_sentence_card(
         return conn.execute(
             """INSERT INTO sentence_cards
                (sentence_id, created_at, last_reviewed_at, review_count,
-                mastery_state, ef, interval_days, repetitions, due_at, user_note)
-               VALUES (?, ?, NULL, ?, ?, ?, 0, ?, ?, '')""",
+                mastery_state, ef, interval_days, repetitions, due_at,
+                user_translation, user_note)
+               VALUES (?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?)""",
             (
                 sentence_id,
                 NOW.isoformat(),
@@ -94,6 +97,8 @@ def _insert_sentence_card(
                 ef,
                 repetitions,
                 due_at.isoformat(),
+                user_translation,
+                user_note,
             ),
         ).lastrowid
 
@@ -213,6 +218,23 @@ class TestListDueCards:
         items = list_due_cards(db, as_of=NOW)
 
         assert [item.card_id for item in items] == [due_id]
+
+    def test_sentence_due_card_includes_translation_and_takeaway(
+        self, db: DatabaseConnection
+    ) -> None:
+        card_id = _insert_sentence_card(
+            db,
+            text="A translated sentence.",
+            user_translation="一句译文。",
+            user_note="复盘要点。",
+            due_at=NOW,
+        )
+
+        item = list_due_cards(db, as_of=NOW)[0]
+
+        assert item.card_id == card_id
+        assert item.answer == "一句译文。"
+        assert item.takeaway == "复盘要点。"
 
     def test_archived_cards_are_excluded(self, db: DatabaseConnection) -> None:
         archived_id = _insert_sentence_card(db, text="Archived.", due_at=NOW)

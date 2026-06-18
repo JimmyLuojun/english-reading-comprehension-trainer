@@ -349,6 +349,32 @@ def _css() -> str:
       background: linear-gradient(transparent 42%, rgba(251, 191, 36, 0.52) 42%);
       text-decoration-color: #b45309;
     }
+    [data-word-card][data-lexical-type="word"] {
+      background: linear-gradient(transparent 54%, rgba(16, 185, 129, 0.28) 54%);
+      text-decoration-color: rgba(5, 150, 105, 0.78);
+    }
+    [data-word-card][data-lexical-type="word"]:hover {
+      background: linear-gradient(transparent 42%, rgba(16, 185, 129, 0.42) 42%);
+      text-decoration-color: #047857;
+    }
+    [data-word-card][data-lexical-type="phrase"] {
+      background: linear-gradient(transparent 54%, rgba(168, 85, 247, 0.24) 54%);
+      text-decoration-color: rgba(126, 34, 206, 0.74);
+    }
+    [data-word-card][data-lexical-type="phrase"]:hover {
+      background: linear-gradient(transparent 42%, rgba(168, 85, 247, 0.38) 42%);
+      text-decoration-color: #6b21a8;
+    }
+    [data-word-card][data-lexical-type="collocation"],
+    [data-word-card][data-lexical-type="idiom"] {
+      background: linear-gradient(transparent 54%, rgba(249, 115, 22, 0.28) 54%);
+      text-decoration-color: rgba(194, 65, 12, 0.76);
+    }
+    [data-word-card][data-lexical-type="collocation"]:hover,
+    [data-word-card][data-lexical-type="idiom"]:hover {
+      background: linear-gradient(transparent 42%, rgba(249, 115, 22, 0.44) 42%);
+      text-decoration-color: #9a3412;
+    }
     .selection-toolbar {
       position: absolute;
       z-index: 20;
@@ -529,20 +555,48 @@ def _css() -> str:
       margin-top: 12px;
     }
     .analysis-section h3 {
-      margin: 0 0 6px;
-      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin: 0 0 8px;
+      padding-left: 10px;
+      border-left: 4px solid var(--accent);
+      color: var(--text);
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 700;
     }
     .analysis-section h4 {
-      margin: 8px 0 4px;
-      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin: 10px 0 4px;
+      padding-left: 8px;
+      border-left: 2px solid var(--accent-line);
+      color: var(--text-dim);
       font-size: 12px;
       font-weight: 600;
     }
+    .section-label-zh {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-strong);
+      line-height: 1.25;
+    }
+    .analysis-section h4 .section-label-zh {
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .section-label-en {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
     .analysis-text {
       margin: 0;
-      line-height: 1.55;
+      font-size: 20px;
+      line-height: 1.7;
     }
     .glossary-word {
       position: relative;
@@ -559,6 +613,41 @@ def _css() -> str:
       border-bottom-color: #2563eb;
       background: #dbeafe;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+    }
+    .glossary-word[data-lexical-type="word"] {
+      border-color: rgba(5, 150, 105, 0.5);
+      border-bottom-color: #059669;
+      background: #d1fae5;
+    }
+    .glossary-word[data-lexical-type="word"]:hover {
+      border-color: #047857;
+      border-bottom-color: #047857;
+      background: #a7f3d0;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
+    }
+    .glossary-word[data-lexical-type="phrase"] {
+      border-color: rgba(126, 34, 206, 0.45);
+      border-bottom-color: #7e22ce;
+      background: #f3e8ff;
+    }
+    .glossary-word[data-lexical-type="phrase"]:hover {
+      border-color: #6b21a8;
+      border-bottom-color: #6b21a8;
+      background: #e9d5ff;
+      box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.18);
+    }
+    .glossary-word[data-lexical-type="collocation"],
+    .glossary-word[data-lexical-type="idiom"] {
+      border-color: rgba(194, 65, 12, 0.45);
+      border-bottom-color: #c2410c;
+      background: #ffedd5;
+    }
+    .glossary-word[data-lexical-type="collocation"]:hover,
+    .glossary-word[data-lexical-type="idiom"]:hover {
+      border-color: #9a3412;
+      border-bottom-color: #9a3412;
+      background: #fed7aa;
+      box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.18);
     }
     .analysis-translation {
       margin-top: 6px;

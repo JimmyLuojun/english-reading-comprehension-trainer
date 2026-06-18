@@ -52,7 +52,7 @@ def _word_cards_table(cards: list[dict[str, Any]]) -> str:
     return (
         "<table><thead><tr>"
         "<th>ID</th><th>Word/Phrase</th><th>Type</th><th>State</th><th>Occ.</th>"
-        "<th>Notes</th><th>AI Meaning</th><th>Source</th><th>Actions</th>"
+        "<th>Takeaway</th><th>AI Meaning</th><th>Source</th><th>Actions</th>"
         "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )

@@ -61,7 +61,7 @@ def test_analysis_glossary_highlights_nested_word_sections() -> None:
     render_vs_simpler = render_vs_simpler[: render_vs_simpler.index("function renderWordAnalysis")]
 
     assert "document.createTreeWalker(element, NodeFilter.SHOW_TEXT" in apply_highlights
-    assert 'parent.closest(".glossary-word")' in apply_highlights
+    assert 'parent.closest(".glossary-word, [data-word-card]")' in apply_highlights
     assert "textNode.replaceWith(fragment);" in apply_highlights
     assert "wordVsSimpler" in refresh_highlights
     assert "applyGlossaryHighlights(container);" in render_vs_simpler
@@ -150,14 +150,10 @@ def test_reader_script_supports_pro_reanalysis_button() -> None:
     assert "{ preferPro: true }" in script
 
 
-def test_analysis_toolbar_actions_run_on_pointerdown_before_click() -> None:
+def test_analysis_toolbar_actions_run_on_single_click_only() -> None:
     script = _selection_script()
     action_helper = script[script.index("function analysisWordActionFromEvent"):]
     action_helper = action_helper[: action_helper.index('panel.addEventListener("click"')]
-    submit_handler = script[script.index('analysisWordForm.addEventListener("submit"'):]
-    submit_handler = submit_handler[: submit_handler.index('analysisWordForm.addEventListener("pointerdown"')]
-    pointer_handler = script[script.index('analysisWordForm.addEventListener("pointerdown"'):]
-    pointer_handler = pointer_handler[: pointer_handler.index('analysisWordForm.addEventListener("click"')]
     click_handler = script[script.index('analysisWordForm.addEventListener("click"'):]
     click_handler = click_handler[: click_handler.index('sentenceForm.addEventListener("submit"')]
 
@@ -167,16 +163,10 @@ def test_analysis_toolbar_actions_run_on_pointerdown_before_click() -> None:
     assert "analysisWordForm.contains(markButton)" in action_helper
     assert "analysisWordForm.contains(analyzeButton)" in action_helper
 
-    assert "event.preventDefault();" in submit_handler
-    assert "runAnalysisWordAction(action);" in submit_handler
-    assert "event.preventDefault();" in pointer_handler
-    assert "event.stopPropagation();" in pointer_handler
-    assert "analysisWordPointerActionHandled = true;" in pointer_handler
-    assert "runAnalysisWordAction(action);" in pointer_handler
-    assert "markAnalysisSelection(" not in pointer_handler
-
-    assert "if (analysisWordPointerActionHandled)" in click_handler
-    assert "analysisWordPointerActionHandled = false;" in click_handler
+    assert 'analysisWordForm.addEventListener("submit"' not in script
+    assert 'analysisWordForm.addEventListener("pointerdown"' not in script
+    assert "analysisWordPointerActionHandled" not in script
+    assert "if (analysisWordPointerActionHandled)" not in click_handler
     assert "runAnalysisWordAction(action);" in click_handler
 
 
@@ -196,6 +186,27 @@ def test_analysis_toolbar_action_in_progress_blocks_collapsed_selection_hide() -
     assert "suppressCollapsedToolbarHideUntil = Date.now() + 1200;" in mark_analysis
     assert "analysisWordActionInProgress = false;" in mark_analysis
     assert "if (analysisWordActionInProgress) return;" in collapsed_selection
+
+
+def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
+    script = _selection_script()
+    helper = script[script.index("function hideToolbarUnlessEditing"):]
+    helper = helper[: helper.index("function setVisible")]
+    study_panel = script[script.index("function renderSentenceStudyPanel"):]
+    study_panel = study_panel[: study_panel.index("function renderAnalysisPayload")]
+    render_payload = script[script.index("function renderAnalysisPayload"):]
+    render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
+    render_word = script[script.index("function renderWordAnalysis"):]
+    render_word = render_word[: render_word.index("async function saveAnalysisMeaningIfEmpty")]
+    translation_analyze = script[script.index('translationAnalyze.addEventListener("click"'):]
+    translation_analyze = translation_analyze[: translation_analyze.index('analysisOpen.addEventListener("click"')]
+
+    assert "if (translationEditorOpen) return;" in helper
+    assert "hideToolbar();" in helper
+    assert "hideToolbarUnlessEditing();" in study_panel
+    assert "hideToolbarUnlessEditing();" in render_payload
+    assert "hideToolbarUnlessEditing();" in render_word
+    assert "hideToolbar();" in translation_analyze
 
 
 def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -> None:
@@ -246,6 +257,9 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert 'const translationDelete = document.getElementById("toolbar-translation-delete");' in script
     assert '"Check translation"' in label_helper
     assert 'sentence.dataset.translation = translation;' in translated_helper
+    assert "if (sentence.dataset.analysisId)" in translated_helper
+    assert 'sentence.dataset.analysisStale = "1";' in translated_helper
+    assert 'sentence.classList.add("analyzed-stale");' in translated_helper
     assert 'sentence.dataset.analysisId = "";' in translated_helper
     assert 'sentence.classList.add("translated");' in translated_helper
     assert 'sentence.classList.add("marked", "translated");' not in translated_helper
@@ -266,6 +280,66 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert 'translationDelete.addEventListener("click", deleteTranslationInPlace);' in script
     assert 'sentence.dataset.translation = "";' not in unmark_helper
     assert "requestAnalysis(sentenceId, activeSentenceTranslation || null);" in analysis_click
+
+
+def test_translation_update_preserves_analysis_id_as_stale() -> None:
+    script = _selection_script()
+    translated_helper = script[script.index("function markSentenceTranslated"):]
+    translated_helper = translated_helper[: translated_helper.index("function clearSentenceTranslation")]
+    save_panel_translation = script[script.index("async function savePanelTranslation"):]
+    save_panel_translation = save_panel_translation[: save_panel_translation.index("async function savePanelNote")]
+
+    assert "if (sentence.dataset.analysisId)" in translated_helper
+    assert 'sentence.dataset.analysisStale = "1";' in translated_helper
+    assert 'sentence.classList.add("analyzed-stale");' in translated_helper
+    assert 'sentence.dataset.analysisId = "";' in translated_helper
+    assert 'sentence.classList.remove("analyzed", "analyzed-stale");' in translated_helper
+    assert "activeAnalysisPayload.is_stale = true;" in save_panel_translation
+    assert "Analysis is stale. Reanalyze when ready." in save_panel_translation
+
+
+def test_reader_script_propagates_lexical_type_and_refreshes_body_highlights() -> None:
+    script = _selection_script()
+    decorate = script[script.index("function decorateWordCardElement"):]
+    decorate = decorate[: decorate.index("function clearWordCardElement")]
+    glossary = script[script.index("function glossaryHighlightFragment"):]
+    glossary = glossary[: glossary.index("function applyGlossaryHighlights")]
+    apply_highlights = script[script.index("function applyGlossaryHighlights"):]
+    apply_highlights = apply_highlights[: apply_highlights.index("function refreshAnalysisGlossaryHighlights")]
+    mark_analysis = script[script.index("async function markAnalysisSelection"):]
+    mark_analysis = mark_analysis[: mark_analysis.index("async function markReaderSelection")]
+
+    assert "lexical_type: card.lexical_type || \"\"" in script
+    assert "element.dataset.lexicalType = card.lexical_type || \"\";" in decorate
+    assert "span.dataset.lexicalType = entry.card.lexical_type || \"\";" in glossary
+    assert 'parent.closest(".glossary-word, [data-word-card]")' in apply_highlights
+    assert "function refreshReaderGlossaryHighlights()" in script
+    assert "refreshReaderGlossaryHighlights();" in mark_analysis
+
+
+def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
+    script = _selection_script()
+    shortcut = script[script.index("function handleReaderShortcut"):]
+    shortcut = shortcut[: shortcut.index("function captureReadingAnchor")]
+
+    assert "function sentenceFromSelectionOrViewport()" in script
+    assert "function selectWholeSentence(sentence)" in script
+    assert 'document.addEventListener("keydown", handleReaderShortcut);' in script
+    # macOS global hotkey tools steal modifier combos, so the shortcut uses bare keys:
+    # it must bail out when any modifier is held and ignore IME composition.
+    assert "event.altKey" in shortcut
+    assert "event.ctrlKey" in shortcut
+    assert "event.metaKey" in shortcut
+    assert "event.isComposing" in shortcut
+    # Match the physical key via event.code rather than event.key (layout-independent).
+    assert 'event.code === "KeyS"' in shortcut
+    assert 'event.code === "KeyT"' in shortcut
+    assert "eventTargetIsTextInput(event)" in shortcut
+    assert "range.selectNodeContents(sentence);" in script
+    assert "selection.removeAllRanges();" in script
+    assert "selection.addRange(range);" in script
+    assert "updateToolbar();" in script
+    assert "if (isTranslate)" in shortcut
 
 
 def test_translated_sentence_double_click_shortcut_preserves_word_card_priority() -> None:

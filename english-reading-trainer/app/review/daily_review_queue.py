@@ -40,6 +40,7 @@ class ReviewQueueItem:
     due_at: datetime
     prompt: str
     answer: str = ""
+    takeaway: str = ""
     ai_meaning: str = ""
     source_book_title: str = ""
     source_href: str = ""
@@ -171,6 +172,7 @@ def _sentence_due_sql() -> str:
             sc.due_at,
             s.text AS prompt,
             COALESCE(sc.user_translation, '') AS answer,
+            COALESCE(sc.user_note, '') AS takeaway,
             '' AS ai_meaning,
             COALESCE(b.title, '') AS source_book_title,
             '/read/' || s.book_id || '?chapter=' || c.idx ||
@@ -215,6 +217,7 @@ def _word_due_sql() -> str:
                 THEN wc.user_note
                 ELSE ''
             END AS answer,
+            '' AS takeaway,
             COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '') AS ai_meaning,
             COALESCE(b.title, '') AS source_book_title,
             CASE
@@ -305,6 +308,7 @@ def _item_from_row(
         due_at=datetime.fromisoformat(row["due_at"]),
         prompt=row["prompt"],
         answer=row["answer"] or "",
+        takeaway=row["takeaway"] or "",
         ai_meaning=row["ai_meaning"] or "",
         source_book_title=row["source_book_title"] or "",
         source_href=row["source_href"] or "",

@@ -74,6 +74,7 @@
 - [审美升级后续优化](features/visual-refresh-followups.md)：已实现的三项小优化——实心主按钮（视觉层级）、指标等宽数字、内联 SVG favicon 与标题整理，单选择器/`<head>` 改动，零新依赖。
 - [回到上次阅读：Books 导航续读](features/dashboard-continue-and-reading-font.md)：已实现——顶部导航 "Books" 客户端改写 `#nav-books` href 直接续读（有进度跳回上次章节+滚动+面板），新增 "Library" 入口看目录，无历史时 "Books" 仍指向目录；已删除冗余工具栏 `_continue_reading_script` 按钮。字号 20px/1.8 已实现，不在本次范围。
 - [UI 一致性与密度优化](features/ui-consistency-and-density.md)：已实现的五步收尾——调浅 sepia 护眼色板（仅 sepia 块）、抽 `_page_header` 锁页头一致性、Import/Profile 收窄、表格去浮表头精修与 Delete 弱化、Review 行压缩、Import 任务卡，仍是 CSS 变量层 + 一个共享 helper，不碰默认冷白色与 reader 布局。
+- [Reader/Review 交互修复批次](features/reader-review-ux-fixes.md)：已实现的六步小修——B1 分析完成不关正在写的翻译浮层、B3 改过译文的句子仍能调回旧分析并标 stale、A2 Review 统一 takeaway 术语并区分译文/takeaway、B2 词性分色（word 绿/phrase 紫/collocation/idiom 橙，句子保持黄）、A1 面板内选词二次分析修复、B4 裸键 `S`/`T` 整句选中快捷键（含面板正文字号对齐原文 + 中英双语醒目标签）。
 
 ---
 

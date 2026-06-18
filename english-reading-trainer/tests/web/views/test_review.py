@@ -17,6 +17,7 @@ class _Item:
     due_at: datetime
     prompt: str
     answer: str = ""
+    takeaway: str = ""
     ai_meaning: str = ""
     source_href: str = ""
 
@@ -74,7 +75,30 @@ def test_review_answer_cell_combines_reveal_and_outcomes() -> None:
 
     html = _review_answer_cell(item, "/review")
 
-    assert "Your note:" in html
+    assert "Takeaway:" in html
     assert "AI meaning:" in html
+    assert "Your note:" not in html
     assert 'value="pass"' in html
     assert 'name="return_to" value="/review"' in html
+
+
+def test_review_answer_cell_labels_sentence_translation_and_takeaway() -> None:
+    item = _Item(
+        card_type=CardType.SENTENCE,
+        card_id=7,
+        mastery_state=MasteryState.NEW,
+        due_at=datetime.now(timezone.utc),
+        prompt="The cat sat.",
+        answer="猫坐着。",
+        takeaway="先找主谓。",
+        ai_meaning="Ignored for sentence",
+    )
+
+    html = _review_answer_cell(item, "/review")
+
+    assert "Translation:" in html
+    assert "Takeaway:" in html
+    assert "猫坐着。" in html
+    assert "先找主谓。" in html
+    assert "AI meaning:" not in html
+    assert "Your note:" not in html

@@ -242,8 +242,10 @@ def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
         pieces.append(_escape(text[cursor:start]))
         meaning = _escape(str(card.get("current_meaning") or ""))
         note = _escape(str(card.get("user_note") or ""))
+        lexical_type = _escape(str(card.get("lexical_type") or ""))
         pieces.append(
             f'<span data-word-card="{card["id"]}"'
+            f' data-lexical-type="{lexical_type}"'
             f' data-meaning="{meaning}" data-note="{note}"'
             f'>{_escape(text[start:end])}</span>'
         )
@@ -256,6 +258,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         card["lemma"]: {
             "id": card["id"],
             "surface_form": card["surface_form"],
+            "lexical_type": card.get("lexical_type") or "",
             "current_meaning": card.get("current_meaning") or "",
             "user_note": card.get("user_note") or "",
         }
@@ -296,10 +299,10 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <input id="toolbar-analysis-word-sentence-id" type="hidden" name="sentence_id">
         <input id="toolbar-analysis-word-surface-form" type="hidden" name="surface_form">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
-        <button type="submit" name="lexical_type" value="word" data-analysis-mark="word">Mark word</button>
-        <button type="submit" name="lexical_type" value="phrase" data-analysis-mark="phrase">Mark phrase</button>
-        <button type="submit" name="lexical_type" value="collocation" data-analysis-mark="collocation">Mark collocation</button>
-        <button type="submit" name="lexical_type" value="word" data-analysis-analyze="word">AI analysis</button>
+        <button type="button" name="lexical_type" value="word" data-analysis-mark="word">Mark word</button>
+        <button type="button" name="lexical_type" value="phrase" data-analysis-mark="phrase">Mark phrase</button>
+        <button type="button" name="lexical_type" value="collocation" data-analysis-mark="collocation">Mark collocation</button>
+        <button type="button" name="lexical_type" value="word" data-analysis-analyze="word">AI analysis</button>
         <span id="toolbar-analysis-word-status" class="toolbar-status" aria-live="polite"></span>
       </form>
       <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
@@ -357,40 +360,40 @@ def _analysis_panel() -> str:
       <div id="analysis-panel-status" class="analysis-status"></div>
       <div id="analysis-sentence-sections">
         <section class="analysis-section">
-          <h3>Simplified English</h3>
+          <h3><span class="section-label-zh">简化英文</span><span class="section-label-en">Simplified English</span></h3>
           <p id="analysis-simplified" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
-          <h3>Chinese gloss</h3>
+          <h3><span class="section-label-zh">中文释义</span><span class="section-label-en">Chinese meaning</span></h3>
           <p id="analysis-gloss" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
-          <h3>Blocking point</h3>
+          <h3><span class="section-label-zh">阅读卡点</span><span class="section-label-en">Blocking point</span></h3>
           <p id="analysis-blocking-point" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
-          <h3>Structure</h3>
-          <h4>Subject skeleton</h4>
+          <h3><span class="section-label-zh">句子结构</span><span class="section-label-en">Structure</span></h3>
+          <h4><span class="section-label-zh">主干骨架</span><span class="section-label-en">Subject skeleton</span></h4>
           <p id="analysis-skeleton" class="analysis-text"></p>
-          <h4>Clauses</h4>
+          <h4><span class="section-label-zh">从句</span><span class="section-label-en">Clauses</span></h4>
           <div id="analysis-clauses"></div>
-          <h4>Modifiers</h4>
+          <h4><span class="section-label-zh">修饰成分</span><span class="section-label-en">Modifiers</span></h4>
           <div id="analysis-modifiers"></div>
-          <h4>Logic markers</h4>
+          <h4><span class="section-label-zh">逻辑连接词</span><span class="section-label-en">Logic markers</span></h4>
           <div id="analysis-logic-markers"></div>
-          <h4>Anaphora</h4>
+          <h4><span class="section-label-zh">指代关系</span><span class="section-label-en">Anaphora</span></h4>
           <div id="analysis-anaphora"></div>
         </section>
         <section class="analysis-section">
-          <h3>Diagnosis</h3>
+          <h3><span class="section-label-zh">问题诊断</span><span class="section-label-en">Diagnosis</span></h3>
           <div id="analysis-diagnosis"></div>
         </section>
         <section class="analysis-section">
-          <h3>Back to whole sentence</h3>
+          <h3><span class="section-label-zh">回到整句</span><span class="section-label-en">Back to whole sentence</span></h3>
           <p id="analysis-back-to-whole" class="analysis-text"></p>
         </section>
         <section class="analysis-section sentence-study-section">
-          <h3>Your translation</h3>
+          <h3><span class="section-label-zh">我的翻译</span><span class="section-label-en">Your translation</span></h3>
           <textarea id="sentence-panel-translation" rows="4" placeholder="Edit your Chinese understanding"></textarea>
           <div class="word-notes-actions">
             <button id="sentence-panel-translation-save" type="button">Save translation</button>
@@ -398,7 +401,7 @@ def _analysis_panel() -> str:
           </div>
         </section>
         <section class="analysis-section sentence-study-section">
-          <h3>Takeaway</h3>
+          <h3><span class="section-label-zh">收获</span><span class="section-label-en">Takeaway</span></h3>
           <p id="sentence-panel-note-suggestion" class="analysis-text"></p>
           <button id="sentence-panel-note-accept" type="button">Accept suggestion</button>
           <textarea id="sentence-panel-note" rows="3" placeholder="What did I learn from this sentence?"></textarea>

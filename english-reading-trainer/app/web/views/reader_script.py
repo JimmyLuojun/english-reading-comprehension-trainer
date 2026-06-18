@@ -167,7 +167,6 @@ def _selection_script() -> str:
       let progressTimer = null;
       let toolbarHideTimer = null;
       let analysisWordActionInProgress = false;
-      let analysisWordPointerActionHandled = false;
       let activeSelectionAnalysisContextText = "";
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
@@ -212,6 +211,7 @@ def _selection_script() -> str:
         wordCards[key] = {
           id: card.id,
           surface_form: card.surface_form || card.lemma,
+          lexical_type: card.lexical_type || "",
           current_meaning: card.current_meaning || "",
           user_note: distinctUserNote(card.user_note, card.current_meaning),
         };
@@ -219,6 +219,7 @@ def _selection_script() -> str:
           lemma: card.lemma,
           id: card.id,
           surface: card.surface_form || "",
+          lexical_type: card.lexical_type || "",
           meaning: card.current_meaning || "",
           note: distinctUserNote(card.user_note, card.current_meaning),
         };
@@ -249,6 +250,7 @@ def _selection_script() -> str:
           id: card.id,
           lemma,
           surface_form: card.surface_form || "",
+          lexical_type: card.lexical_type || "",
           current_meaning: card.current_meaning || "",
           user_note: card.user_note || "",
         });
@@ -340,6 +342,11 @@ def _selection_script() -> str:
         blurToolbarFocus();
       }
 
+      function hideToolbarUnlessEditing() {
+        if (translationEditorOpen) return;
+        hideToolbar();
+      }
+
       function setVisible(element, visible) {
         element.hidden = !visible;
       }
@@ -383,6 +390,67 @@ def _selection_script() -> str:
           || null;
       }
 
+      function elementFromNode(node) {
+        return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement || null;
+      }
+
+      function topVisibleSentence() {
+        const sentences = Array.from(reader.querySelectorAll("[data-sentence-id]"));
+        for (const sentence of sentences) {
+          const rect = sentence.getBoundingClientRect();
+          if (rect.bottom >= 0 && rect.top <= window.innerHeight) return sentence;
+        }
+        return sentences[0] || null;
+      }
+
+      function sentenceFromSelectionOrViewport() {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (!selectionInsideToolbar(range) && !selectionInsideAnalysisPanel(range)) {
+            const element = elementFromNode(selection.anchorNode);
+            const sentence = element?.closest?.("[data-sentence-id]");
+            if (sentence) return sentence;
+          }
+        }
+        return topVisibleSentence();
+      }
+
+      function selectWholeSentence(sentence) {
+        if (!sentence) return false;
+        const range = document.createRange();
+        range.selectNodeContents(sentence);
+        const selection = window.getSelection();
+        if (!selection) return false;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        updateToolbar();
+        return true;
+      }
+
+      function eventTargetIsTextInput(event) {
+        return Boolean(event.target?.closest?.("input, textarea, select, [contenteditable='true']"));
+      }
+
+      function handleReaderShortcut(event) {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        if (event.isComposing || eventTargetIsTextInput(event)) return;
+        // macOS global hotkey tools intercept every modifier combo (Option+S/T were stolen),
+        // so use bare physical keys matched via event.code (layout- and modifier-independent).
+        // The reader text is non-editable, so plain S/T never collide with typing here.
+        const isSelect = event.code === "KeyS";
+        const isTranslate = event.code === "KeyT";
+        if (!isSelect && !isTranslate) return;
+        event.preventDefault();
+        const sentence = sentenceFromSelectionOrViewport();
+        if (!sentence || !selectWholeSentence(sentence)) return;
+        if (isTranslate) {
+          activeSentenceId = sentence.dataset.sentenceId;
+          activeSentenceTranslation = sentence.dataset.translation || "";
+          openTranslationEditor();
+        }
+      }
+
       function captureReadingAnchor(target) {
         const targetElement = target?.closest?.("[data-word-card], [data-sentence-id]");
         const activeWordElement = activeWordDetailCardId
@@ -417,6 +485,7 @@ def _selection_script() -> str:
         if (!element || !card) return;
         const meaning = card.current_meaning || "";
         element.dataset.wordCard = String(card.id || "");
+        element.dataset.lexicalType = card.lexical_type || "";
         element.dataset.meaning = meaning;
         element.dataset.note = distinctUserNote(card.user_note, meaning);
       }
@@ -428,6 +497,7 @@ def _selection_script() -> str:
         element.removeAttribute("data-meaning");
         element.removeAttribute("data-note");
         element.removeAttribute("data-lemma");
+        element.removeAttribute("data-lexical-type");
         element.classList.remove("glossary-word", "marked-word", "word-analysis-active");
       }
 
@@ -530,10 +600,16 @@ def _selection_script() -> str:
       function markSentenceTranslated(sentence, translation) {
         if (!sentence) return;
         sentence.dataset.translation = translation;
-        sentence.dataset.analysisId = "";
-        sentence.dataset.analysisStale = "0";
+        if (sentence.dataset.analysisId) {
+          sentence.dataset.analysisStale = "1";
+          sentence.classList.remove("analyzed");
+          sentence.classList.add("analyzed-stale");
+        } else {
+          sentence.dataset.analysisId = "";
+          sentence.dataset.analysisStale = "0";
+          sentence.classList.remove("analyzed", "analyzed-stale");
+        }
         sentence.classList.add("translated");
-        sentence.classList.remove("analyzed", "analyzed-stale");
         sentence.title = "Translation saved";
       }
 
@@ -658,6 +734,7 @@ def _selection_script() -> str:
             span.dataset.meaning = entry.card.meaning || "";
             span.dataset.note = entry.card.note || "";
             span.dataset.lemma = entry.card.lemma || "";
+            span.dataset.lexicalType = entry.card.lexical_type || "";
             fragment.appendChild(span);
             cursor = tokenEnd;
             hasHit = true;
@@ -677,7 +754,7 @@ def _selection_script() -> str:
           acceptNode(node) {
             if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
             const parent = node.parentElement;
-            if (parent && parent.closest(".glossary-word")) return NodeFilter.FILTER_REJECT;
+            if (parent && parent.closest(".glossary-word, [data-word-card]")) return NodeFilter.FILTER_REJECT;
             return NodeFilter.FILTER_ACCEPT;
           },
         });
@@ -700,6 +777,10 @@ def _selection_script() -> str:
           wordVsSimpler, wordAnalysisMorphology,
         ]
           .forEach((element) => applyGlossaryHighlights(element));
+      }
+
+      function refreshReaderGlossaryHighlights() {
+        applyGlossaryHighlights(reader);
       }
 
       function setAnalysisWordButtonsDisabled(disabled) {
@@ -740,6 +821,7 @@ def _selection_script() -> str:
           registerWordCard(payload.word_card);
           rebuildGlossaryRegex();
           refreshAnalysisGlossaryHighlights();
+          refreshReaderGlossaryHighlights();
           if (payload.card_id && contextText.trim()) {
             wordAnalysisContextByCardId.set(String(payload.card_id), contextText.trim());
           }
@@ -1432,7 +1514,7 @@ def _selection_script() -> str:
       }
 
       function renderSentenceStudyPanel(sentence, message) {
-        hideToolbar();
+        hideToolbarUnlessEditing();
         const sentenceId = sentence?.dataset.sentenceId || "";
         activeAnalysisPayload = {
           sentence_id: sentenceId,
@@ -1459,7 +1541,7 @@ def _selection_script() -> str:
 
       function renderAnalysisPayload(payload) {
         const analysis = payload.analysis || {};
-        hideToolbar();
+        hideToolbarUnlessEditing();
         activeAnalysisPayload = payload;
         activeAnalysisLabel = "sentence";
         activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
@@ -1681,7 +1763,11 @@ def _selection_script() -> str:
           if (!response.ok) throw new Error("Save failed");
           markSentenceTranslated(document.getElementById(`sentence-${sentenceId}`), value);
           activeSentenceTranslation = value;
-          if (activeAnalysisPayload) activeAnalysisPayload.user_translation = value;
+          if (activeAnalysisPayload) {
+            activeAnalysisPayload.user_translation = value;
+            activeAnalysisPayload.is_stale = true;
+          }
+          if (panelStatus) panelStatus.textContent = "Analysis is stale. Reanalyze when ready.";
           if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saved";
         } catch (error) {
           if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = `Save failed: ${error}`;
@@ -1725,7 +1811,7 @@ def _selection_script() -> str:
 
       function renderWordAnalysis(payload) {
         const a = payload.analysis || {};
-        hideToolbar();
+        hideToolbarUnlessEditing();
         activeAnalysisPayload = payload;
         activeAnalysisLabel = (payload.surface_form || payload.lemma || "word").trim();
         activeAnalysisWordCardId = String(payload.card_id || "");
@@ -2067,37 +2153,11 @@ def _selection_script() -> str:
         const lexicalType = event.submitter?.value || "word";
         markReaderSelection(lexicalType, event.submitter);
       });
-      analysisWordForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const action = analysisWordActionFromEvent(event);
-        if (!action) return;
-        event.stopPropagation();
-        if (analysisWordPointerActionHandled) {
-          analysisWordPointerActionHandled = false;
-          return;
-        }
-        runAnalysisWordAction(action);
-      });
-      analysisWordForm.addEventListener("pointerdown", (event) => {
-        const action = analysisWordActionFromEvent(event);
-        if (!action) return;
-        event.preventDefault();
-        event.stopPropagation();
-        analysisWordPointerActionHandled = true;
-        runAnalysisWordAction(action);
-        window.setTimeout(() => {
-          analysisWordPointerActionHandled = false;
-        }, 500);
-      });
       analysisWordForm.addEventListener("click", (event) => {
         const action = analysisWordActionFromEvent(event);
         if (!action) return;
         event.preventDefault();
         event.stopPropagation();
-        if (analysisWordPointerActionHandled) {
-          analysisWordPointerActionHandled = false;
-          return;
-        }
         runAnalysisWordAction(action);
       });
       sentenceForm.addEventListener("submit", (event) => {
@@ -2221,6 +2281,7 @@ def _selection_script() -> str:
         window.getSelection()?.removeAllRanges();
         openTranslatedSentenceShortcut(sentence);
       });
+      document.addEventListener("keydown", handleReaderShortcut);
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
       window.addEventListener("scroll", () => {
         hideToolbar();

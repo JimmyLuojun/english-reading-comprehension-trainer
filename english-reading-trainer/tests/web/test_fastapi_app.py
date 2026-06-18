@@ -1709,7 +1709,7 @@ class TestReadingAndMarking:
         assert "glossary_return_url" in response.text
         assert "Back to reading" in response.text
 
-    def test_cards_page_word_table_has_notes_column(
+    def test_cards_page_word_table_has_takeaway_column(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1724,7 +1724,8 @@ class TestReadingAndMarking:
 
         response = client.get("/cards")
 
-        assert "Notes" in response.text
+        assert "Takeaway" in response.text
+        assert "Notes" not in response.text
         assert "AI Meaning" in response.text
         assert "Source" in response.text
 
@@ -2041,7 +2042,8 @@ class TestReviewRoutes:
 
         assert "▶ Reveal" in response.text
         assert "hover-popover-panel" in response.text
-        assert "Your note:" in response.text
+        assert "Takeaway:" in response.text
+        assert "Your note:" not in response.text
         assert "my own note" in response.text
 
     def test_review_page_no_reveal_when_definition_empty(
@@ -2193,7 +2195,8 @@ class TestReviewRoutes:
 
         assert "▶ Reveal" in response.text
         assert "hover-popover-panel" in response.text
-        assert "Your note:" in response.text
+        assert "Takeaway:" in response.text
+        assert "Your note:" not in response.text
         assert "AI meaning:" in response.text
         assert "我自己的笔记" in response.text
         assert "basic and undeveloped" in response.text
