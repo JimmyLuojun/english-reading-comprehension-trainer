@@ -263,6 +263,11 @@ class TestBasicPages:
 
         assert response.status_code == 200
         assert "Reading Trainer" in response.text
+        assert 'href="/review">Start review</a>' in response.text
+        assert "reader:last-book-id" in response.text
+        assert "Continue reading" in response.text
+        assert 'link.className = "button";' in response.text
+        assert "?chapter=${chapter}&restore=1" in response.text
         assert "Due now" in response.text
         assert 'href="/books" aria-label="Books: 0"' in response.text
         assert 'href="/cards#sentence-cards" aria-label="Sentence cards: 0"' in response.text
@@ -279,6 +284,10 @@ class TestBasicPages:
         assert response.status_code == 200
         assert "Test Book" in response.text
         assert "/books/1" in response.text
+        assert "reader:last-book-id" in response.text
+        assert "Continue reading" in response.text
+        assert 'link.className = "button primary";' in response.text
+        assert "?chapter=${chapter}&restore=1" in response.text
 
     def test_book_detail_lists_chapters(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

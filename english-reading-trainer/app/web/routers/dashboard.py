@@ -15,6 +15,7 @@ from app.web.queries import (
     _dashboard_stats,
 )
 from app.web.views import (
+    _continue_reading_script,
     _due_table,
     _escape,
     _html_page,
@@ -38,6 +39,7 @@ def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], Databas
             "Books, cards, review queue, and learner profile.",
             '<a class="button primary" href="/review">Start review</a>',
         )}
+        {_continue_reading_script(button_class="button")}
         <section class="metrics">
           {_metric("Books", stats["books"], href="/books")}
           {_metric("Sentences", stats["sentences"])}

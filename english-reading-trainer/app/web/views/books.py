@@ -39,28 +39,6 @@ def _books_table(rows: list[dict[str, Any]]) -> str:
     </table>
     """
 
-def _books_continue_script() -> str:
-    return """
-    <script>
-      (() => {
-        let bookId = "";
-        try {
-          bookId = window.localStorage.getItem("reader:last-book-id") || "";
-        } catch (error) {
-          bookId = "";
-        }
-        if (!bookId) return;
-        const toolbar = document.querySelector("section.toolbar");
-        if (!toolbar) return;
-        const link = document.createElement("a");
-        link.className = "button primary";
-        link.href = `/read/${encodeURIComponent(bookId)}`;
-        link.textContent = "Continue reading";
-        toolbar.append(link);
-      })();
-    </script>
-    """
-
 def _delete_book_form(book_id: int) -> str:
     confirm = (
         "Delete this book and all related sentence cards? Word cards that also "

@@ -28,6 +28,7 @@ def _css() -> str:
       --shadow: 0 18px 50px rgba(20, 30, 40, 0.08);
       --font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
       --analysis-panel-width: 520px;
+      --reader-max-width: 1120px;
     }
     html[data-theme="sepia"] {
       color-scheme: light;
@@ -218,7 +219,8 @@ def _css() -> str:
     tr:last-child td { border-bottom: 0; }
     .review-item-col { width: 40%; }
     .reader {
-      max-width: 680px;
+      width: min(100%, var(--reader-max-width));
+      max-width: var(--reader-max-width);
       margin: 32px auto 96px;
       padding: 0 16px;
     }
@@ -265,8 +267,8 @@ def _css() -> str:
       margin: 0 0 1.2em;
       color: var(--text);
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
-      font-size: 18px;
-      line-height: 1.75;
+      font-size: 20px;
+      line-height: 1.8;
     }
     .reader-figure {
       margin: 28px 0;

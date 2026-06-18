@@ -910,17 +910,19 @@ def _selection_script() -> str:
       function restoreReaderProgress() {
         if (reader.dataset.restoreProgress !== "1") return;
         const saved = readProgress();
-        if (!saved) return;
+        if (!saved) return null;
         const savedChapter = Number.parseInt(saved.chapter_idx, 10);
         if (savedChapter && savedChapter !== chapterIdx) {
           window.location.replace(`/read/${bookId}?chapter=${savedChapter}&restore=1`);
-          return;
+          return null;
         }
         const sentenceId = Number.parseInt(saved.top_sentence_id, 10);
-        if (!sentenceId) return;
-        window.setTimeout(() => {
-          document.getElementById(`sentence-${sentenceId}`)?.scrollIntoView({ block: "start" });
-        }, 0);
+        if (sentenceId) {
+          window.setTimeout(() => {
+            document.getElementById(`sentence-${sentenceId}`)?.scrollIntoView({ block: "start" });
+          }, 0);
+        }
+        return saved;
       }
 
       function topSentenceId() {
@@ -941,8 +943,50 @@ def _selection_script() -> str:
         window.localStorage.setItem(progressKey, JSON.stringify({
           chapter_idx: chapterIdx,
           top_sentence_id: sentenceId,
+          analysis_state: currentAnalysisState(),
           ts: new Date().toISOString(),
         }));
+      }
+
+      function currentAnalysisState() {
+        if (!panel || panel.hidden) return { open: false };
+        const state = {
+          open: true,
+          mode: panelMode,
+          panel_scroll_top: panel.scrollTop || 0,
+        };
+        if (panelMode === "word" && activeAnalysisWordCardId) {
+          state.card_id = activeAnalysisWordCardId;
+          state.source_sentence_id = activeAnalysisSourceSentenceId || "";
+        } else if (activeAnalysisSentenceId) {
+          state.sentence_id = activeAnalysisSentenceId;
+        }
+        return state;
+      }
+
+      async function restoreSavedAnalysisPanel(saved) {
+        const state = saved?.analysis_state || {};
+        if (!state.open) return false;
+        const panelScrollTop = Number.parseInt(state.panel_scroll_top, 10) || 0;
+        if (state.mode === "word" && state.card_id) {
+          await loadSavedWordAnalysis(String(state.card_id));
+        } else if (state.sentence_id) {
+          const sentence = document.getElementById(`sentence-${state.sentence_id}`);
+          if (!sentence) return false;
+          activeSentenceId = sentence.dataset.sentenceId;
+          activeSentenceTranslation = sentence.dataset.translation || "";
+          if (sentence.dataset.analysisId) {
+            await loadSavedAnalysis(sentence.dataset.sentenceId);
+          } else {
+            renderSentenceStudyPanel(sentence, "No saved AI analysis yet.");
+          }
+        } else {
+          openPanelPlaceholder();
+        }
+        window.setTimeout(() => {
+          panel.scrollTop = panelScrollTop;
+        }, 0);
+        return true;
       }
 
       function scheduleProgressSave() {
@@ -1203,6 +1247,7 @@ def _selection_script() -> str:
         if (panelTab) panelTab.hidden = true;
         document.body.classList.add("analysis-open");
         updatePreviousAnalysisButton();
+        saveReaderProgress();
       }
 
       function closePanel() {
@@ -1218,6 +1263,7 @@ def _selection_script() -> str:
         reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
           el.classList.remove("word-analysis-active");
         });
+        saveReaderProgress();
       }
 
       function openPanelPlaceholder() {
@@ -2190,11 +2236,16 @@ def _selection_script() -> str:
           toolbar.style.bottom = `${keyboardInset}px`;
         });
       }
-      restoreReaderProgress();
+      window.addEventListener("pagehide", saveReaderProgress);
+      const restoredProgress = restoreReaderProgress();
       if (initialWordCardId) {
         window.setTimeout(() => loadSavedWordAnalysis(initialWordCardId), 0);
-      } else {
+      } else if (initialPanel === "analysis" && initialSentenceId) {
         openInitialSentenceAnalysis();
+      } else {
+        restoreSavedAnalysisPanel(restoredProgress).then((restoredPanel) => {
+          if (!restoredPanel) openInitialSentenceAnalysis();
+        });
       }
     })();
     """

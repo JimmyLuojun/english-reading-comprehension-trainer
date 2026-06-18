@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.web.views.books import (
     _appendix_letter,
-    _books_continue_script,
     _books_table,
     _chapters_table,
     _primary_read_idx,
@@ -82,11 +81,3 @@ def test_chapters_table_renders_read_links() -> None:
 
     assert "/read/7?chapter=1" in html
     assert "<td>2</td>" in html
-
-
-def test_books_continue_script_uses_last_reader_book_id() -> None:
-    script = _books_continue_script()
-
-    assert "reader:last-book-id" in script
-    assert "Continue reading" in script
-    assert "link.href = `/read/${encodeURIComponent(bookId)}`;" in script

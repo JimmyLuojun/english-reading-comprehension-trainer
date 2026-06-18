@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.web.views.layout import (
     _active,
+    _continue_reading_script,
     _date,
     _escape,
     _html_page,
@@ -67,6 +68,24 @@ def test_page_header_renders_consistent_toolbar_variants() -> None:
         '<section class="toolbar"><div><h1>Title</h1></div>'
         '<a class="button" href="/x">Action</a></section>'
     )
+
+
+def test_continue_reading_script_defaults_to_primary_button_and_restores_progress() -> None:
+    script = _continue_reading_script()
+
+    assert "reader:last-book-id" in script
+    assert "reader:progress:book:${bookId}" in script
+    assert "Continue reading" in script
+    assert 'link.className = "button primary";' in script
+    assert "?chapter=${chapter}&restore=1" in script
+
+
+def test_continue_reading_script_accepts_secondary_button_class() -> None:
+    script = _continue_reading_script(button_class="button")
+
+    assert 'link.className = "button";' in script
+    assert 'link.className = "button primary";' not in script
+    assert "reader:last-book-id" in script
 
 
 def test_formatting_helpers() -> None:

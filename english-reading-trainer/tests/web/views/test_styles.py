@@ -100,6 +100,16 @@ def test_css_visual_refresh_scopes_display_serif_to_titles() -> None:
     assert "table {\n      width: 100%;\n      font-family: var(--font-display);" not in css
 
 
+def test_css_reader_body_type_is_larger_without_global_font_change() -> None:
+    css = _css()
+    reader_para = _css_block(css, ".reader-para {", ".reader-figure")
+
+    assert "font-size: 20px;" in reader_para
+    assert "line-height: 1.8;" in reader_para
+    assert "font-size: 18px;" not in reader_para
+    assert 'font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' in css
+
+
 def test_css_visual_refresh_followups_fill_primary_after_shared_hover() -> None:
     css = _css()
     shared_hover_selector = "nav a.active, .button.primary, button:hover, .button:hover"

@@ -86,6 +86,38 @@ def _metric(label: str, value: int, href: str | None = None) -> str:
         )
     return f'<div class="metric">{content}</div>'
 
+def _continue_reading_script(button_class: str = "button primary") -> str:
+    return """
+    <script>
+      (() => {
+        let bookId = "";
+        try {
+          bookId = window.localStorage.getItem("reader:last-book-id") || "";
+        } catch (error) {
+          bookId = "";
+        }
+        if (!bookId) return;
+        const toolbar = document.querySelector("section.toolbar");
+        if (!toolbar) return;
+        let href = `/read/${encodeURIComponent(bookId)}`;
+        try {
+          const progress = JSON.parse(
+            window.localStorage.getItem(`reader:progress:book:${bookId}`) || "null",
+          );
+          const chapter = Number.parseInt(progress?.chapter_idx, 10);
+          if (chapter) href = `${href}?chapter=${chapter}&restore=1`;
+        } catch (error) {
+          href = `/read/${encodeURIComponent(bookId)}`;
+        }
+        const link = document.createElement("a");
+        link.className = "__BUTTON_CLASS__";
+        link.href = href;
+        link.textContent = "Continue reading";
+        toolbar.append(link);
+      })();
+    </script>
+    """.replace("__BUTTON_CLASS__", button_class)
+
 def _date(value: str) -> str:
     if not value:
         return ""
