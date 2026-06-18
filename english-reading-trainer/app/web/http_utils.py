@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.web.config import _UPLOAD_CHUNK_BYTES
 from app.web.models import UploadTooLargeError
-from app.web.views import _escape, _html_page
+from app.web.views import _html_page, _page_header
 
 async def _read_upload_bytes(file: UploadFile, *, max_bytes: int) -> bytes:
     chunks: list[bytes] = []
@@ -85,13 +85,9 @@ def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=303)
 
 def _error_page(message: str, *, status_code: int) -> HTMLResponse:
-    body = f"""
-    <section class="toolbar">
-      <div>
-        <h1>Request Error</h1>
-        <p class="muted">{_escape(message)}</p>
-      </div>
-      <a class="button" href="/">Dashboard</a>
-    </section>
-    """
+    body = _page_header(
+        "Request Error",
+        message,
+        '<a class="button" href="/">Dashboard</a>',
+    )
     return _html_page("Error", body, active="", status_code=status_code)

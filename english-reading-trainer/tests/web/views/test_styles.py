@@ -46,12 +46,17 @@ def test_css_contains_sepia_theme_variables_and_surface_bindings() -> None:
     css = _css()
 
     assert 'html[data-theme="sepia"]' in css
-    assert "--bg: #f3ead6" in css
-    assert "--surface: #faf4e4" in css
-    assert "--surface-alt: #efe3c8" in css
+    assert "--bg: #efe6d3" in css
+    assert "--surface: #faf5ea" in css
+    assert "--surface-alt: #f1e9d7" in css
+    assert "--line: #e6dcc6" in css
+    assert "--shadow: 0 16px 40px rgba(70, 55, 25, 0.07)" in css
     assert "background: var(--nav-surface)" in css
     assert ".reader-page {\n      background: var(--surface);" in css
-    assert "th { color: var(--muted); font-weight: 600; background: var(--surface-alt); }" in css
+    assert "color: var(--muted);" in css
+    assert "font-size: 12px;" in css
+    assert "text-transform: uppercase;" in css
+    assert "background: var(--surface-alt);" in css
     assert "background: #f2f4f7" not in css
     assert "background: #ffffff" not in css
 
@@ -121,3 +126,26 @@ def test_css_visual_refresh_followups_metric_numbers_are_tabular() -> None:
     css = _css()
 
     assert ".metric strong { font-size: 24px; font-variant-numeric: tabular-nums; }" in css
+
+
+def test_css_ui_consistency_width_table_and_action_density_rules() -> None:
+    css = _css()
+
+    assert "body.narrow main {\n      width: min(760px, calc(100vw - 32px));\n    }" in css
+    assert "table {\n      width: 100%;" in css
+    assert "box-shadow: none;" in css
+    assert "tbody tr:hover { background: var(--surface-alt); }" in css
+    assert "font-variant-numeric: tabular-nums;" in css
+    assert ".review-item-col { width: 40%; }" in css
+    assert ".answer-form {\n      gap: 6px;\n      flex-wrap: nowrap;\n    }" in css
+    assert ".answer-form button { padding: 4px 10px; }" in css
+    assert (
+        "td button.danger, td .button.danger {\n"
+        "      border-color: var(--line);\n"
+        "      color: var(--muted);\n"
+        "    }"
+    ) in css
+    assert "td button.danger:hover, td .button.danger:hover" in css
+    assert ".stack-form input:not([type=file]) { max-width: 420px; }" in css
+    assert ".stack-form textarea { max-width: 640px; }" in css
+    assert ".stack-form button { justify-self: start; }" in css

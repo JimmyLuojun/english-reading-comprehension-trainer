@@ -42,6 +42,7 @@ from app.web.http_utils import (
 from app.web.views import (
     _cards_return_script,
     _html_page,
+    _page_header,
     _sentence_cards_table,
     _word_card_sources_page,
     _word_cards_table,
@@ -186,12 +187,7 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         sentence_cards = list_sentence_cards(db, limit=_DEFAULT_PAGE_LIMIT)
         word_cards = list_word_cards(db, limit=_DEFAULT_PAGE_LIMIT)
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>Cards</h1>
-            <p class="muted">Sentence and word cards currently tracked.</p>
-          </div>
-        </section>
+        {_page_header("Cards", "Sentence and word cards currently tracked.")}
         {_cards_return_script()}
         <section class="band">
           <h2 id="sentence-cards">Sentence Cards</h2>

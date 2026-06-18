@@ -33,7 +33,7 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
     import app.web.fastapi_app as fastapi_app
     @web_app.get("/import", response_class=HTMLResponse)
     def import_page() -> HTMLResponse:
-        return _html_page("Import", _import_forms(), active="import")
+        return _html_page("Import", _import_forms(), active="import", page_class="narrow")
 
     @web_app.post("/import/file")
     async def import_file(

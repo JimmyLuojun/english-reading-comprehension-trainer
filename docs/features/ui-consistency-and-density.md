@@ -1,6 +1,6 @@
 # UI 一致性与密度优化 (sepia 调浅 / 统一页头 / 表格精修) — Executable Plan
 
-Status: planned (2026-06-18)
+Status: implemented (2026-06-18)
 
 Next landing on top of the shipped [visual refresh](visual-refresh.md) and its
 [follow-ups](visual-refresh-followups.md). Goal: lift the feel from "套了一层米黄色护眼滤镜的管理后台"

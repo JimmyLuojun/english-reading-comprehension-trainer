@@ -68,6 +68,15 @@ def _html_page(
     )
 
 
+def _page_header(title: str, subtitle: str = "", actions: str = "") -> str:
+    sub = f'<p class="muted">{_escape(subtitle)}</p>' if subtitle else ""
+    return (
+        '<section class="toolbar"><div>'
+        f"<h1>{_escape(title)}</h1>{sub}</div>"
+        f"{actions}</section>"
+    )
+
+
 def _metric(label: str, value: int, href: str | None = None) -> str:
     content = f"<span>{_escape(label)}</span><strong>{value}</strong>"
     if href is not None:

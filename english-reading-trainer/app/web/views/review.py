@@ -24,7 +24,7 @@ def _due_table(items: list[Any], return_to: str) -> str:
     )
     return f"""
     <table>
-      <thead><tr><th>Type</th><th>ID</th><th>State</th><th>Due</th><th>Review item</th><th>Answer</th></tr></thead>
+      <thead><tr><th>Type</th><th>ID</th><th>State</th><th>Due</th><th class="review-item-col">Review item</th><th>Answer</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
     """

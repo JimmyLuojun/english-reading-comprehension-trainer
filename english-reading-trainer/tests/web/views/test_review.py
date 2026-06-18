@@ -34,7 +34,7 @@ def test_due_table_renders_empty_state_and_word_prompt_audio() -> None:
 
     html = _due_table([item], "/review")
 
-    assert "<th>Review item</th>" in html
+    assert '<th class="review-item-col">Review item</th>' in html
     assert "<th>Prompt</th>" not in html
     assert 'data-speak-text="cat"' in _review_prompt_cell(item)
     assert "/review/word/1" in html

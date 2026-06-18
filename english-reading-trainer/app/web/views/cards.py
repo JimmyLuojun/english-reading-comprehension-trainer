@@ -9,7 +9,7 @@ from app.web.views.components import (
     _pronunciation_cell,
     _source_link,
 )
-from app.web.views.layout import _date, _escape
+from app.web.views.layout import _date, _escape, _page_header
 
 
 def _sentence_cards_table(cards: list[dict[str, Any]]) -> str:
@@ -190,15 +190,12 @@ def _word_card_sources_page(
     candidates: list[dict[str, Any]],
 ) -> str:
     return (
-        '<section class="toolbar">'
-        "<div>"
-        f"<h1>Sources: {_escape(card['surface_form'])}</h1>"
-        f'<p class="muted">{_escape(card["lexical_type"])} · '
-        f'{len(sources)} recorded source{"s" if len(sources) != 1 else ""}</p>'
-        "</div>"
-        '<a class="button" href="/cards">Back to Cards</a>'
-        "</section>"
-        '<section class="band">'
+        _page_header(
+            f"Sources: {card['surface_form']}",
+            f'{card["lexical_type"]} · {len(sources)} recorded source{"s" if len(sources) != 1 else ""}',
+            '<a class="button" href="/cards">Back to Cards</a>',
+        )
+        + '<section class="band">'
         "<h2>Recorded Sources</h2>"
         f"{_word_card_sources_table(sources)}"
         "<h2>Find Occurrences</h2>"

@@ -31,11 +31,11 @@ def _css() -> str:
     }
     html[data-theme="sepia"] {
       color-scheme: light;
-      --bg: #f3ead6;
-      --surface: #faf4e4;
-      --surface-alt: #efe3c8;
+      --bg: #efe6d3;
+      --surface: #faf5ea;
+      --surface-alt: #f1e9d7;
       --nav-surface: rgba(250, 244, 228, 0.92);
-      --line: #e2d8be;
+      --line: #e6dcc6;
       --text: #463a28;
       --text-dim: #6b5c40;
       --muted: #8a7a5c;
@@ -46,7 +46,7 @@ def _css() -> str:
       --radius: 8px;
       --radius-sm: 6px;
       --radius-pill: 999px;
-      --shadow: 0 18px 50px rgba(70, 55, 25, 0.1);
+      --shadow: 0 16px 40px rgba(70, 55, 25, 0.07);
       --font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
     }
     ::selection {
@@ -122,6 +122,9 @@ def _css() -> str:
       width: min(1180px, calc(100vw - 32px));
       margin: 24px auto 48px;
     }
+    body.narrow main {
+      width: min(760px, calc(100vw - 32px));
+    }
     .reader-page main {
       width: 100%;
       margin: 0;
@@ -193,7 +196,7 @@ def _css() -> str:
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      box-shadow: var(--shadow);
+      box-shadow: none;
       overflow: visible;
     }
     th, td {
@@ -201,9 +204,19 @@ def _css() -> str:
       padding: 9px 10px;
       text-align: left;
       vertical-align: top;
+      font-variant-numeric: tabular-nums;
     }
-    th { color: var(--muted); font-weight: 600; background: var(--surface-alt); }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: var(--surface-alt);
+    }
+    tbody tr:hover { background: var(--surface-alt); }
     tr:last-child td { border-bottom: 0; }
+    .review-item-col { width: 40%; }
     .reader {
       max-width: 680px;
       margin: 32px auto 96px;
@@ -687,6 +700,11 @@ def _css() -> str:
       align-items: center;
       flex-wrap: wrap;
     }
+    .answer-form {
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+    .answer-form button { padding: 4px 10px; }
     .card-anchor {
       scroll-margin-top: 72px;
     }
@@ -706,7 +724,19 @@ def _css() -> str:
       min-width: 160px;
     }
     textarea { width: 100%; min-height: 180px; }
+    td button.danger, td .button.danger {
+      border-color: var(--line);
+      color: var(--muted);
+    }
+    td button.danger:hover, td .button.danger:hover {
+      background: var(--danger-bg);
+      border-color: var(--danger);
+      color: var(--danger);
+    }
     .stack-form { display: grid; gap: 8px; }
+    .stack-form input:not([type=file]) { max-width: 420px; }
+    .stack-form textarea { max-width: 640px; }
+    .stack-form button { justify-self: start; }
     .small { padding: 4px 8px; }
     .prompt, .profile-summary pre {
       white-space: pre-wrap;

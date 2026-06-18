@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from fastapi.responses import HTMLResponse
 
-from app.web.views.layout import _html_page
+from app.web.views.layout import _html_page, _page_header
 
 def _import_forms() -> str:
-    return """
-    <section class="toolbar">
-      <div>
-        <h1>Import</h1>
-        <p class="muted">Add a TXT, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.</p>
-      </div>
-    </section>
+    return (
+        _page_header(
+            "Import",
+            "Add a TXT, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.",
+        )
+        + """
     <section class="band">
       <h2>Upload file</h2>
       <form method="post" action="/import/file" enctype="multipart/form-data" class="stack-form">
@@ -39,6 +38,7 @@ def _import_forms() -> str:
       </form>
     </section>
     """
+    )
 
 def _duplicate_page(existing_book_id: int | None) -> HTMLResponse:
     if existing_book_id is not None:
@@ -49,15 +49,13 @@ def _duplicate_page(existing_book_id: int | None) -> HTMLResponse:
     else:
         link = '<a class="button" href="/books">Browse books</a>'
     body = f"""
-    <section class="toolbar">
-      <div>
-        <h1>Already imported</h1>
-        <p class="muted">This content has the same hash as a book already in your library.</p>
-      </div>
-    </section>
+    {_page_header(
+        "Already imported",
+        "This content has the same hash as a book already in your library.",
+    )}
     <section class="band">
       <p>No new book was created. Open the existing one to keep reading.</p>
       <p>{link}</p>
     </section>
     """
-    return _html_page("Already imported", body, active="import", status_code=409)
+    return _html_page("Already imported", body, active="import", page_class="narrow", status_code=409)

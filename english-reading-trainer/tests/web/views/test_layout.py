@@ -8,6 +8,7 @@ from app.web.views.layout import (
     _escape,
     _html_page,
     _metric,
+    _page_header,
 )
 
 
@@ -52,6 +53,20 @@ def test_html_page_includes_encoded_inline_svg_favicon() -> None:
     assert "<" not in href
     assert ">" not in href
     assert '"' not in href
+
+
+def test_page_header_renders_consistent_toolbar_variants() -> None:
+    assert _page_header("<Title>") == (
+        '<section class="toolbar"><div><h1>&lt;Title&gt;</h1></div></section>'
+    )
+    assert _page_header("Title", "Muted <copy>") == (
+        '<section class="toolbar"><div><h1>Title</h1>'
+        '<p class="muted">Muted &lt;copy&gt;</p></div></section>'
+    )
+    assert _page_header("Title", actions='<a class="button" href="/x">Action</a>') == (
+        '<section class="toolbar"><div><h1>Title</h1></div>'
+        '<a class="button" href="/x">Action</a></section>'
+    )
 
 
 def test_formatting_helpers() -> None:

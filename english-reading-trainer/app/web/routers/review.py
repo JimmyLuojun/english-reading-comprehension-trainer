@@ -22,6 +22,7 @@ from app.web.http_utils import (
 from app.web.views import (
     _due_table,
     _html_page,
+    _page_header,
 )
 
 def register_review_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
@@ -29,15 +30,10 @@ def register_review_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
     def review() -> HTMLResponse:
         db = db_factory()
         items = build_daily_review_queue(db)
-        body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>Review Queue</h1>
-            <p class="muted">Due cards ordered by priority and budget rules.</p>
-          </div>
-        </section>
-        {_due_table(items, return_to="/review")}
-        """
+        body = (
+            _page_header("Review Queue", "Due cards ordered by priority and budget rules.")
+            + _due_table(items, return_to="/review")
+        )
         return _html_page("Review", body, active="review")
 
     @web_app.post("/review/{card_type}/{card_id}")

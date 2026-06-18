@@ -20,6 +20,7 @@ from app.web.views import (
     _html_page,
     _latest_profile_block,
     _metric,
+    _page_header,
 )
 
 def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
@@ -32,13 +33,11 @@ def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], Databas
         profile_status = get_profile_trigger_status(db)
 
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>Reading Trainer</h1>
-            <p class="muted">Books, cards, review queue, and learner profile.</p>
-          </div>
-          <a class="button primary" href="/review">Start review</a>
-        </section>
+        {_page_header(
+            "Reading Trainer",
+            "Books, cards, review queue, and learner profile.",
+            '<a class="button primary" href="/review">Start review</a>',
+        )}
         <section class="metrics">
           {_metric("Books", stats["books"], href="/books")}
           {_metric("Sentences", stats["sentences"])}

@@ -20,8 +20,8 @@ from app.web.views import (
     _books_continue_script,
     _books_table,
     _chapters_table,
-    _escape,
     _html_page,
+    _page_header,
     _primary_read_idx,
 )
 
@@ -30,14 +30,7 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
     def books() -> HTMLResponse:
         db = db_factory()
         rows = _fetch_books(db)
-        body = """
-        <section class="toolbar">
-          <div>
-            <h1>Books</h1>
-            <p class="muted">Imported reading material.</p>
-          </div>
-        </section>
-        """
+        body = _page_header("Books", "Imported reading material.")
         body += _books_continue_script()
         body += _books_table(rows)
         return _html_page("Books", body, active="books")
@@ -64,13 +57,11 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             else f"/read/{book_id}"
         )
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>{_escape(book["title"])}</h1>
-            <p class="muted">{_escape(book["author"] or "Unknown author")}</p>
-          </div>
-          <a class="button" href="{read_href}">Start reading</a>
-        </section>
+        {_page_header(
+            book["title"],
+            book["author"] or "Unknown author",
+            f'<a class="button" href="{read_href}">Start reading</a>',
+        )}
         {_chapters_table(book_id, chapters)}
         """
         return _html_page(book["title"], body, active="books")

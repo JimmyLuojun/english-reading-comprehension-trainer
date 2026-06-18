@@ -2,6 +2,7 @@
 
 from app.web.views.layout import (
     _html_page,
+    _page_header,
     _metric,
     _date,
     _active,
@@ -104,6 +105,7 @@ __all__ = [
     "_latest_profile_block",
     "_metric",
     "_note_edit_cell",
+    "_page_header",
     "_primary_read_idx",
     "_profile_save_form",
     "_pronunciation_cell",

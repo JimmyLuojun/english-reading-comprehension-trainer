@@ -72,7 +72,7 @@
 - [阅读护眼主题执行方案](features/reading-eye-comfort-theme.md)：已实现的米黄/sepia 护眼主题与头部开关，纯 CSS 变量覆盖，反转 §0 的"主题切换"排除项。
 - [审美升级执行方案](features/visual-refresh.md)：已实现的默认观感升级（衬线标题、青绿主色、三级文字层级、统一圆角与柔和表面），纯 CSS 变量层改动，不碰布局/不引外部字体，与 sepia 主题共存。
 - [审美升级后续优化](features/visual-refresh-followups.md)：已实现的三项小优化——实心主按钮（视觉层级）、指标等宽数字、内联 SVG favicon 与标题整理，单选择器/`<head>` 改动，零新依赖。
-- [UI 一致性与密度优化](features/ui-consistency-and-density.md)：计划中的五步收尾——调浅 sepia 护眼色板（仅 sepia 块）、抽 `_page_header` 锁页头一致性、Import/Profile 收窄、表格去浮表头精修与 Delete 弱化、Review 行压缩、Import 任务卡，仍是 CSS 变量层 + 一个共享 helper，不碰默认冷白色与 reader 布局。
+- [UI 一致性与密度优化](features/ui-consistency-and-density.md)：已实现的五步收尾——调浅 sepia 护眼色板（仅 sepia 块）、抽 `_page_header` 锁页头一致性、Import/Profile 收窄、表格去浮表头精修与 Delete 弱化、Review 行压缩、Import 任务卡，仍是 CSS 变量层 + 一个共享 helper，不碰默认冷白色与 reader 布局。
 
 ---
 

@@ -22,6 +22,7 @@ from app.web.views import (
     _escape,
     _html_page,
     _latest_profile_block,
+    _page_header,
     _profile_save_form,
 )
 
@@ -32,13 +33,11 @@ def register_profile_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseC
         latest = get_latest_profile_snapshot(db)
         status = get_profile_trigger_status(db)
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>Learner Profile</h1>
-            <p class="muted">Manual AI profile summary and snapshot history.</p>
-          </div>
-          <a class="button" href="/profile/prompt">Generate prompt</a>
-        </section>
+        {_page_header(
+            "Learner Profile",
+            "Manual AI profile summary and snapshot history.",
+            '<a class="button" href="/profile/prompt">Generate prompt</a>',
+        )}
         <section class="band">
           <h2>Status</h2>
           <p>Profile is <strong>{"due" if status.should_generate else "not due"}</strong>
@@ -50,7 +49,7 @@ def register_profile_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseC
           {_profile_save_form()}
         </section>
         """
-        return _html_page("Profile", body, active="profile")
+        return _html_page("Profile", body, active="profile", page_class="narrow")
 
     @web_app.get("/profile/prompt", response_class=HTMLResponse)
     def profile_prompt() -> HTMLResponse:
@@ -59,16 +58,14 @@ def register_profile_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseC
         except ProfileInputError as exc:
             return _error_page(str(exc), status_code=400)
         body = f"""
-        <section class="toolbar">
-          <div>
-            <h1>Profile Prompt</h1>
-            <p class="muted">Copy this into your AI chat, then save the Markdown output.</p>
-          </div>
-          <a class="button" href="/profile">Back to profile</a>
-        </section>
+        {_page_header(
+            "Profile Prompt",
+            "Copy this into your AI chat, then save the Markdown output.",
+            '<a class="button" href="/profile">Back to profile</a>',
+        )}
         <pre class="prompt">{_escape(prompt)}</pre>
         """
-        return _html_page("Profile Prompt", body, active="profile")
+        return _html_page("Profile Prompt", body, active="profile", page_class="narrow")
 
     @web_app.post("/profile/save")
     async def save_profile(request: Request) -> Any:
