@@ -34,8 +34,31 @@ def test_due_table_renders_empty_state_and_word_prompt_audio() -> None:
 
     html = _due_table([item], "/review")
 
+    assert "<th>Review item</th>" in html
+    assert "<th>Prompt</th>" not in html
     assert 'data-speak-text="cat"' in _review_prompt_cell(item)
     assert "/review/word/1" in html
+
+
+def test_review_prompt_cell_shows_complete_sentence() -> None:
+    prompt = (
+        "The network timestamps transactions by hashing them into an ongoing chain "
+        "of hash-based proof-of-work, forming a record that cannot be changed without "
+        "redoing the proof-of-work."
+    )
+    item = _Item(
+        card_type=CardType.SENTENCE,
+        card_id=7,
+        mastery_state=MasteryState.NEW,
+        due_at=datetime(2026, 6, 17, tzinfo=timezone.utc),
+        prompt=prompt,
+        source_href="/read/1?chapter=2&sentence_id=7&panel=analysis#sentence-7",
+    )
+
+    html = _review_prompt_cell(item)
+
+    assert 'href="/read/1?chapter=2&amp;sentence_id=7&amp;panel=analysis#sentence-7"' in html
+    assert "redoing the proof-of-work." in html
 
 
 def test_review_answer_cell_combines_reveal_and_outcomes() -> None:

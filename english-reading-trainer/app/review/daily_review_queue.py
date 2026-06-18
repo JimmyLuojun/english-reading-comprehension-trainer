@@ -172,8 +172,9 @@ def _sentence_due_sql() -> str:
             s.text AS prompt,
             COALESCE(sc.user_translation, '') AS answer,
             '' AS ai_meaning,
-            '' AS source_book_title,
-            '' AS source_href,
+            COALESCE(b.title, '') AS source_book_title,
+            '/read/' || s.book_id || '?chapter=' || c.idx ||
+            '&sentence_id=' || s.id || '&panel=analysis#sentence-' || s.id AS source_href,
             (
                 SELECT rl.quality FROM review_logs rl
                  WHERE rl.card_type = 'sentence' AND rl.card_id = sc.id
@@ -188,6 +189,8 @@ def _sentence_due_sql() -> str:
             ) AS last_outcome
           FROM sentence_cards sc
           JOIN sentences s ON s.id = sc.sentence_id
+          JOIN chapters c ON c.id = s.chapter_id
+          JOIN books b ON b.id = s.book_id
          WHERE sc.due_at <= ?
            AND sc.archived_at IS NULL
     """

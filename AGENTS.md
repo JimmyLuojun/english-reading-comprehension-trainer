@@ -18,6 +18,7 @@
   - 测试框架：`pytest`。覆盖率工具：`pytest-cov`，目标 ≥ 90% 行覆盖、关键模块（`sm2_scheduler` / `ai_response_cache` / `json_output_validator`）100%。
   - 本项目所有 Python 测试、ruff、脚本验证都必须使用 `english-reading-trainer/.venv/bin/python -m ...`，不要使用裸 `python`、`pytest`、`ruff`，避免跑到 miniconda base 或系统 Python。验证结果必须报告实际使用的 `sys.executable`，尤其在依赖导入失败时。
   - 测试必须可独立运行（`english-reading-trainer/.venv/bin/python -m pytest tests/`），不依赖外部网络或环境变量。
+  - 非微不足道的代码变更完成后，除针对性测试外还必须跑全量测试：`english-reading-trainer/.venv/bin/python -m pytest tests/`。如果因耗时、环境、外部依赖或已知失败无法跑完整套件，必须在最终回复中明确说明没有跑全量测试、阻塞原因、已跑的替代验证以及剩余风险。
   - Web 代码变更后运行 `english-reading-trainer/.venv/bin/python -m ruff check app/web`，防止拆分后遗留未使用导入、缺失名称和不清晰依赖。
 
 ## Shared Memory

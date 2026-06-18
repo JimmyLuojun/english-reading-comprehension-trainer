@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.db_models import CardType, ReviewOutcome
-from app.web.views.components import _hover_popover, _pronunciation_cell
+from app.web.views.components import _hover_popover, _pronunciation_cell, _source_link
 from app.web.views.layout import _date, _escape
 
 def _due_table(items: list[Any], return_to: str) -> str:
@@ -24,21 +24,21 @@ def _due_table(items: list[Any], return_to: str) -> str:
     )
     return f"""
     <table>
-      <thead><tr><th>Type</th><th>ID</th><th>State</th><th>Due</th><th>Prompt</th><th>Answer</th></tr></thead>
+      <thead><tr><th>Type</th><th>ID</th><th>State</th><th>Due</th><th>Review item</th><th>Answer</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
     """
 
 def _review_prompt_cell(item: Any) -> str:
     prompt = str(getattr(item, "prompt", "") or "")
-    display = prompt[:120]
+    href = getattr(item, "source_href", "")
     if item.card_type == CardType.WORD:
         return _pronunciation_cell(
-            display,
+            prompt,
             speak_text=prompt,
-            href=getattr(item, "source_href", ""),
+            href=href,
         )
-    return _escape(display)
+    return _source_link(prompt, href, class_name="source-link review-item-link")
 
 def _review_answer_cell(item: Any, return_to: str) -> str:
     answer = (getattr(item, "answer", "") or "").strip()

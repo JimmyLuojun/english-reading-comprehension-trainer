@@ -330,15 +330,22 @@ class TestListDueCards:
 
         assert items[0].source_href.endswith(f"?chapter=1&word_card={card_id}#sentence-{sentence_id}")
 
-    def test_sentence_cards_do_not_include_word_source_link(
+    def test_sentence_cards_link_to_reader_analysis_panel(
         self, db: DatabaseConnection
     ) -> None:
-        _insert_sentence_card(db, text="A due sentence.")
+        card_id = _insert_sentence_card(db, text="A due sentence.")
+        with db.get_connection() as conn:
+            sentence_id = conn.execute(
+                "SELECT sentence_id FROM sentence_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()["sentence_id"]
 
         items = list_due_cards(db, as_of=NOW, card_type="sentence")
 
-        assert items[0].source_book_title == ""
-        assert items[0].source_href == ""
+        assert items[0].source_book_title == "B"
+        assert items[0].source_href.endswith(
+            f"?chapter=1&sentence_id={sentence_id}&panel=analysis#sentence-{sentence_id}"
+        )
 
 
 class TestBuildDailyReviewQueue:

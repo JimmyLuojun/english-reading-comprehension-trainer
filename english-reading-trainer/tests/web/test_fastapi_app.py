@@ -2209,19 +2209,22 @@ class TestReviewRoutes:
         assert f'href="{source_href}"' in response.text
         assert 'data-speak-text="cat"' in response.text
 
-    def test_review_page_sentence_prompt_has_no_source_link(
+    def test_review_page_sentence_prompt_links_to_analysis_panel(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         book_id, sentence_ids = _seed_book(db, tmp_path)
         client.post(f"/mark/sentence/{sentence_ids[0]}", data={"return_to": "/review"})
         sentence_card_id = _sentence_card_id(db, sentence_ids[0])
         _make_due_yesterday(db, "sentence_cards", sentence_card_id)
-        source_href = f"/read/{book_id}?chapter=1#sentence-{sentence_ids[0]}"
+        source_href = (
+            f"/read/{book_id}?chapter=1&sentence_id={sentence_ids[0]}"
+            f"&panel=analysis#sentence-{sentence_ids[0]}"
+        )
 
         response = client.get("/review")
 
         assert response.status_code == 200
-        assert f'href="{source_href}"' not in response.text
+        assert f'href="{source_href.replace("&", "&amp;")}"' in response.text
         assert "The cat sat on the mat." in response.text
 
     def test_review_post_records_answer(
