@@ -28,7 +28,7 @@ def _css() -> str:
       --shadow: 0 18px 50px rgba(20, 30, 40, 0.08);
       --font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
       --analysis-panel-width: 520px;
-      --reader-max-width: 1120px;
+      --reader-max-width: 840px;
     }
     html[data-theme="sepia"] {
       color-scheme: light;

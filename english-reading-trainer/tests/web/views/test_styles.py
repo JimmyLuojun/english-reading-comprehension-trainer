@@ -27,6 +27,8 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "@media (max-width: 1179px)" in css
     assert ".analysis-panel-tab" in css
     assert ".analysis-open .analysis-panel-tab" in css
+    assert "--reader-max-width: 840px" in css
+    assert "max-width: var(--reader-max-width)" in css
     assert "#toolbar-analysis-word-status" in css
     assert "[data-sentence-id].translated" in css
     assert "text-decoration-style: dotted" in css
