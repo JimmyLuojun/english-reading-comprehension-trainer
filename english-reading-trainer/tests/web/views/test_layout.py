@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from app.web.views.layout import (
     _active,
-    _continue_reading_script,
     _date,
     _escape,
     _html_page,
     _metric,
     _page_header,
+    _resume_nav_script,
 )
 
 
@@ -20,8 +20,10 @@ def test_html_page_escapes_title_and_marks_active_nav() -> None:
     assert response.status_code == 200
     assert "&lt;Title&gt; - English Reading Trainer" in body
     assert '<body class="reader">' in body
-    assert '<a class="active" href="/books">Books</a>' in body
-    assert "reader:last-book-id" not in body
+    assert '<a id="nav-books" class="active" href="/books">Books</a>' in body
+    assert '<a class="" href="/books">Library</a>' in body
+    assert 'getElementById("nav-books")' in body
+    assert "reader:last-book-id" in body
 
 
 def test_html_page_includes_pre_paint_theme_bootstrap_and_toggle() -> None:
@@ -70,22 +72,15 @@ def test_page_header_renders_consistent_toolbar_variants() -> None:
     )
 
 
-def test_continue_reading_script_defaults_to_primary_button_and_restores_progress() -> None:
-    script = _continue_reading_script()
+def test_resume_nav_script_rewrites_books_nav() -> None:
+    script = _resume_nav_script()
 
+    assert 'getElementById("nav-books")' in script
     assert "reader:last-book-id" in script
     assert "reader:progress:book:${bookId}" in script
-    assert "Continue reading" in script
-    assert 'link.className = "button primary";' in script
     assert "?chapter=${chapter}&restore=1" in script
-
-
-def test_continue_reading_script_accepts_secondary_button_class() -> None:
-    script = _continue_reading_script(button_class="button")
-
-    assert 'link.className = "button";' in script
-    assert 'link.className = "button primary";' not in script
-    assert "reader:last-book-id" in script
+    assert "link.href = href" in script
+    assert "Continue reading" not in script
 
 
 def test_formatting_helpers() -> None:

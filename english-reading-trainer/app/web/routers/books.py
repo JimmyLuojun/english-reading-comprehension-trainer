@@ -19,7 +19,6 @@ from app.web.services.books import delete_book_and_assets
 from app.web.views import (
     _books_table,
     _chapters_table,
-    _continue_reading_script,
     _html_page,
     _page_header,
     _primary_read_idx,
@@ -30,10 +29,9 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
     def books() -> HTMLResponse:
         db = db_factory()
         rows = _fetch_books(db)
-        body = _page_header("Books", "Imported reading material.")
-        body += _continue_reading_script()
+        body = _page_header("Library", "Imported reading material.")
         body += _books_table(rows)
-        return _html_page("Books", body, active="books")
+        return _html_page("Library", body, active="library")
 
     @web_app.post("/books/{book_id}/delete")
     def delete_book(book_id: int) -> Any:
@@ -64,4 +62,4 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         )}
         {_chapters_table(book_id, chapters)}
         """
-        return _html_page(book["title"], body, active="books")
+        return _html_page(book["title"], body, active="library")

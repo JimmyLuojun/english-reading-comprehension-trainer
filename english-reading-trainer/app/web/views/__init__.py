@@ -7,7 +7,6 @@ from app.web.views.layout import (
     _date,
     _active,
     _escape,
-    _continue_reading_script,
 )
 
 from app.web.views.books import (
@@ -88,7 +87,6 @@ __all__ = [
     "_books_table",
     "_cards_return_script",
     "_chapters_table",
-    "_continue_reading_script",
     "_css",
     "_date",
     "_def_edit_script",

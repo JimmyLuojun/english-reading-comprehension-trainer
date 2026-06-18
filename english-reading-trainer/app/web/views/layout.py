@@ -53,13 +53,15 @@ def _html_page(
 <body{body_class}>
   <nav>
     <a class="{_active(active, "dashboard")}" href="/">Dashboard</a>
-    <a class="{_active(active, "books")}" href="/books">Books</a>
+    <a id="nav-books" class="{_active(active, "books")}" href="/books">Books</a>
+    <a class="{_active(active, "library")}" href="/books">Library</a>
     <a class="{_active(active, "import")}" href="/import">Import</a>
     <a class="{_active(active, "cards")}" href="/cards">Cards</a>
     <a class="{_active(active, "review")}" href="/review">Review</a>
     <a class="{_active(active, "profile")}" href="/profile">Profile</a>
     <button type="button" id="theme-toggle" onclick="{_escape(_THEME_TOGGLE_SCRIPT)}">护眼</button>
   </nav>
+  <script>{_resume_nav_script()}</script>
   <main>{body}</main>
   <script>{_def_edit_script()}</script>
 </body>
@@ -86,37 +88,31 @@ def _metric(label: str, value: int, href: str | None = None) -> str:
         )
     return f'<div class="metric">{content}</div>'
 
-def _continue_reading_script(button_class: str = "button primary") -> str:
+def _resume_nav_script() -> str:
     return """
-    <script>
-      (() => {
-        let bookId = "";
-        try {
-          bookId = window.localStorage.getItem("reader:last-book-id") || "";
-        } catch (error) {
-          bookId = "";
-        }
-        if (!bookId) return;
-        const toolbar = document.querySelector("section.toolbar");
-        if (!toolbar) return;
-        let href = `/read/${encodeURIComponent(bookId)}`;
-        try {
-          const progress = JSON.parse(
-            window.localStorage.getItem(`reader:progress:book:${bookId}`) || "null",
-          );
-          const chapter = Number.parseInt(progress?.chapter_idx, 10);
-          if (chapter) href = `${href}?chapter=${chapter}&restore=1`;
-        } catch (error) {
-          href = `/read/${encodeURIComponent(bookId)}`;
-        }
-        const link = document.createElement("a");
-        link.className = "__BUTTON_CLASS__";
-        link.href = href;
-        link.textContent = "Continue reading";
-        toolbar.append(link);
-      })();
-    </script>
-    """.replace("__BUTTON_CLASS__", button_class)
+    (() => {
+      const link = document.getElementById("nav-books");
+      if (!link) return;
+      let bookId = "";
+      try {
+        bookId = window.localStorage.getItem("reader:last-book-id") || "";
+      } catch (error) {
+        bookId = "";
+      }
+      if (!bookId) return;
+      let href = `/read/${encodeURIComponent(bookId)}`;
+      try {
+        const progress = JSON.parse(
+          window.localStorage.getItem(`reader:progress:book:${bookId}`) || "null",
+        );
+        const chapter = Number.parseInt(progress?.chapter_idx, 10);
+        if (chapter) href = `${href}?chapter=${chapter}&restore=1`;
+      } catch (error) {
+        href = `/read/${encodeURIComponent(bookId)}`;
+      }
+      link.href = href;
+    })();
+    """
 
 def _date(value: str) -> str:
     if not value:

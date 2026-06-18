@@ -1,6 +1,6 @@
 # 回到上次阅读：Books 导航续读 — Executable Plan
 
-Status: planned (2026-06-18)，取代本文件原先的 "Dashboard Continue 按钮 + 字号" 方案。
+Status: implemented (2026-06-18)，取代本文件原先的 "Dashboard Continue 按钮 + 字号" 方案。
 
 ## 背景与决策
 
