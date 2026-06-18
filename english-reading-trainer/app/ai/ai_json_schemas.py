@@ -5,10 +5,13 @@ Both schemas use `additionalProperties: false` to prevent prompt-injection
 via unexpected extra fields. Error codes are validated against the closed
 enumeration from db_models.VALID_ERROR_CODES.
 
-WORD_ANALYSIS_SCHEMA    — v1 prompt, dictionary-view fields
-WORD_ANALYSIS_SCHEMA_V2 — v2 prompt, writer-perspective fields (§22)
-WORD_ANALYSIS_SCHEMA_V3 — v3 prompt, adds Chinese meaning for reader panel
-WORD_ANALYSIS_SCHEMA_V4 — v4 prompt, adds learner-note feedback
+SENTENCE_ANALYSIS_SCHEMA    — v1 sentence prompt fields
+SENTENCE_ANALYSIS_SCHEMA_V2 — v2 prompt, adds blocking point and takeaway suggestion
+WORD_ANALYSIS_SCHEMA        — v1 prompt, dictionary-view fields
+WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
+WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
+WORD_ANALYSIS_SCHEMA_V4     — v4 prompt, adds learner-note feedback
+WORD_ANALYSIS_SCHEMA_V5     — v5 prompt, adds role in sentence
 """
 
 from app.db_models import VALID_ERROR_CODES
@@ -148,6 +151,22 @@ SENTENCE_ANALYSIS_SCHEMA: dict = {
             "minimum": 0.0,
             "maximum": 1.0,
         },
+    },
+}
+
+SENTENCE_ANALYSIS_SCHEMA_V2: dict = {
+    **SENTENCE_ANALYSIS_SCHEMA,
+    "required": [
+        "subject_skeleton", "clauses", "modifiers", "logic_markers",
+        "anaphora", "simplified_en", "chinese_gloss", "blocking_point",
+        "predicted_error_types", "diagnosis_basis",
+        "diagnosed_error_types", "diagnosis_evidence",
+        "takeaway_suggestion", "confidence",
+    ],
+    "properties": {
+        **SENTENCE_ANALYSIS_SCHEMA["properties"],
+        "blocking_point": {"type": "string", "minLength": 1},
+        "takeaway_suggestion": {"type": "string", "minLength": 1},
     },
 }
 
@@ -320,5 +339,23 @@ WORD_ANALYSIS_SCHEMA_V4: dict = {
                 "corrected_understanding": {"type": "string"},
             },
         },
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Word / phrase / collocation analysis schema v5
+# Adds the minimal recursive "back to the sentence" link.
+# ---------------------------------------------------------------------------
+
+WORD_ANALYSIS_SCHEMA_V5: dict = {
+    **WORD_ANALYSIS_SCHEMA_V4,
+    "required": [
+        "lemma", "lexical_type", "pos", "meaning_in_context", "chinese_meaning",
+        "role_in_sentence", "register", "why_this_word", "vs_simpler",
+        "learner_note_check", "morphology", "predicted_error_types", "confidence",
+    ],
+    "properties": {
+        **WORD_ANALYSIS_SCHEMA_V4["properties"],
+        "role_in_sentence": {"type": "string", "minLength": 1},
     },
 }

@@ -25,7 +25,7 @@ from app.db_connection import DatabaseConnection
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
-_VALID_RESPONSE = json.dumps({
+_VALID_RESPONSE_V1 = json.dumps({
     "subject_skeleton": "The cat sat",
     "clauses": [{"type": "main", "text": "The cat sat", "role": "main pred"}],
     "modifiers": [],
@@ -40,6 +40,23 @@ _VALID_RESPONSE = json.dumps({
     "confidence": 0.9,
 })
 
+_VALID_RESPONSE = json.dumps({
+    "subject_skeleton": "The cat sat",
+    "clauses": [{"type": "main", "text": "The cat sat", "role": "main pred"}],
+    "modifiers": [],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The cat sat.",
+    "chinese_gloss": "猫坐着。",
+    "blocking_point": "The main verb is simple, but the prepositional phrase can be missed.",
+    "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
+    "takeaway_suggestion": "遇到介词短语，先检查它补充哪个动作，否则易犯 G01。",
+    "confidence": 0.9,
+})
+
 _VALID_DIAGNOSED_RESPONSE = json.dumps({
     "subject_skeleton": "The cat sat",
     "clauses": [{"type": "main", "text": "The cat sat", "role": "main pred"}],
@@ -48,12 +65,14 @@ _VALID_DIAGNOSED_RESPONSE = json.dumps({
     "anaphora": [],
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
+    "blocking_point": "The translation misses the modifier attached to the main clause.",
     "predicted_error_types": [],
     "diagnosis_basis": "user_translation",
     "diagnosed_error_types": ["G02"],
     "diagnosis_evidence": [
         {"error_type": "G02", "evidence": "The translation misses the modifier."}
     ],
+    "takeaway_suggestion": "遇到修饰成分，先检查它修饰哪个词，否则易犯 G02。",
     "confidence": 0.9,
 })
 
@@ -160,7 +179,7 @@ class TestAnalyzeSentenceCacheHit:
         assert "subject_skeleton" in result.data
 
     def test_stale_cache_flagged(self, db: DatabaseConnection) -> None:
-        with _mock_llm([_VALID_RESPONSE]):
+        with _mock_llm([_VALID_RESPONSE_V1]):
             analyze_sentence(db, _SENTENCE, model=_MODEL, prompt_version="v1")
         # Request v2: should get stale v1 back
         with _mock_llm([]) as mock:

@@ -10,10 +10,12 @@ import jsonschema
 
 from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
+    SENTENCE_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
+    WORD_ANALYSIS_SCHEMA_V5,
 )
 from app.db_models import VALID_ERROR_CODES
 
@@ -50,6 +52,18 @@ VALID_DIAGNOSED_SENTENCE = {
             "evidence": "The translation attaches the modifier to the wrong noun.",
         }
     ],
+}
+
+VALID_SENTENCE_V2 = {
+    **VALID_SENTENCE,
+    "blocking_point": "The relative clause can be mistaken for a main action.",
+    "takeaway_suggestion": "遇到名词后的从句，先检查它修饰哪个名词，否则易犯 G02。",
+}
+
+VALID_DIAGNOSED_SENTENCE_V2 = {
+    **VALID_DIAGNOSED_SENTENCE,
+    "blocking_point": "The translation attaches the modifier to the wrong noun.",
+    "takeaway_suggestion": "遇到名词后的从句，先检查它修饰哪个名词，否则易犯 G02。",
 }
 
 VALID_WORD = {
@@ -93,6 +107,14 @@ VALID_WORD_V4 = {
         "feedback": "你的理解正确。",
         "corrected_understanding": "",
     },
+}
+
+VALID_WORD_V5 = {
+    **VALID_WORD_V4,
+    "role_in_sentence": (
+        "It functions as the main verb and explains how the policy changes the risk. "
+        "If read as a noun, the whole causal relation becomes unclear."
+    ),
 }
 
 
@@ -317,6 +339,49 @@ class TestInvalidInstances:
 
 
 # ---------------------------------------------------------------------------
+# SENTENCE_ANALYSIS_SCHEMA_V2
+# ---------------------------------------------------------------------------
+
+class TestSentenceSchemaV2Structure:
+    def test_v2_schema_is_dict(self) -> None:
+        assert isinstance(SENTENCE_ANALYSIS_SCHEMA_V2, dict)
+
+    def test_v2_required_fields(self) -> None:
+        required = SENTENCE_ANALYSIS_SCHEMA_V2["required"]
+        for field in ["blocking_point", "takeaway_suggestion"]:
+            assert field in required
+            assert field in SENTENCE_ANALYSIS_SCHEMA_V2["properties"]
+
+    def test_v2_preserves_v1_fields(self) -> None:
+        required = SENTENCE_ANALYSIS_SCHEMA_V2["required"]
+        for field in ["subject_skeleton", "clauses", "diagnosis_basis"]:
+            assert field in required
+
+
+class TestSentenceSchemaV2ValidInstances:
+    def test_valid_v2_predicted_sentence_passes(self) -> None:
+        _validate(VALID_SENTENCE_V2, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+    def test_valid_v2_diagnosed_sentence_passes(self) -> None:
+        _validate(VALID_DIAGNOSED_SENTENCE_V2, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+
+class TestSentenceSchemaV2InvalidInstances:
+    def test_v1_sentence_rejected_by_v2_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_SENTENCE, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+    def test_missing_takeaway_suggestion_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_SENTENCE_V2.items() if k != "takeaway_suggestion"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+    def test_extra_field_rejected_by_v2_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate({**VALID_SENTENCE_V2, "extra_field": "oops"}, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+
+# ---------------------------------------------------------------------------
 # WORD_ANALYSIS_SCHEMA_V2
 # ---------------------------------------------------------------------------
 
@@ -473,3 +538,37 @@ class TestWordSchemaV4InvalidInstances:
     def test_v3_word_rejected_by_v4_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate(VALID_WORD_V3, WORD_ANALYSIS_SCHEMA_V4)
+
+
+# ---------------------------------------------------------------------------
+# WORD_ANALYSIS_SCHEMA_V5
+# ---------------------------------------------------------------------------
+
+class TestWordSchemaV5Structure:
+    def test_v5_schema_is_dict(self) -> None:
+        assert isinstance(WORD_ANALYSIS_SCHEMA_V5, dict)
+
+    def test_v5_requires_role_in_sentence(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V5["required"]
+        assert "role_in_sentence" in required
+        assert "role_in_sentence" in WORD_ANALYSIS_SCHEMA_V5["properties"]
+
+    def test_v5_preserves_v4_learner_note_check(self) -> None:
+        required = WORD_ANALYSIS_SCHEMA_V5["required"]
+        assert "learner_note_check" in required
+
+
+class TestWordSchemaV5ValidInstances:
+    def test_valid_v5_word_passes(self) -> None:
+        _validate(VALID_WORD_V5, WORD_ANALYSIS_SCHEMA_V5)
+
+
+class TestWordSchemaV5InvalidInstances:
+    def test_missing_role_in_sentence_rejected(self) -> None:
+        bad = {k: v for k, v in VALID_WORD_V5.items() if k != "role_in_sentence"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, WORD_ANALYSIS_SCHEMA_V5)
+
+    def test_v4_word_rejected_by_v5_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_WORD_V4, WORD_ANALYSIS_SCHEMA_V5)

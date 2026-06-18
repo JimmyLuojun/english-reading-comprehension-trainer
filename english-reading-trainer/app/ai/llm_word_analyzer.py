@@ -15,6 +15,7 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
+    WORD_ANALYSIS_SCHEMA_V5,
 )
 from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
@@ -23,13 +24,14 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PROMPT_NAME = "word_analysis"
-_PROMPT_VERSION = "v4"
+_PROMPT_VERSION = "v5"
 
 _SCHEMAS = {
     "v1": WORD_ANALYSIS_SCHEMA,
     "v2": WORD_ANALYSIS_SCHEMA_V2,
     "v3": WORD_ANALYSIS_SCHEMA_V3,
     "v4": WORD_ANALYSIS_SCHEMA_V4,
+    "v5": WORD_ANALYSIS_SCHEMA_V5,
 }
 
 _RETRY_SUFFIX = (
@@ -104,7 +106,7 @@ def analyze_word(
         "learner_profile": learner_profile or "(none)",
     })
 
-    schema = _SCHEMAS.get(prompt_version, WORD_ANALYSIS_SCHEMA_V3)
+    schema = _SCHEMAS.get(prompt_version, WORD_ANALYSIS_SCHEMA_V5)
     raw = _call_llm(prompt, model)
     data, is_valid = _validate_attempt(raw, schema)
 

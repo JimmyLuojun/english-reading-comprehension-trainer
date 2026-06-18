@@ -54,6 +54,25 @@ _VALID_SENTENCE_JSON = json.dumps({
     "confidence": 0.95,
 })
 
+_VALID_SENTENCE_JSON_V2 = json.dumps({
+    "subject_skeleton": "fox jumps",
+    "clauses": [
+        {"type": "main", "text": "The quick brown fox jumps over the lazy dog", "role": "statement"}
+    ],
+    "modifiers": [{"target": "fox", "modifier": "quick brown", "type": "adjective"}],
+    "logic_markers": [],
+    "anaphora": [],
+    "simplified_en": "The fox jumped over the dog",
+    "chinese_gloss": "那只狐狸跳过了狗",
+    "blocking_point": "The long subject can hide the main verb.",
+    "predicted_error_types": ["G01"],
+    "diagnosis_basis": "predicted",
+    "diagnosed_error_types": [],
+    "diagnosis_evidence": [],
+    "takeaway_suggestion": "遇到长主语，先检查真正的谓语，否则易犯 G01。",
+    "confidence": 0.95,
+})
+
 _VALID_DIAGNOSED_SENTENCE_JSON = json.dumps({
     "subject_skeleton": "fox jumps",
     "clauses": [
@@ -114,6 +133,28 @@ _VALID_WORD_JSON_V4 = json.dumps({
     "pos": "noun",
     "meaning_in_context": "a wild animal known for cunning",
     "chinese_meaning": "以狡猾著称的狐狸",
+    "register": "neutral",
+    "why_this_word": "Fox is the precise animal name; animal would be too general. If you wrote animal, you would lose the cultural association with cleverness.",
+    "vs_simpler": [
+        {"simpler": "animal", "difference": "Animal is broader; fox names the species and its familiar connotations."}
+    ],
+    "learner_note_check": {
+        "status": "not_provided",
+        "feedback": "",
+        "corrected_understanding": "",
+    },
+    "morphology": {"root": "", "family": ["foxy", "foxlike"]},
+    "predicted_error_types": ["L01"],
+    "confidence": 0.9,
+})
+
+_VALID_WORD_JSON_V5 = json.dumps({
+    "lemma": "fox",
+    "lexical_type": "word",
+    "pos": "noun",
+    "meaning_in_context": "a wild animal known for cunning",
+    "chinese_meaning": "以狡猾著称的狐狸",
+    "role_in_sentence": "It is the subject noun and anchors who performs the action.",
     "register": "neutral",
     "why_this_word": "Fox is the precise animal name; animal would be too general. If you wrote animal, you would lose the cultural association with cleverness.",
     "vs_simpler": [
@@ -266,6 +307,20 @@ class TestSaveSentenceAnalysisHappyPath:
                 "SELECT model FROM ai_cache WHERE id = ?", (r.cache_id,)
             ).fetchone()
         assert row["model"] == "claude-opus-4-7"
+
+    def test_v2_json_with_recursive_fields_is_valid(
+        self,
+        db: DatabaseConnection,
+        sid: int,
+    ):
+        r = save_sentence_analysis(
+            db,
+            sid,
+            _VALID_SENTENCE_JSON_V2,
+            prompt_version="v2",
+        )
+
+        assert r.is_valid is True
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +477,21 @@ class TestSaveWordAnalysisHappyPath:
             "fox",
             _VALID_WORD_JSON_V4,
             prompt_version="v4",
+        )
+
+        assert r.is_valid is True
+
+    def test_v5_json_with_role_in_sentence_is_valid(
+        self,
+        db: DatabaseConnection,
+        sid: int,
+    ):
+        r = save_word_analysis(
+            db,
+            sid,
+            "fox",
+            _VALID_WORD_JSON_V5,
+            prompt_version="v5",
         )
 
         assert r.is_valid is True

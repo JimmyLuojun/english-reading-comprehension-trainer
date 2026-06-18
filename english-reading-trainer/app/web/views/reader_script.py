@@ -63,14 +63,23 @@ def _selection_script() -> str:
       const wordSections = document.getElementById("analysis-word-sections");
       const simplified = document.getElementById("analysis-simplified");
       const gloss = document.getElementById("analysis-gloss");
+      const blockingPoint = document.getElementById("analysis-blocking-point");
       const skeleton = document.getElementById("analysis-skeleton");
+      const clauses = document.getElementById("analysis-clauses");
+      const modifiers = document.getElementById("analysis-modifiers");
+      const logicMarkers = document.getElementById("analysis-logic-markers");
+      const anaphora = document.getElementById("analysis-anaphora");
       const diagnosis = document.getElementById("analysis-diagnosis");
+      const backToWhole = document.getElementById("analysis-back-to-whole");
       const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
       const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
       const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
+      const sentencePanelNoteSuggestion = document.getElementById("sentence-panel-note-suggestion");
+      const sentencePanelNoteAccept = document.getElementById("sentence-panel-note-accept");
       const sentencePanelNote = document.getElementById("sentence-panel-note");
       const sentencePanelNoteSave = document.getElementById("sentence-panel-note-save");
       const sentencePanelNoteStatus = document.getElementById("sentence-panel-note-status");
+      const wordRole = document.getElementById("analysis-word-role");
       const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
       const wordAnalysisMeaningZh = document.getElementById("analysis-word-meaning-zh");
       const wordRegister = document.getElementById("analysis-word-register");
@@ -542,6 +551,16 @@ def _selection_script() -> str:
         }
       }
 
+      function acceptTakeawaySuggestion() {
+        const suggestion = (sentencePanelNoteSuggestion?.textContent || "").trim();
+        if (!suggestion || !sentencePanelNote) return;
+        sentencePanelNote.value = suggestion;
+        sentencePanelNote.focus();
+        if (sentencePanelNoteStatus) {
+          sentencePanelNoteStatus.textContent = "Suggestion inserted. Edit or save it.";
+        }
+      }
+
       function showWordDetail(span) {
         suppressNextUpdate = true;
         suppressCollapsedToolbarHideUntil = Date.now() + 250;
@@ -671,7 +690,11 @@ def _selection_script() -> str:
       }
 
       function refreshAnalysisGlossaryHighlights() {
-        [simplified, gloss, skeleton, wordAnalysisMeaning, wordRegister, wordWhy, wordVsSimpler, wordAnalysisMorphology]
+        [
+          simplified, gloss, blockingPoint, skeleton, clauses, modifiers, logicMarkers,
+          anaphora, backToWhole, wordRole, wordAnalysisMeaning, wordRegister, wordWhy,
+          wordVsSimpler, wordAnalysisMorphology,
+        ]
           .forEach((element) => applyGlossaryHighlights(element));
       }
 
@@ -1209,9 +1232,12 @@ def _selection_script() -> str:
         simplified.textContent = "";
         gloss.textContent = "";
         skeleton.textContent = "";
+        clearSentenceStructure();
         diagnosis.replaceChildren();
         if (sentencePanelTranslation) sentencePanelTranslation.value = "";
         if (sentencePanelNote) sentencePanelNote.value = "";
+        if (sentencePanelNoteSuggestion) sentencePanelNoteSuggestion.textContent = "";
+        if (sentencePanelNoteAccept) sentencePanelNoteAccept.hidden = true;
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
       }
@@ -1227,9 +1253,12 @@ def _selection_script() -> str:
         simplified.textContent = "";
         gloss.textContent = "";
         skeleton.textContent = "";
+        clearSentenceStructure();
         diagnosis.replaceChildren();
         if (sentencePanelTranslation) sentencePanelTranslation.value = "";
         if (sentencePanelNote) sentencePanelNote.value = "";
+        if (sentencePanelNoteSuggestion) sentencePanelNoteSuggestion.textContent = "";
+        if (sentencePanelNoteAccept) sentencePanelNoteAccept.hidden = true;
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
       }
@@ -1244,6 +1273,7 @@ def _selection_script() -> str:
         if (panelRetryPro) panelRetryPro.hidden = true;
         if (wordAnalysisMeaning) wordAnalysisMeaning.textContent = "";
         if (wordAnalysisMeaningZh) wordAnalysisMeaningZh.textContent = "";
+        if (wordRole) wordRole.textContent = "";
         if (wordRegister) wordRegister.textContent = "";
         if (wordWhy) wordWhy.textContent = "";
         if (wordVsSimpler) wordVsSimpler.replaceChildren();
@@ -1285,8 +1315,70 @@ def _selection_script() -> str:
         if (sentencePanelNote) {
           sentencePanelNote.value = payload.user_note || "";
         }
+        if (sentencePanelNoteSuggestion) {
+          sentencePanelNoteSuggestion.textContent = payload.analysis?.takeaway_suggestion || "";
+        }
+        if (sentencePanelNoteAccept) {
+          sentencePanelNoteAccept.hidden = !(payload.analysis?.takeaway_suggestion || "").trim();
+        }
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
+      }
+
+      function clearSentenceStructure() {
+        if (blockingPoint) blockingPoint.textContent = "";
+        if (clauses) clauses.replaceChildren();
+        if (modifiers) modifiers.replaceChildren();
+        if (logicMarkers) logicMarkers.replaceChildren();
+        if (anaphora) anaphora.replaceChildren();
+        if (backToWhole) backToWhole.textContent = "";
+      }
+
+      function appendAnalysisList(container, items, formatter) {
+        if (!container) return;
+        container.replaceChildren();
+        if (!items.length) {
+          const empty = document.createElement("p");
+          empty.className = "analysis-text muted";
+          empty.textContent = "—";
+          container.append(empty);
+          return;
+        }
+        for (const item of items) {
+          const p = document.createElement("p");
+          p.className = "analysis-text";
+          p.textContent = formatter(item);
+          container.append(p);
+          applyGlossaryHighlights(p);
+        }
+      }
+
+      function renderSentenceStructure(analysis) {
+        if (clauses) {
+          appendAnalysisList(clauses, analysis.clauses || [], (item) => {
+            const type = item.type ? `${item.type}: ` : "";
+            const role = item.role ? ` — ${item.role}` : "";
+            return `${type}${item.text || ""}${role}`;
+          });
+        }
+        if (modifiers) {
+          appendAnalysisList(modifiers, analysis.modifiers || [], (item) => {
+            const target = item.target || "";
+            const modifier = item.modifier || "";
+            const type = item.type ? ` (${item.type})` : "";
+            return `${modifier} → ${target}${type}`;
+          });
+        }
+        if (logicMarkers) {
+          appendAnalysisList(logicMarkers, analysis.logic_markers || [], (item) => {
+            return `${item.marker || ""} → ${item.function || ""}`;
+          });
+        }
+        if (anaphora) {
+          appendAnalysisList(anaphora, analysis.anaphora || [], (item) => {
+            return `${item.pronoun || ""} → ${item.refers_to || ""}`;
+          });
+        }
       }
 
       function renderSentenceStudyPanel(sentence, message) {
@@ -1310,6 +1402,7 @@ def _selection_script() -> str:
         simplified.textContent = "";
         gloss.textContent = "";
         skeleton.textContent = "";
+        clearSentenceStructure();
         diagnosis.replaceChildren();
         setSentenceStudyFields(activeAnalysisPayload);
       }
@@ -1336,10 +1429,15 @@ def _selection_script() -> str:
         ].join(" · ");
         simplified.textContent = analysis.simplified_en || "";
         gloss.textContent = analysis.chinese_gloss || "";
+        if (blockingPoint) blockingPoint.textContent = analysis.blocking_point || "";
         skeleton.textContent = analysis.subject_skeleton || "";
+        if (backToWhole) backToWhole.textContent = analysis.simplified_en || "";
         applyGlossaryHighlights(simplified);
         applyGlossaryHighlights(gloss);
+        if (blockingPoint) applyGlossaryHighlights(blockingPoint);
         applyGlossaryHighlights(skeleton);
+        if (backToWhole) applyGlossaryHighlights(backToWhole);
+        renderSentenceStructure(analysis);
         renderDiagnosis(analysis);
         renderSimilarMistakes(payload, analysis);
       }
@@ -1606,6 +1704,10 @@ def _selection_script() -> str:
           wordPronunciation.dataset.speakText = speakText;
           wordPronunciation.hidden = !speakText;
         }
+        if (wordRole) {
+          wordRole.textContent = a.role_in_sentence || "—";
+          applyGlossaryHighlights(wordRole);
+        }
         if (wordAnalysisMeaning) {
           wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
           applyGlossaryHighlights(wordAnalysisMeaning);
@@ -1861,6 +1963,9 @@ def _selection_script() -> str:
       }
       if (sentencePanelNoteSave) {
         sentencePanelNoteSave.addEventListener("click", savePanelNote);
+      }
+      if (sentencePanelNoteAccept) {
+        sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);
       }
       function showGlossaryWordDetail(hit) {
         const selection = window.getSelection();

@@ -49,7 +49,7 @@ def build_sentence_prompt(
         if cleaned_translation
         else "sentence_analysis_predict"
     )
-    template = _load_prompt(prompt_name, "v1")
+    template = _load_prompt(prompt_name, "v2")
     return _render(template, {
         "sentence":        ctx["sentence_text"],
         "context":         ctx["context"],
@@ -70,11 +70,12 @@ def build_word_prompt(
     as it appears in *sentence_id*.
     """
     ctx = _fetch_sentence_context(db, sentence_id)
-    template = _load_prompt("word_analysis", "v1")
+    template = _load_prompt("word_analysis", "v5")
     return _render(template, {
         "surface_form":    surface_form,
         "sentence":        ctx["sentence_text"],
         "context":         ctx["context"],
+        "learner_note":    "(none)",
         "related_cards":   ctx["related_cards_text"],
         "learner_profile": ctx["learner_profile"],
     })

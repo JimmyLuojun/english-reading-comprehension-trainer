@@ -13,6 +13,8 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "bottom: calc(100% + 8px)" in css
     assert "right: 0" in css
     assert ".analysis-panel" in css
+    assert ".analysis-section h4" in css
+    assert "#sentence-panel-note-accept" in css
     assert "--analysis-panel-width: 520px" in css
     assert "@media (min-width: 1180px)" in css
     assert "padding-right: var(--analysis-panel-width)" in css

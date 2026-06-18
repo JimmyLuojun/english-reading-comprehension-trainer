@@ -107,14 +107,35 @@ def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
     retry = retry[: retry.index("async function saveWordDetailEdits")]
 
     assert 'document.getElementById("sentence-panel-translation")' in script
+    assert 'document.getElementById("analysis-blocking-point")' in script
+    assert 'document.getElementById("analysis-clauses")' in script
+    assert 'document.getElementById("analysis-back-to-whole")' in script
+    assert 'document.getElementById("sentence-panel-note-suggestion")' in script
+    assert 'document.getElementById("sentence-panel-note-accept")' in script
     assert 'document.getElementById("sentence-panel-note")' in script
+    assert "renderSentenceStructure(analysis);" in render_payload
+    assert "analysis.blocking_point || \"\"" in render_payload
+    assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
+    assert "payload.analysis?.takeaway_suggestion || \"\"" in script
+    assert "function acceptTakeawaySuggestion()" in script
+    assert 'sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);' in script
     assert "payload.user_note || \"\"" in script
     assert 'fetch(`/mark/sentence/${sentenceId}/translation`' in save_translation
     assert 'fetch(`/mark/sentence/${sentenceId}`' in save_note
     assert 'method: "PATCH"' in save_note
     assert "updateSentenceNote(sentenceId, value);" in save_note
     assert "sentencePanelTranslation?.value || null" in retry
+
+
+def test_word_analysis_panel_shows_role_in_sentence() -> None:
+    script = _selection_script()
+    render_word = script[script.index("function renderWordAnalysis"):]
+    render_word = render_word[: render_word.index("async function saveAnalysisMeaningIfEmpty")]
+
+    assert 'document.getElementById("analysis-word-role")' in script
+    assert "a.role_in_sentence || \"—\"" in render_word
+    assert "applyGlossaryHighlights(wordRole);" in render_word
 
 
 def test_reader_script_supports_pro_reanalysis_button() -> None:

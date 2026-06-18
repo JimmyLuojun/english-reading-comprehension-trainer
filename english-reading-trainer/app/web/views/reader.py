@@ -365,12 +365,29 @@ def _analysis_panel() -> str:
           <p id="analysis-gloss" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
+          <h3>Blocking point</h3>
+          <p id="analysis-blocking-point" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3>Structure</h3>
+          <h4>Subject skeleton</h4>
+          <p id="analysis-skeleton" class="analysis-text"></p>
+          <h4>Clauses</h4>
+          <div id="analysis-clauses"></div>
+          <h4>Modifiers</h4>
+          <div id="analysis-modifiers"></div>
+          <h4>Logic markers</h4>
+          <div id="analysis-logic-markers"></div>
+          <h4>Anaphora</h4>
+          <div id="analysis-anaphora"></div>
+        </section>
+        <section class="analysis-section">
           <h3>Diagnosis</h3>
           <div id="analysis-diagnosis"></div>
         </section>
         <section class="analysis-section">
-          <h3>Subject skeleton</h3>
-          <p id="analysis-skeleton" class="analysis-text"></p>
+          <h3>Back to whole sentence</h3>
+          <p id="analysis-back-to-whole" class="analysis-text"></p>
         </section>
         <section class="analysis-section sentence-study-section">
           <h3>Your translation</h3>
@@ -382,6 +399,8 @@ def _analysis_panel() -> str:
         </section>
         <section class="analysis-section sentence-study-section">
           <h3>Takeaway</h3>
+          <p id="sentence-panel-note-suggestion" class="analysis-text"></p>
+          <button id="sentence-panel-note-accept" type="button">Accept suggestion</button>
           <textarea id="sentence-panel-note" rows="3" placeholder="What did I learn from this sentence?"></textarea>
           <div class="word-notes-actions">
             <button id="sentence-panel-note-save" type="button">Save takeaway</button>
@@ -390,6 +409,10 @@ def _analysis_panel() -> str:
         </section>
       </div>
       <div id="analysis-word-sections" hidden>
+        <section class="analysis-section">
+          <h3>In this sentence</h3>
+          <p id="analysis-word-role" class="analysis-text"></p>
+        </section>
         <section class="analysis-section">
           <h3>Meaning in context</h3>
           <p id="analysis-word-meaning" class="analysis-text"></p>

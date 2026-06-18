@@ -110,3 +110,50 @@
 - 浏览器级测试覆盖：滚动后删除正文词卡，URL 不变、页面不回顶部、对应高亮移除。
 
 ---
+
+## §29 最小递归式 AI 分析
+
+`[新增 2026-06-18]`
+
+目标：让 AI analysis 支持“整句理解 → 局部拆解 → 回到整句 → 留下可复用检查点”的阅读训练闭环，同时不引入第二套复习系统、不新增表、不重做面板架构。
+
+### §29.1 要避免的负面后果
+
+- 不新增 `recursive_parse` 嵌套树；现有 `clauses` / `modifiers` / `anaphora` / `logic_markers` 已能表达结构拆解。
+- 不新增 `review_question` / `review_answer` / `Quiz me later`；Review 仍只使用既有 SM-2 卡片、Takeaway 和 Similar past mistake。
+- 不把词汇 prompt 拆出多个高度重叠字段；词义、作者用词动机、近义替换差异仍由现有字段承担。
+- 不新增 panel↔正文高亮组件；需要高亮时优先复用已有 evidence/glossary 高亮。
+- 不修改历史 prompt 文件；所有 prompt 优化都通过新版本落地。
+
+### §29.2 Prompt 增量
+
+句子分析新版本只新增两个字段：
+
+- `blocking_point`：本句真正影响理解的 1 个卡点。诊断模式必须来自用户译文证据；预测模式取最可能误读处。
+- `takeaway_suggestion`：一句可直接保存为 Takeaway 的检查点，固定为“遇到 [结构/搭配]，先检查 [动作]，否则易犯 [错误码]。”。
+
+词 / 词组 / 固定搭配分析新版本只新增一个字段：
+
+- `role_in_sentence`：目标项在本句中的句法或语义作用，以及理解错会怎样带偏整句。
+
+### §29.3 Panel 增量
+
+句子面板按递归阅读路径重排：
+
+1. 整句答案：`simplified_en` + `chinese_gloss`。
+2. 本句卡点：`blocking_point`。
+3. 结构拆解：主干、从句、修饰、指代、逻辑，复用已有字段。
+4. 诊断证据与 Similar past mistake。
+5. 回到整句：再次显示 `simplified_en`。
+6. Takeaway：在现有 Takeaway 编辑区上方显示 `takeaway_suggestion`，提供 `Accept suggestion` 按钮把建议填入现有输入框，再复用现有保存接口。
+
+词面板只新增 `In this sentence` 区块，显示 `role_in_sentence`。
+
+### §29.4 测试
+
+- Prompt 测试覆盖新版本文件存在、frontmatter、字段名、错误码和模板变量。
+- Schema 测试覆盖句子 v2 与词 v5 必填字段，并保留旧版本兼容。
+- Reader view/script 测试覆盖新增 panel 区块、建议 Takeaway 预填按钮和词汇 `role_in_sentence` 渲染。
+- Web 变更继续运行 `app/web` ruff；非微小改动继续运行全量测试。
+
+---

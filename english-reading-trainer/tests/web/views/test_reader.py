@@ -119,12 +119,22 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
 
     assert 'id="sentence-panel-translation"' in html
     assert "Your translation" in html
+    assert 'id="analysis-blocking-point"' in html
+    assert 'id="analysis-clauses"' in html
+    assert 'id="analysis-back-to-whole"' in html
     assert 'id="sentence-panel-note"' in html
+    assert 'id="sentence-panel-note-suggestion"' in html
+    assert 'id="sentence-panel-note-accept"' in html
     assert "Takeaway" in html
     assert "Save takeaway" in html
+    assert 'id="analysis-word-role"' in html
     assert 'id="analysis-panel-tab"' in html
     assert 'aria-controls="analysis-panel"' in html
-    assert html.index("Subject skeleton") < html.index("Your translation")
+    assert html.index("Simplified English") < html.index("Blocking point")
+    assert html.index("Blocking point") < html.index("Structure")
+    assert html.index("Structure") < html.index("Diagnosis")
+    assert html.index("Diagnosis") < html.index("Back to whole sentence")
+    assert html.index("Back to whole sentence") < html.index("Your translation")
     assert html.index("Your translation") < html.index("Takeaway")
 
 

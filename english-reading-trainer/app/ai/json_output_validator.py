@@ -12,8 +12,6 @@ retry logic without knowing parsing details.
 """
 
 import json
-import re
-
 import jsonschema
 from jsonschema import ValidationError
 

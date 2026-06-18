@@ -35,6 +35,7 @@ _VALID_WORD_RESPONSE = json.dumps({
     "pos": "verb",
     "meaning_in_context": "to make the harmful effects of something less severe",
     "chinese_meaning": "减轻不良影响",
+    "role_in_sentence": "It is the main verb and shows the government's action toward harmful effects.",
     "register": "formal",
     "why_this_word": "Mitigate is formal register and targets a specific harm; reduce is vaguer. Writing 'reduce the effects' loses the connotation of purposeful countermeasure.",
     "vs_simpler": [

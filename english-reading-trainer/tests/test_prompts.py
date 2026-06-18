@@ -1,5 +1,5 @@
 """
-Tests for prompt v1 files in prompts/.
+Tests for prompt files in prompts/.
 
 Validates:
 - All current prompt files exist
@@ -23,13 +23,16 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v1.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v1.md",
-    "word_analysis":              PROMPTS_DIR / "word_analysis.v1.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v2.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v2.md",
+    "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
+SENTENCE_ANALYSIS_PREDICT_V1 = PROMPTS_DIR / "sentence_analysis_predict.v1.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V1 = PROMPTS_DIR / "sentence_analysis_diagnose.v1.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
+WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
 
 # Required template variables per prompt
 REQUIRED_VARS = {
@@ -39,7 +42,7 @@ REQUIRED_VARS = {
                                    "chapter_title", "related_cards",
                                    "learner_profile"],
     "word_analysis": ["surface_form", "sentence", "context",
-                      "related_cards", "learner_profile"],
+                      "related_cards", "learner_note", "learner_profile"],
     "profile_summary": ["lookback_days", "total_reviews",
                         "sentence_card_count", "word_card_count",
                         "error_type_stats"],
@@ -111,9 +114,13 @@ class TestPromptFilesExist:
             f"{name} is {size} bytes — exceeds {MAX_PROMPT_BYTES} byte limit"
         )
 
-    def test_current_word_prompt_v4_exists(self) -> None:
+    def test_historical_word_prompt_v4_exists(self) -> None:
         assert WORD_ANALYSIS_V4.exists()
         assert WORD_ANALYSIS_V4.stat().st_size <= MAX_PROMPT_BYTES
+
+    def test_current_word_prompt_v5_exists(self) -> None:
+        assert WORD_ANALYSIS_V5.exists()
+        assert WORD_ANALYSIS_V5.stat().st_size <= MAX_PROMPT_BYTES
 
     def test_historical_word_prompt_v3_exists(self) -> None:
         assert WORD_ANALYSIS_V3.exists()
@@ -149,9 +156,9 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v1"),
-        ("sentence_analysis_diagnose", "v1"),
-        ("word_analysis", "v1"),
+        ("sentence_analysis_predict", "v2"),
+        ("sentence_analysis_diagnose", "v2"),
+        ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
     def test_version_matches_filename(self, name: str, expected_version: str) -> None:
@@ -222,13 +229,15 @@ class TestErrorCodesInPrompts:
 class TestJSONSchemaFieldsInPrompts:
     SENTENCE_FIELDS = [
         "subject_skeleton", "clauses", "modifiers", "logic_markers",
-        "anaphora", "simplified_en", "chinese_gloss",
+        "anaphora", "simplified_en", "chinese_gloss", "blocking_point",
         "predicted_error_types", "diagnosis_basis",
-        "diagnosed_error_types", "diagnosis_evidence", "confidence",
+        "diagnosed_error_types", "diagnosis_evidence",
+        "takeaway_suggestion", "confidence",
     ]
     WORD_FIELDS = [
         "lemma", "lexical_type", "pos", "meaning_in_context",
-        "common_collocations", "near_synonyms", "confusable_with",
+        "chinese_meaning", "role_in_sentence", "register", "why_this_word",
+        "vs_simpler", "learner_note_check",
         "morphology", "predicted_error_types", "confidence",
     ]
 
@@ -256,6 +265,15 @@ class TestJSONSchemaFieldsInPrompts:
         assert "learner_note_check" in text
         assert "not_provided" in text
         assert "Do not let the learner note override" in text
+
+    def test_current_word_prompt_v5_contains_role_in_sentence(self) -> None:
+        text = WORD_ANALYSIS_V5.read_text(encoding="utf-8")
+        assert "version: v5" in text
+        assert "role_in_sentence" in text
+
+    def test_historical_sentence_prompt_v1_files_remain(self) -> None:
+        assert SENTENCE_ANALYSIS_PREDICT_V1.exists()
+        assert SENTENCE_ANALYSIS_DIAGNOSE_V1.exists()
 
 
 # ---------------------------------------------------------------------------

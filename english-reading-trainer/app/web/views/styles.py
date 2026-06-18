@@ -461,6 +461,12 @@ def _css() -> str:
       font-size: 13px;
       font-weight: 600;
     }
+    .analysis-section h4 {
+      margin: 8px 0 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
     .analysis-text {
       margin: 0;
       line-height: 1.55;
@@ -535,6 +541,7 @@ def _css() -> str:
     .sentence-study-section textarea {
       width: 100%;
       min-height: 76px;
+      margin-top: 6px;
       resize: vertical;
       font: inherit;
       border: 1px solid var(--line);
@@ -543,6 +550,9 @@ def _css() -> str:
       color: var(--text);
       font-size: 14px;
       line-height: 1.45;
+    }
+    #sentence-panel-note-accept {
+      margin-top: 6px;
     }
     .word-notes-actions {
       display: flex;

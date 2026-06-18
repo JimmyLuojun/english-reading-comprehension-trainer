@@ -76,6 +76,7 @@
 - [PDF import ADR](decisions/2026-06-17-pdf-import.md)：PDF 归一化为句子锚点，不做 PDF viewer 主路径。
 - [FastAPI web split ADR](decisions/2026-06-17-fastapi-web-split.md)：Web UI 按 routes / queries / views 拆分。
 - [DeepSeek V4 model routing ADR](decisions/2026-06-17-deepseek-v4-model-routing.md)：普通分析默认 Flash，句子分析和手动 Pro 重分析使用 Pro。
+- [Minimal recursive AI analysis ADR](decisions/2026-06-18-minimal-recursive-ai-analysis.md)：只用最少字段实现整句→拆解→回到整句→检查点，不新增第二套 Review。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。
@@ -116,3 +117,4 @@
 - [x] §27 AI 分析覆盖式面板
 - [x] §28 阅读页操作后保持当前位置
 - [x] §29 PDF 导入执行方案
+- [x] §30 最小递归式 AI 分析：句子 blocking_point/takeaway_suggestion，词汇 role_in_sentence，复用现有 Review/Takeaway。

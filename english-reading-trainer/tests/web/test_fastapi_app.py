@@ -39,10 +39,12 @@ _VALID_SENTENCE_ANALYSIS = {
     "anaphora": [],
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
+    "blocking_point": "The prepositional phrase can be missed.",
     "predicted_error_types": ["G01"],
     "diagnosis_basis": "predicted",
     "diagnosed_error_types": [],
     "diagnosis_evidence": [],
+    "takeaway_suggestion": "遇到介词短语，先检查它补充哪个动作，否则易犯 G01。",
     "confidence": 0.9,
 }
 
@@ -52,11 +54,17 @@ _VALID_WORD_ANALYSIS = {
     "pos": "noun",
     "meaning_in_context": "a small domestic feline animal",
     "chinese_meaning": "小型家养猫科动物",
+    "role_in_sentence": "It names the animal that performs the action in the sentence.",
     "register": "neutral",
     "why_this_word": "Cat is the neutral everyday term for the animal. Feline would be more formal or literary. Writing 'a small domestic feline animal' would sound clinical rather than natural.",
     "vs_simpler": [
         {"simpler": "pet", "difference": "Pet is a general term for any kept animal; cat is specific to the species."},
     ],
+    "learner_note_check": {
+        "status": "not_provided",
+        "feedback": "",
+        "corrected_understanding": "",
+    },
     "morphology": {"root": "", "family": []},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
@@ -70,6 +78,7 @@ _VALID_DIAGNOSED_ANALYSIS = {
     "anaphora": [],
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
+    "blocking_point": "The translation misses the prepositional phrase.",
     "predicted_error_types": [],
     "diagnosis_basis": "user_translation",
     "diagnosed_error_types": ["G02"],
@@ -79,6 +88,7 @@ _VALID_DIAGNOSED_ANALYSIS = {
             "evidence": "The translation misses the phrase \"on the mat\".",
         }
     ],
+    "takeaway_suggestion": "遇到介词短语，先检查它补充哪个动作，否则易犯 G02。",
     "confidence": 0.9,
 }
 
@@ -184,7 +194,7 @@ def _attach_sentence_analysis(
     db: DatabaseConnection,
     sentence_id: int,
     *,
-    prompt_version: str = "v1",
+    prompt_version: str = "v2",
 ) -> int:
     with db.get_connection() as conn:
         cache_id = conn.execute(
@@ -245,7 +255,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 7
+        assert count == 10
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -1498,7 +1508,7 @@ class TestReadingAndMarking:
         assert payload["ok"] is True
         assert payload["surface_form"] == "cat"
         assert payload["sentence_id"] == sentence_ids[0]
-        assert payload["active_prompt_version"] == "v4"
+        assert payload["active_prompt_version"] == "v5"
         assert payload["is_stale"] is True
         assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
         assert payload["analysis"]["chinese_meaning"] == "小型家养猫科动物"

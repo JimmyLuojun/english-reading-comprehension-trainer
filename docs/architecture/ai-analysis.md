@@ -30,6 +30,8 @@ cache_key    = (content_hash, prompt_version, model)
 
 ### 9.1 句子分析
 
+Current sentence analysis uses versioned schemas. v1 contains the structural and diagnosis fields below. v2 keeps those fields and adds the minimal recursive-learning fields `blocking_point` and `takeaway_suggestion`.
+
 ```json
 {
   "subject_skeleton": "string",
@@ -41,12 +43,16 @@ cache_key    = (content_hash, prompt_version, model)
   "anaphora": [{"pronoun": "string", "refers_to": "string"}],
   "simplified_en": "string",
   "chinese_gloss": "string",
+  "blocking_point": "string",
   "predicted_error_types": ["G02", "D01"],
+  "takeaway_suggestion": "遇到 [结构/搭配]，先检查 [动作]，否则易犯 [错误码]。",
   "confidence": 0.0
 }
 ```
 
 ### 9.2 词汇分析
+
+Current word analysis uses versioned schemas. v1 is the historical dictionary-view schema below; later versions add writer perspective, Chinese meaning, learner-note feedback, and v5 adds the minimal recursive field `role_in_sentence`.
 
 ```json
 {
@@ -57,6 +63,7 @@ cache_key    = (content_hash, prompt_version, model)
   "common_collocations": ["string"],
   "near_synonyms": ["string"],
   "confusable_with": ["string"],
+  "role_in_sentence": "string",
   "morphology": {"root": "string", "family": ["string"]},
   "predicted_error_types": ["L01"],
   "confidence": 0.0
@@ -158,11 +165,27 @@ content_hash = SHA256(
 prompts/
   sentence_analysis_predict.v1.md    -- 无译文，预测模式
   sentence_analysis_diagnose.v1.md   -- 有译文，诊断模式
+  sentence_analysis_predict.v2.md    -- 无译文，预测模式 + 最小递归字段
+  sentence_analysis_diagnose.v2.md   -- 有译文，诊断模式 + 最小递归字段
 ```
 
 诊断版的核心指令是"找出译文与原文之间的具体偏差，归类到 §2 错因封闭枚举；不得编造未在译文中体现的错误"。
 
 `[新增 2026-06-15]`
+
+---
+---
+
+## 15.7 最小递归式诊断增量
+
+`[新增 2026-06-18]`
+
+句子 analysis 的递归价值只落在两点：拆完后回到整句，以及留下可复用检查点。因此 v2 只新增：
+
+- `blocking_point`：本句真正影响理解的一个卡点。
+- `takeaway_suggestion`：可直接保存到现有 `sentence_cards.user_note` 的检查点，格式固定为“遇到 [结构/搭配]，先检查 [动作]，否则易犯 [错误码]。”。
+
+不新增 `recursive_parse`、`diagnosis_by_level`、`review_question` 或 `review_answer`。结构拆解继续复用 `subject_skeleton`、`clauses`、`modifiers`、`anaphora` 和 `logic_markers`；复习继续复用现有 Cards、Takeaway、SM-2 和 Similar past mistake。
 
 ---
 ---

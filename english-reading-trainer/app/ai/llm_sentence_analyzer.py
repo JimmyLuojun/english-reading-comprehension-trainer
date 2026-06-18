@@ -20,16 +20,16 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA
+from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA, SENTENCE_ANALYSIS_SCHEMA_V2
 from app.ai.ai_provider_config import get_ai_provider_settings, get_sentence_analysis_model
-from app.ai.ai_response_cache import CachedEntry, compute_content_hash, get_cached, save_to_cache
+from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
 from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
-_PROMPT_VERSION = "v1"
+_PROMPT_VERSION = "v2"
 
 # Correction suffix appended on retry to guide the LLM back on track
 _RETRY_SUFFIX = (
@@ -97,14 +97,16 @@ def analyze_sentence(
         "user_translation": cleaned_translation or "(none)",
     })
 
+    schema = _sentence_analysis_schema(prompt_version)
+
     # --- First attempt ---
     raw = _call_llm(prompt, model)
-    data, is_valid = _validate_attempt(raw, SENTENCE_ANALYSIS_SCHEMA)
+    data, is_valid = _validate_attempt(raw, schema)
 
     if not is_valid:
         # --- Retry with correction ---
         raw = _call_llm(prompt + _RETRY_SUFFIX, model)
-        data, is_valid = _validate_attempt(raw, SENTENCE_ANALYSIS_SCHEMA)
+        data, is_valid = _validate_attempt(raw, schema)
 
     response_json = json.dumps(data) if is_valid else raw
 
@@ -136,6 +138,12 @@ def _prompt_name_for_translation(user_translation: str | None) -> str:
     if user_translation:
         return _DIAGNOSE_PROMPT_NAME
     return _PREDICT_PROMPT_NAME
+
+
+def _sentence_analysis_schema(prompt_version: str) -> dict:
+    if prompt_version == "v1":
+        return SENTENCE_ANALYSIS_SCHEMA
+    return SENTENCE_ANALYSIS_SCHEMA_V2
 
 
 def _clean_optional_translation(value: str | None) -> str | None:

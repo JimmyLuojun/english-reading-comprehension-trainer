@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 
 from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
+    SENTENCE_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
+    WORD_ANALYSIS_SCHEMA_V5,
 )
 from app.ai.ai_response_cache import compute_content_hash, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
@@ -80,7 +82,7 @@ def save_sentence_analysis(
     data: dict = {}
 
     try:
-        data = parse_and_validate(raw_json, SENTENCE_ANALYSIS_SCHEMA)
+        data = parse_and_validate(raw_json, _sentence_analysis_schema(prompt_version))
         response_json = json.dumps(data)
     except (json.JSONDecodeError, ValidationError) as exc:
         is_valid = False
@@ -301,8 +303,15 @@ def _word_analysis_schema(prompt_version: str) -> dict:
         "v2": WORD_ANALYSIS_SCHEMA_V2,
         "v3": WORD_ANALYSIS_SCHEMA_V3,
         "v4": WORD_ANALYSIS_SCHEMA_V4,
+        "v5": WORD_ANALYSIS_SCHEMA_V5,
     }
-    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V4)
+    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V5)
+
+
+def _sentence_analysis_schema(prompt_version: str) -> dict:
+    if prompt_version == "v1":
+        return SENTENCE_ANALYSIS_SCHEMA
+    return SENTENCE_ANALYSIS_SCHEMA_V2
 
 
 def _sync_sentence_card_errors(
