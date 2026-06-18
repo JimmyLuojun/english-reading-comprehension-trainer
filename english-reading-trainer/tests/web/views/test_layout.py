@@ -36,6 +36,24 @@ def test_html_page_includes_pre_paint_theme_bootstrap_and_toggle() -> None:
     assert "localStorage.removeItem(&#x27;theme&#x27;)" in body
 
 
+def test_html_page_includes_encoded_inline_svg_favicon() -> None:
+    response = _html_page("Title", "<p>Body</p>", active="dashboard")
+
+    body = response.body.decode()
+    head = body[: body.index("</head>")]
+    favicon_start = head.index('<link rel="icon" href="')
+    favicon_end = head.index('">', favicon_start)
+    href = head[favicon_start + len('<link rel="icon" href="') : favicon_end]
+    assert "data:image/svg+xml," in href
+    assert "%230f8f83" in href
+    assert "%23ffffff" in href
+    assert "%E8%AF%BB" in href
+    assert "#" not in href
+    assert "<" not in href
+    assert ">" not in href
+    assert '"' not in href
+
+
 def test_formatting_helpers() -> None:
     assert _metric("<Cards>", 3) == '<div class="metric"><span>&lt;Cards&gt;</span><strong>3</strong></div>'
     assert _metric("Books", 8, href="/books") == (

@@ -21,6 +21,13 @@ _THEME_TOGGLE_SCRIPT = (
     "if(s){delete d.dataset.theme;localStorage.removeItem('theme');}"
     "else{d.dataset.theme='sepia';localStorage.setItem('theme','sepia');}})()"
 )
+_FAVICON_HREF = (
+    "data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 "
+    "viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 "
+    "rx=%276%27 fill=%27%230f8f83%27/%3E%3Ctext x=%2716%27 y=%2722%27 "
+    "font-family=%27Georgia,serif%27 font-size=%2718%27 font-weight=%27600%27 "
+    "fill=%27%23ffffff%27 text-anchor=%27middle%27%3E%E8%AF%BB%3C/text%3E%3C/svg%3E"
+)
 
 
 def _html_page(
@@ -39,6 +46,7 @@ def _html_page(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_escape(title)} - English Reading Trainer</title>
+  <link rel="icon" href="{_FAVICON_HREF}">
   <script>{_THEME_BOOTSTRAP_SCRIPT}</script>
   <style>{_css()}</style>
 </head>

@@ -93,3 +93,31 @@ def test_css_visual_refresh_scopes_display_serif_to_titles() -> None:
     assert "h1, h2, .reader-title {\n      font-family: var(--font-display);" in css
     assert "table {\n      width: 100%;" in css
     assert "table {\n      width: 100%;\n      font-family: var(--font-display);" not in css
+
+
+def test_css_visual_refresh_followups_fill_primary_after_shared_hover() -> None:
+    css = _css()
+    shared_hover_selector = "nav a.active, .button.primary, button:hover, .button:hover"
+    filled_primary_selector = ".button.primary, button.primary"
+
+    assert css.index(shared_hover_selector) < css.index(filled_primary_selector)
+    assert (
+        ".button.primary, button.primary {\n"
+        "      background: var(--accent);\n"
+        "      border-color: var(--accent);\n"
+        "      color: #fff;\n"
+        "    }"
+    ) in css
+    assert (
+        ".button.primary:hover, button.primary:hover {\n"
+        "      background: var(--accent-strong);\n"
+        "      border-color: var(--accent-strong);\n"
+        "      color: #fff;\n"
+        "    }"
+    ) in css
+
+
+def test_css_visual_refresh_followups_metric_numbers_are_tabular() -> None:
+    css = _css()
+
+    assert ".metric strong { font-size: 24px; font-variant-numeric: tabular-nums; }" in css

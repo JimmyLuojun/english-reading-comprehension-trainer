@@ -88,6 +88,16 @@ def _css() -> str:
       border-color: var(--accent);
       color: var(--accent-strong);
     }
+    .button.primary, button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .button.primary:hover, button.primary:hover {
+      background: var(--accent-strong);
+      border-color: var(--accent-strong);
+      color: #fff;
+    }
     #theme-toggle {
       margin-left: auto;
     }
@@ -154,7 +164,7 @@ def _css() -> str:
       transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
     }
     .metric span { display: block; color: var(--muted); font-size: 13px; }
-    .metric strong { font-size: 24px; }
+    .metric strong { font-size: 24px; font-variant-numeric: tabular-nums; }
     .metric-link:hover, .metric-link:focus {
       border-color: var(--accent);
       color: var(--accent-strong);

@@ -1,6 +1,6 @@
 # Visual Refresh Follow-ups (主按钮 / 数字对齐 / 站点标识) — Executable Plan
 
-Status: planned
+Status: implemented (2026-06-18)
 
 Three small, high-payoff polish items on top of the implemented [visual refresh](visual-refresh.md). All are CSS-variable / single-selector / `<head>` edits — no layout change, no new dependency, no new static file. Builds on the teal `--accent` and the `--font-display` / radius / shadow scale already in `styles.py`.
 
