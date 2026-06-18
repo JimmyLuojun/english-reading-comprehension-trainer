@@ -11,6 +11,18 @@ from fastapi.responses import HTMLResponse
 from app.web.views.cards_script import _def_edit_script
 from app.web.views.styles import _css
 
+
+_THEME_BOOTSTRAP_SCRIPT = (
+    "try{var t=localStorage.getItem('theme');"
+    "if(t)document.documentElement.dataset.theme=t;}catch(e){}"
+)
+_THEME_TOGGLE_SCRIPT = (
+    "(function(){var d=document.documentElement,s=d.dataset.theme==='sepia';"
+    "if(s){delete d.dataset.theme;localStorage.removeItem('theme');}"
+    "else{d.dataset.theme='sepia';localStorage.setItem('theme','sepia');}})()"
+)
+
+
 def _html_page(
     title: str,
     body: str,
@@ -27,6 +39,7 @@ def _html_page(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_escape(title)} - English Reading Trainer</title>
+  <script>{_THEME_BOOTSTRAP_SCRIPT}</script>
   <style>{_css()}</style>
 </head>
 <body{body_class}>
@@ -37,6 +50,7 @@ def _html_page(
     <a class="{_active(active, "cards")}" href="/cards">Cards</a>
     <a class="{_active(active, "review")}" href="/review">Review</a>
     <a class="{_active(active, "profile")}" href="/profile">Profile</a>
+    <button type="button" id="theme-toggle" onclick="{_escape(_THEME_TOGGLE_SCRIPT)}">护眼</button>
   </nav>
   <main>{body}</main>
   <script>{_def_edit_script()}</script>

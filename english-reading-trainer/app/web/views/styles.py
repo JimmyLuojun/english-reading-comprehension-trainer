@@ -6,18 +6,52 @@ def _css() -> str:
     return """
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
-      --surface: #ffffff;
-      --line: #d9dee7;
+      --bg: #f6f8f5;
+      --surface: #fffefa;
+      --surface-alt: #eef4f1;
+      --nav-surface: rgba(255, 254, 250, 0.9);
+      --line: #e3e8ef;
       --text: #1f2937;
+      --text-dim: #4b5563;
       --muted: #667085;
-      --accent: #2563eb;
-      --accent-strong: #1d4ed8;
+      --accent: #0f8f83;
+      --accent-strong: #0c7268;
+      --accent-line: #97d5cf;
+      --accent-soft: #e7f6f3;
       --ok: #047857;
       --danger: #b42318;
       --danger-line: #fecdca;
       --danger-bg: #fff1f0;
+      --radius: 8px;
+      --radius-sm: 6px;
+      --radius-pill: 999px;
+      --shadow: 0 18px 50px rgba(20, 30, 40, 0.08);
+      --font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
       --analysis-panel-width: 520px;
+    }
+    html[data-theme="sepia"] {
+      color-scheme: light;
+      --bg: #f3ead6;
+      --surface: #faf4e4;
+      --surface-alt: #efe3c8;
+      --nav-surface: rgba(250, 244, 228, 0.92);
+      --line: #e2d8be;
+      --text: #463a28;
+      --text-dim: #6b5c40;
+      --muted: #8a7a5c;
+      --accent: #0f8f83;
+      --accent-strong: #0c7268;
+      --accent-line: #92c9bd;
+      --accent-soft: #e1efe8;
+      --radius: 8px;
+      --radius-sm: 6px;
+      --radius-pill: 999px;
+      --shadow: 0 18px 50px rgba(70, 55, 25, 0.1);
+      --font-display: Georgia, "Noto Serif SC", "Songti SC", serif;
+    }
+    ::selection {
+      background: var(--accent);
+      color: #fff;
     }
     * { box-sizing: border-box; }
     body {
@@ -32,7 +66,8 @@ def _css() -> str:
       align-items: center;
       padding: 12px 24px;
       border-bottom: 1px solid var(--line);
-      background: var(--surface);
+      background: var(--nav-surface);
+      backdrop-filter: blur(10px);
       position: sticky;
       top: 0;
       z-index: 1;
@@ -43,14 +78,18 @@ def _css() -> str:
       color: var(--text);
       text-decoration: none;
       padding: 7px 10px;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       font: inherit;
       cursor: pointer;
       white-space: nowrap;
+      transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
     }
     nav a.active, .button.primary, button:hover, .button:hover {
       border-color: var(--accent);
       color: var(--accent-strong);
+    }
+    #theme-toggle {
+      margin-left: auto;
     }
     button.danger, .button.danger {
       border-color: var(--danger-line);
@@ -62,11 +101,11 @@ def _css() -> str:
       color: var(--danger);
     }
     .reader-page {
-      background: #ffffff;
+      background: var(--surface);
     }
     .reader-page nav {
       padding: 8px 16px;
-      background: rgba(255, 255, 255, 0.88);
+      background: var(--nav-surface);
       backdrop-filter: blur(10px);
     }
     main {
@@ -82,8 +121,12 @@ def _css() -> str:
         padding-right: var(--analysis-panel-width);
       }
     }
-    h1 { margin: 0; font-size: 26px; }
-    h2 { margin: 24px 0 10px; font-size: 18px; }
+    h1, h2, .reader-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+    h2 { margin: 32px 0 12px; font-size: 20px; line-height: 1.2; }
     p { margin: 6px 0; }
     .muted { color: var(--muted); }
     .toolbar {
@@ -103,16 +146,19 @@ def _css() -> str:
       display: block;
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius);
       padding: 12px;
       color: inherit;
       text-decoration: none;
+      box-shadow: var(--shadow);
+      transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
     }
     .metric span { display: block; color: var(--muted); font-size: 13px; }
     .metric strong { font-size: 24px; }
     .metric-link:hover, .metric-link:focus {
       border-color: var(--accent);
       color: var(--accent-strong);
+      transform: translateY(-1px);
     }
     .metric-link:focus-visible {
       outline: 2px solid var(--accent);
@@ -121,9 +167,10 @@ def _css() -> str:
     .band {
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 16px;
-      margin-bottom: 14px;
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
     }
     .split {
       display: grid;
@@ -135,7 +182,8 @@ def _css() -> str:
       border-collapse: collapse;
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
       overflow: visible;
     }
     th, td {
@@ -144,7 +192,7 @@ def _css() -> str:
       text-align: left;
       vertical-align: top;
     }
-    th { color: var(--muted); font-weight: 600; background: #f2f4f7; }
+    th { color: var(--muted); font-weight: 600; background: var(--surface-alt); }
     tr:last-child td { border-bottom: 0; }
     .reader {
       max-width: 680px;
@@ -167,7 +215,7 @@ def _css() -> str:
     }
     .reader-chapter {
       margin: 0;
-      color: var(--muted);
+      color: var(--text-dim);
       font-size: 16px;
       font-weight: 400;
     }
@@ -192,7 +240,7 @@ def _css() -> str:
     }
     .reader-para {
       margin: 0 0 1.2em;
-      color: #1a1a1a;
+      color: var(--text);
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
       font-size: 18px;
       line-height: 1.75;
@@ -286,7 +334,7 @@ def _css() -> str:
       box-sizing: border-box;
       max-width: min(calc(100vw - 16px), 520px);
       padding: 8px;
-      border-radius: 8px;
+      border-radius: var(--radius);
       background: #111827;
       color: #f9fafb;
       box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
@@ -396,7 +444,7 @@ def _css() -> str:
       width: min(var(--analysis-panel-width), 92vw);
       overflow-y: auto;
       border-left: 1px solid var(--line);
-      background: #ffffff;
+      background: var(--surface);
       box-shadow: -14px 0 32px rgba(15, 23, 42, 0.14);
       padding: 18px;
     }
@@ -407,7 +455,7 @@ def _css() -> str:
       top: 96px;
       right: 0;
       border-right: 0;
-      border-radius: 6px 0 0 6px;
+      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
       padding: 10px 8px;
       color: var(--accent-strong);
       writing-mode: vertical-rl;
@@ -439,12 +487,12 @@ def _css() -> str:
       color: var(--muted);
       font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0;
+      letter-spacing: 0.12em;
     }
     .analysis-status {
       min-height: 20px;
       margin: 8px 0 12px;
-      color: var(--muted);
+      color: var(--text-dim);
       font-size: 14px;
     }
     .analysis-status.error {
@@ -489,16 +537,16 @@ def _css() -> str:
     }
     .analysis-translation {
       margin-top: 6px;
-      color: var(--muted);
+      color: var(--text-dim);
     }
     .analysis-codes {
       display: inline-block;
       margin: 2px 0 8px;
-      border: 1px solid #bfdbfe;
-      border-radius: 999px;
+      border: 1px solid var(--accent-line);
+      border-radius: var(--radius-pill);
       padding: 2px 8px;
-      color: #1d4ed8;
-      background: #eff6ff;
+      color: var(--accent-strong);
+      background: var(--accent-soft);
       font-size: 13px;
     }
     .word-analysis-list {
@@ -533,7 +581,7 @@ def _css() -> str:
     .word-notes-label input {
       font: inherit;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 5px 8px;
       color: var(--text);
       font-size: 14px;
@@ -545,7 +593,7 @@ def _css() -> str:
       resize: vertical;
       font: inherit;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 7px 9px;
       color: var(--text);
       font-size: 14px;
@@ -563,14 +611,14 @@ def _css() -> str:
       width: 100%;
       margin: 6px 0 0;
       border-color: var(--line);
-      background: #f8fafc;
+      background: var(--surface-alt);
       color: var(--text);
       text-align: left;
       white-space: normal;
     }
     .evidence-item:hover {
-      border-color: #2563eb;
-      color: #1d4ed8;
+      border-color: var(--accent);
+      color: var(--accent-strong);
     }
     .similar-mistakes {
       margin-top: 12px;
@@ -585,9 +633,9 @@ def _css() -> str:
     .similar-mistake {
       margin-top: 10px;
       border: 1px solid #dbeafe;
-      border-radius: 8px;
+      border-radius: var(--radius);
       padding: 10px;
-      background: #f8fafc;
+      background: var(--surface-alt);
     }
     .similar-mistake-source {
       margin: 2px 0 0;
@@ -619,7 +667,7 @@ def _css() -> str:
     .badge {
       color: var(--ok);
       border: 1px solid #9bd4bd;
-      border-radius: 999px;
+      border-radius: var(--radius-pill);
       padding: 1px 7px;
       margin-left: 6px;
     }
@@ -642,7 +690,7 @@ def _css() -> str:
     }
     .inline-form input, .inline-form select, textarea {
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 7px 9px;
       font: inherit;
       min-width: 160px;
@@ -655,13 +703,13 @@ def _css() -> str:
       background: #111827;
       color: #f9fafb;
       padding: 14px;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       overflow-x: auto;
     }
     .empty {
       color: var(--muted);
       border: 1px dashed var(--line);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 12px;
       background: var(--surface);
     }
@@ -719,7 +767,7 @@ def _css() -> str:
       white-space: nowrap;
     }
     .hover-popover-trigger:focus {
-      outline: 2px solid rgba(37, 99, 235, 0.28);
+      outline: 2px solid var(--accent-line);
       outline-offset: 2px;
       border-radius: 3px;
     }
@@ -733,7 +781,7 @@ def _css() -> str:
       max-height: min(280px, 60vh);
       overflow: auto;
       padding: 10px 12px;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       background: #111827;
       color: #f9fafb;
       box-shadow: 0 16px 36px rgba(15, 23, 42, 0.24);

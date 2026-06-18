@@ -29,7 +29,7 @@ from app.db_connection import DatabaseConnection
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
-_PROMPT_VERSION = "v2"
+_PROMPT_VERSION = "v3"
 
 # Correction suffix appended on retry to guide the LLM back on track
 _RETRY_SUFFIX = (

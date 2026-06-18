@@ -32,7 +32,7 @@
 
 - 多标签页 / 多客户端实时同步
 - 键盘快捷键（Cmd+M 标句等，第二版）
-- 字号 / 行距 / 主题切换（夜间 / 米黄 / 高对比）
+- 字号 / 行距 / 主题切换（夜间 / 高对比）；米黄 / sepia 护眼主题已实现，见 §3
 - EPUB 中的复杂排版级图片 / 公式重建（第一版只按原书顺序展示图片、公式截图与图注）
 - 可访问性 (a11y) / 屏幕阅读器适配
 - 打印样式
@@ -68,6 +68,10 @@
 - [删除导入材料](features/book-deletion.md)：彻底删除书籍/文章、词卡 re-anchor、review log 保留规则。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。
 - [PDF 导入执行方案](features/pdf-import.md)：计划中的 PDF 导入归一化方案。
+- [推理错误层执行方案](features/inference-error-layer.md)：计划中的 `inference` 错误层（I01/I02），补全"词法语法全懂但没读懂意思"的诊断盲区。
+- [阅读护眼主题执行方案](features/reading-eye-comfort-theme.md)：已实现的米黄/sepia 护眼主题与头部开关，纯 CSS 变量覆盖，反转 §0 的"主题切换"排除项。
+- [审美升级执行方案](features/visual-refresh.md)：已实现的默认观感升级（衬线标题、青绿主色、三级文字层级、统一圆角与柔和表面），纯 CSS 变量层改动，不碰布局/不引外部字体，与 sepia 主题共存。
+- [审美升级后续优化](features/visual-refresh-followups.md)：计划中的三项小优化——实心主按钮（视觉层级）、指标等宽数字、内联 SVG favicon 与标题整理，单选择器/`<head>` 改动，零新依赖。
 
 ---
 
@@ -77,6 +81,7 @@
 - [FastAPI web split ADR](decisions/2026-06-17-fastapi-web-split.md)：Web UI 按 routes / queries / views 拆分。
 - [DeepSeek V4 model routing ADR](decisions/2026-06-17-deepseek-v4-model-routing.md)：普通分析默认 Flash，句子分析和手动 Pro 重分析使用 Pro。
 - [Minimal recursive AI analysis ADR](decisions/2026-06-18-minimal-recursive-ai-analysis.md)：只用最少字段实现整句→拆解→回到整句→检查点，不新增第二套 Review。
+- [Inference error layer ADR](decisions/2026-06-18-inference-error-layer.md)：新增 `inference` 错误层（I01/I02），其余分类缺口（宏观结构、否定/比较范围）暂缓，待真实数据决定。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。

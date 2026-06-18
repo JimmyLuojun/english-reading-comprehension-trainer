@@ -22,6 +22,20 @@ def test_html_page_escapes_title_and_marks_active_nav() -> None:
     assert "reader:last-book-id" not in body
 
 
+def test_html_page_includes_pre_paint_theme_bootstrap_and_toggle() -> None:
+    response = _html_page("Title", "<p>Body</p>", active="dashboard")
+
+    body = response.body.decode()
+    bootstrap_index = body.index("localStorage.getItem('theme')")
+    style_index = body.index("<style>")
+    assert bootstrap_index < style_index
+    assert "document.documentElement.dataset.theme=t" in body
+    assert 'id="theme-toggle"' in body
+    assert ">护眼</button>" in body
+    assert "localStorage.setItem(&#x27;theme&#x27;,&#x27;sepia&#x27;)" in body
+    assert "localStorage.removeItem(&#x27;theme&#x27;)" in body
+
+
 def test_formatting_helpers() -> None:
     assert _metric("<Cards>", 3) == '<div class="metric"><span>&lt;Cards&gt;</span><strong>3</strong></div>'
     assert _metric("Books", 8, href="/books") == (

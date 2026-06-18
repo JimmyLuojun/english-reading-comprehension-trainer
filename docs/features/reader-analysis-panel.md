@@ -152,7 +152,7 @@
 ### §29.4 测试
 
 - Prompt 测试覆盖新版本文件存在、frontmatter、字段名、错误码和模板变量。
-- Schema 测试覆盖句子 v2 与词 v5 必填字段，并保留旧版本兼容。
+- Schema 测试覆盖当前句子 prompt v3（复用 v2 JSON schema）与词 v5 必填字段，并保留旧版本兼容。
 - Reader view/script 测试覆盖新增 panel 区块、建议 Takeaway 预填按钮和词汇 `role_in_sentence` 渲染。
 - Web 变更继续运行 `app/web` ruff；非微小改动继续运行全量测试。
 

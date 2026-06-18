@@ -5,7 +5,7 @@ All enums here are the single source of truth — migration SQL and application
 code must stay in sync with these values.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -65,6 +65,7 @@ class ErrorLayer(str, Enum):
     GRAMMAR   = "grammar"
     LEXICAL   = "lexical"
     DISCOURSE = "discourse"
+    INFERENCE = "inference"
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,9 @@ ERROR_TYPES: list[dict] = [
     {"code": "D03", "name": "因果 / 推论连词误读",         "layer": ErrorLayer.DISCOURSE},
     {"code": "D04", "name": "信息焦点（主述位）判断错",     "layer": ErrorLayer.DISCOURSE},
     {"code": "D05", "name": "篇章衔接（this / these / such）回指失败", "layer": ErrorLayer.DISCOURSE},
+    # Inference layer
+    {"code": "I01", "name": "隐含关系推断失败",            "layer": ErrorLayer.INFERENCE},
+    {"code": "I02", "name": "言外之意 / 立场推断失败",     "layer": ErrorLayer.INFERENCE},
 ]
 
 # All valid error codes — used for validation

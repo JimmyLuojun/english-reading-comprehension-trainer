@@ -23,13 +23,15 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v2.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v2.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v3.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v3.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
 SENTENCE_ANALYSIS_PREDICT_V1 = PROMPTS_DIR / "sentence_analysis_predict.v1.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V1 = PROMPTS_DIR / "sentence_analysis_diagnose.v1.md"
+SENTENCE_ANALYSIS_PREDICT_V2 = PROMPTS_DIR / "sentence_analysis_predict.v2.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V2 = PROMPTS_DIR / "sentence_analysis_diagnose.v2.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
@@ -86,8 +88,8 @@ def _extract_template_vars(text: str) -> set[str]:
 
 
 def _extract_error_codes_in_prompt(text: str) -> set[str]:
-    """Find all G/L/D prefixed codes mentioned in the prompt text."""
-    return set(re.findall(r"\b([GLD]\d{2})\b", text))
+    """Find all closed error-code references mentioned in the prompt text."""
+    return set(re.findall(r"\b([GLDI]\d{2})\b", text))
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +158,8 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v2"),
-        ("sentence_analysis_diagnose", "v2"),
+        ("sentence_analysis_predict", "v3"),
+        ("sentence_analysis_diagnose", "v3"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
@@ -210,6 +212,7 @@ class TestErrorCodesInPrompts:
         assert any(c.startswith("G") for c in codes), f"{name} missing grammar codes"
         assert any(c.startswith("L") for c in codes), f"{name} missing lexical codes"
         assert any(c.startswith("D") for c in codes), f"{name} missing discourse codes"
+        assert any(c.startswith("I") for c in codes), f"{name} missing inference codes"
 
     def test_word_prompt_covers_lexical_layer(self) -> None:
         codes = _extract_error_codes_in_prompt(_read("word_analysis"))
@@ -274,6 +277,10 @@ class TestJSONSchemaFieldsInPrompts:
     def test_historical_sentence_prompt_v1_files_remain(self) -> None:
         assert SENTENCE_ANALYSIS_PREDICT_V1.exists()
         assert SENTENCE_ANALYSIS_DIAGNOSE_V1.exists()
+
+    def test_historical_sentence_prompt_v2_files_remain(self) -> None:
+        assert SENTENCE_ANALYSIS_PREDICT_V2.exists()
+        assert SENTENCE_ANALYSIS_DIAGNOSE_V2.exists()
 
 
 # ---------------------------------------------------------------------------

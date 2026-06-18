@@ -46,6 +46,7 @@ class TestMigrationRunner:
         assert "006_epub_assets_and_blocks.sql" in applied
         assert "007_pdf_source_format.sql" in applied
         assert "008_word_card_sources.sql" in applied
+        assert "009_inference_error_layer.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -61,6 +62,7 @@ class TestMigrationRunner:
         assert "006_epub_assets_and_blocks.sql" in recorded
         assert "007_pdf_source_format.sql" in recorded
         assert "008_word_card_sources.sql" in recorded
+        assert "009_inference_error_layer.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -115,6 +117,90 @@ class TestMigrationRunner:
         assert card["occurrence_count"] == 1
         assert source["sentence_id"] == sentence_id
         assert source["is_primary"] == 1
+
+    def test_inference_layer_migration_preserves_error_type_foreign_keys(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("00[1-8]_*.sql")):
+            shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "inference_upgrade.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('B', 'txt', 'h_inference', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters (book_id, idx, title, sentence_start, sentence_end) "
+                "VALUES (?, 1, 'Ch', 0, 1)",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx, sentence_start, sentence_end) "
+                "VALUES (?, 1, 0, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                "INSERT INTO sentences "
+                "(book_id, chapter_id, paragraph_id, idx, text, text_hash, "
+                "char_offset_start, char_offset_end) "
+                "VALUES (?, ?, ?, 0, 'A sentence.', 'h_sentence', 0, 11)",
+                (book_id, chapter_id, paragraph_id),
+            ).lastrowid
+            sentence_card_id = conn.execute(
+                "INSERT INTO sentence_cards (sentence_id, created_at, due_at) "
+                "VALUES (?, '2026-01-01T00:00:00+00:00', "
+                "'2026-01-01T00:00:00+00:00')",
+                (sentence_id,),
+            ).lastrowid
+            word_card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    created_at, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count)
+                   VALUES ('sentence', 'sentence', 'word', ?,
+                           '2026-01-01T00:00:00+00:00', 'new', 2.5, 0, 0,
+                           '2026-01-01T00:00:00+00:00', 1)""",
+                (sentence_id,),
+            ).lastrowid
+            g01_id = conn.execute(
+                "SELECT id FROM error_types WHERE code = 'G01'"
+            ).fetchone()["id"]
+            g02_id = conn.execute(
+                "SELECT id FROM error_types WHERE code = 'G02'"
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO sentence_card_errors (card_id, error_type_id) VALUES (?, ?)",
+                (sentence_card_id, g01_id),
+            )
+            conn.execute(
+                "INSERT INTO word_card_errors (card_id, error_type_id) VALUES (?, ?)",
+                (word_card_id, g02_id),
+            )
+
+        applied = db.apply_migrations(MIGRATIONS_DIR)
+
+        assert applied == ["009_inference_error_layer.sql"]
+        with db.get_connection() as conn:
+            sentence_code = conn.execute(
+                """SELECT et.code
+                   FROM sentence_card_errors sce
+                   JOIN error_types et ON et.id = sce.error_type_id"""
+            ).fetchone()["code"]
+            word_code = conn.execute(
+                """SELECT et.code
+                   FROM word_card_errors wce
+                   JOIN error_types et ON et.id = wce.error_type_id"""
+            ).fetchone()["code"]
+            fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+
+        assert sentence_code == "G01"
+        assert word_code == "G02"
+        assert fk_errors == []
 
     def test_migrations_dir_empty_returns_empty(self, tmp_path: Path) -> None:
         db = DatabaseConnection(tmp_path / "a.db")
@@ -353,7 +439,11 @@ class TestConstraints:
 
         applied = db.apply_migrations(MIGRATIONS_DIR)
 
-        assert applied == ["007_pdf_source_format.sql", "008_word_card_sources.sql"]
+        assert applied == [
+            "007_pdf_source_format.sql",
+            "008_word_card_sources.sql",
+            "009_inference_error_layer.sql",
+        ]
         with db.get_connection() as conn:
             counts = {
                 table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -537,10 +627,10 @@ class TestConstraints:
 # ---------------------------------------------------------------------------
 
 class TestErrorTypeSeed:
-    def test_all_18_error_types_seeded(self, db: DatabaseConnection) -> None:
+    def test_all_20_error_types_seeded(self, db: DatabaseConnection) -> None:
         with db.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM error_types").fetchone()[0]
-        assert count == 18
+        assert count == 20
 
     def test_all_codes_present(self, db: DatabaseConnection) -> None:
         with db.get_connection() as conn:
@@ -552,13 +642,40 @@ class TestErrorTypeSeed:
         with db.get_connection() as conn:
             rows = conn.execute("SELECT DISTINCT layer FROM error_types").fetchall()
         layers = {row["layer"] for row in rows}
-        assert layers == {"grammar", "lexical", "discourse"}
+        assert layers == {"grammar", "lexical", "discourse", "inference"}
+
+    def test_inference_error_types_seeded(self, db: DatabaseConnection) -> None:
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT code, name, layer FROM error_types WHERE layer = 'inference'"
+            ).fetchall()
+        assert {(row["code"], row["name"], row["layer"]) for row in rows} == {
+            ("I01", "隐含关系推断失败", "inference"),
+            ("I02", "言外之意 / 立场推断失败", "inference"),
+        }
+
+    def test_inference_layer_check_accepts_inference_and_rejects_unknown(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO error_types (code, name, layer) "
+                "VALUES ('I99', '临时推理测试', 'inference')"
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            with db.get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO error_types (code, name, layer) "
+                    "VALUES ('Z99', '未知层测试', 'unknown')"
+                )
 
     def test_seed_is_idempotent(self, db: DatabaseConnection) -> None:
         db.apply_migrations(MIGRATIONS_DIR)
         with db.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM error_types").fetchone()[0]
-        assert count == 18
+        assert count == 20
 
     @pytest.mark.parametrize("code", list(VALID_ERROR_CODES))
     def test_each_error_code_exists(self, db: DatabaseConnection, code: str) -> None:

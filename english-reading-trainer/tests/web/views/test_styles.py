@@ -5,6 +5,12 @@ from __future__ import annotations
 from app.web.views.styles import _css
 
 
+def _css_block(css: str, selector: str, next_selector: str) -> str:
+    start = css.index(selector)
+    end = css.index(next_selector, start)
+    return css[start:end]
+
+
 def test_css_contains_reader_and_popover_selectors() -> None:
     css = _css()
 
@@ -34,3 +40,56 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "max-height: min(52vh, 360px)" in css
     assert ".similar-mistakes" in css
     assert ".similar-mistake-comparison" in css
+
+
+def test_css_contains_sepia_theme_variables_and_surface_bindings() -> None:
+    css = _css()
+
+    assert 'html[data-theme="sepia"]' in css
+    assert "--bg: #f3ead6" in css
+    assert "--surface: #faf4e4" in css
+    assert "--surface-alt: #efe3c8" in css
+    assert "background: var(--nav-surface)" in css
+    assert ".reader-page {\n      background: var(--surface);" in css
+    assert "th { color: var(--muted); font-weight: 600; background: var(--surface-alt); }" in css
+    assert "background: #f2f4f7" not in css
+    assert "background: #ffffff" not in css
+
+
+def test_css_visual_refresh_variables_are_mirrored_across_themes() -> None:
+    css = _css()
+    root_block = _css_block(css, ":root {", 'html[data-theme="sepia"]')
+    sepia_block = _css_block(css, 'html[data-theme="sepia"]', "::selection")
+
+    for variable in (
+        "--text-dim:",
+        "--accent-line:",
+        "--accent-soft:",
+        "--radius:",
+        "--radius-sm:",
+        "--radius-pill:",
+        "--shadow:",
+        "--font-display:",
+    ):
+        assert variable in root_block
+        assert variable in sepia_block
+
+
+def test_css_visual_refresh_uses_teal_accent_without_redefining_old_blue() -> None:
+    css = _css()
+    root_block = _css_block(css, ":root {", 'html[data-theme="sepia"]')
+
+    assert "--accent: #0f8f83" in root_block
+    assert "--accent-strong: #0c7268" in root_block
+    assert "--accent: #2563eb" not in css
+    assert "--accent-strong: #1d4ed8" not in css
+    assert "text-decoration-color: #2563eb" in css
+
+
+def test_css_visual_refresh_scopes_display_serif_to_titles() -> None:
+    css = _css()
+
+    assert 'font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' in css
+    assert "h1, h2, .reader-title {\n      font-family: var(--font-display);" in css
+    assert "table {\n      width: 100%;" in css
+    assert "table {\n      width: 100%;\n      font-family: var(--font-display);" not in css

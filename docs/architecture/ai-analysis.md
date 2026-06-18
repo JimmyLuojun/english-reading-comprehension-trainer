@@ -30,7 +30,7 @@ cache_key    = (content_hash, prompt_version, model)
 
 ### 9.1 句子分析
 
-Current sentence analysis uses versioned schemas. v1 contains the structural and diagnosis fields below. v2 keeps those fields and adds the minimal recursive-learning fields `blocking_point` and `takeaway_suggestion`.
+Current sentence analysis uses versioned schemas. v1 contains the structural and diagnosis fields below. v2 keeps those fields and adds the minimal recursive-learning fields `blocking_point` and `takeaway_suggestion`; v3 reuses the same JSON schema and adds the inference error layer (`I01`/`I02`) to the prompt taxonomy.
 
 ```json
 {
@@ -167,6 +167,8 @@ prompts/
   sentence_analysis_diagnose.v1.md   -- 有译文，诊断模式
   sentence_analysis_predict.v2.md    -- 无译文，预测模式 + 最小递归字段
   sentence_analysis_diagnose.v2.md   -- 有译文，诊断模式 + 最小递归字段
+  sentence_analysis_predict.v3.md    -- 无译文，预测模式 + inference 错误层
+  sentence_analysis_diagnose.v3.md   -- 有译文，诊断模式 + inference 错误层
 ```
 
 诊断版的核心指令是"找出译文与原文之间的具体偏差，归类到 §2 错因封闭枚举；不得编造未在译文中体现的错误"。
@@ -186,6 +188,8 @@ prompts/
 - `takeaway_suggestion`：可直接保存到现有 `sentence_cards.user_note` 的检查点，格式固定为“遇到 [结构/搭配]，先检查 [动作]，否则易犯 [错误码]。”。
 
 不新增 `recursive_parse`、`diagnosis_by_level`、`review_question` 或 `review_answer`。结构拆解继续复用 `subject_skeleton`、`clauses`、`modifiers`、`anaphora` 和 `logic_markers`；复习继续复用现有 Cards、Takeaway、SM-2 和 Similar past mistake。
+
+v3 不新增 JSON 字段，只扩展封闭错误码清单中的 `inference` 层。
 
 ---
 ---

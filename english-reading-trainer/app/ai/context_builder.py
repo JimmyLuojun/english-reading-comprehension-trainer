@@ -49,7 +49,7 @@ def build_sentence_prompt(
         if cleaned_translation
         else "sentence_analysis_predict"
     )
-    template = _load_prompt(prompt_name, "v2")
+    template = _load_prompt(prompt_name, "v3")
     return _render(template, {
         "sentence":        ctx["sentence_text"],
         "context":         ctx["context"],

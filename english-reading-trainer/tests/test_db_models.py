@@ -22,8 +22,8 @@ from app.db_models import (
 
 
 class TestErrorTypeConstants:
-    def test_error_types_has_18_entries(self) -> None:
-        assert len(ERROR_TYPES) == 18
+    def test_error_types_has_20_entries(self) -> None:
+        assert len(ERROR_TYPES) == 20
 
     def test_all_codes_unique(self) -> None:
         codes = [e["code"] for e in ERROR_TYPES]
@@ -46,6 +46,11 @@ class TestErrorTypeConstants:
         discourse = [e for e in ERROR_TYPES if e["layer"] == ErrorLayer.DISCOURSE]
         assert len(discourse) == 5
 
+    def test_inference_layer_has_2_codes(self) -> None:
+        inference = [e for e in ERROR_TYPES if e["layer"] == ErrorLayer.INFERENCE]
+        assert len(inference) == 2
+        assert {e["code"] for e in inference} == {"I01", "I02"}
+
     def test_valid_error_codes_matches_error_types(self) -> None:
         expected = frozenset(e["code"] for e in ERROR_TYPES)
         assert VALID_ERROR_CODES == expected
@@ -54,6 +59,7 @@ class TestErrorTypeConstants:
         ("G", ErrorLayer.GRAMMAR),
         ("L", ErrorLayer.LEXICAL),
         ("D", ErrorLayer.DISCOURSE),
+        ("I", ErrorLayer.INFERENCE),
     ])
     def test_code_prefix_matches_layer(self, prefix: str, layer: ErrorLayer) -> None:
         for entry in ERROR_TYPES:
@@ -125,6 +131,6 @@ class TestEnumerations:
         assert actual == expected
 
     def test_error_layer_values(self) -> None:
-        expected = {"grammar", "lexical", "discourse"}
+        expected = {"grammar", "lexical", "discourse", "inference"}
         actual = {layer.value for layer in ErrorLayer}
         assert actual == expected

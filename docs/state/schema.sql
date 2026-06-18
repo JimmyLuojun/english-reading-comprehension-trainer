@@ -99,12 +99,6 @@ CREATE TABLE tags (
     name     TEXT    NOT NULL UNIQUE,
     category TEXT    NOT NULL DEFAULT ''
 );
-CREATE TABLE error_types (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    code  TEXT    NOT NULL UNIQUE,  -- e.g. G01, L03, D02
-    name  TEXT    NOT NULL,
-    layer TEXT    NOT NULL CHECK(layer IN ('grammar','lexical','discourse'))
-);
 CREATE TABLE sentence_card_tags (
     card_id INTEGER NOT NULL REFERENCES sentence_cards(id) ON DELETE CASCADE,
     tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
@@ -218,3 +212,9 @@ CREATE INDEX idx_word_card_sources_sentence
 CREATE UNIQUE INDEX idx_word_card_sources_one_primary
     ON word_card_sources(card_id)
     WHERE is_primary = 1;
+CREATE TABLE IF NOT EXISTS "error_types" (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    code  TEXT    NOT NULL UNIQUE,
+    name  TEXT    NOT NULL,
+    layer TEXT    NOT NULL CHECK(layer IN ('grammar','lexical','discourse','inference'))
+);
