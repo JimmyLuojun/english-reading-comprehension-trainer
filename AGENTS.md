@@ -8,6 +8,12 @@
 
 - When the user asks to list negative consequences to avoid and give a simple effective solution, answer in that order: first concrete risks/regressions to avoid, then the minimal viable solution. Do not detour into broad architecture unless the current design cannot support the fix.
 
+### Bandwidth / Media Handling
+
+- 为省流量，Claude Code 默认**不要**自己读取图片、PDF、音视频等大体积二进制文件（它们会被编码上传给模型）。优先只处理代码与文本。
+- 这类视觉/媒体任务（看截图、读 PDF、分析图片）默认**转交 Codex 或 Gemini** 处理，不要自己 Read。
+- 仅当确实必须由 Claude 亲自读取该文件才能完成任务时，先在回复里**明确、显眼地说明：要读哪个文件、为什么非读不可、预计的流量代价**，然后请用户确认；得到确认后再读取。`.claude/settings.json` 的 `permissions.ask` 已对这些扩展名设为每次弹窗确认，作为硬性兜底。
+
 ### Testing
 
 - **每个 Python 代码文件都要有对应的单元测试，覆盖尽可能完整。**

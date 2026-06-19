@@ -1,6 +1,22 @@
 {
   "permissions": {
     "allow": [],
+    "ask": [
+      "Read(**/*.png)",
+      "Read(**/*.jpg)",
+      "Read(**/*.jpeg)",
+      "Read(**/*.gif)",
+      "Read(**/*.webp)",
+      "Read(**/*.bmp)",
+      "Read(**/*.tiff)",
+      "Read(**/*.ico)",
+      "Read(**/*.pdf)",
+      "Read(**/*.mp4)",
+      "Read(**/*.mov)",
+      "Read(**/*.mp3)",
+      "Read(**/*.wav)",
+      "WebFetch"
+    ],
     "deny": []
   }
 }
