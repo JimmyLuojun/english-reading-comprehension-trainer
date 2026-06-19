@@ -142,6 +142,16 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
     assert 'type="button" name="lexical_type" value="word" data-analysis-mark="word"' in html
 
 
+def test_selection_toolbar_word_detail_uses_takeaway_label() -> None:
+    html = _selection_toolbar("/read/1", [])
+
+    assert ">Takeaway\n" in html
+    assert 'id="toolbar-word-detail-note"' in html
+    assert "What I should remember" in html
+    assert ">Note\n" not in html
+    assert "Your note…" not in html
+
+
 def test_reader_view_has_book_and_chapter_navigation() -> None:
     html = _reader_view(
         rows=[],
@@ -183,6 +193,20 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert html.index("Diagnosis") < html.index("Back to whole sentence")
     assert html.index("Back to whole sentence") < html.index("Your translation")
     assert html.index("Your translation") < html.index("Takeaway")
+
+
+def test_analysis_panel_word_card_uses_takeaway_not_notes() -> None:
+    html = _analysis_panel()
+
+    assert "Takeaway check" in html
+    assert "My word card" in html
+    assert 'id="word-panel-note"' in html
+    assert 'id="analysis-word-note-check"' in html
+    # Stale "Note(s)" labels must not leak back into the Word Analysis panel.
+    assert "My notes" not in html
+    assert "Your note check" not in html
+    assert "My understanding" not in html
+    assert 'class="word-notes-label">Notes' not in html
 
 
 def test_analysis_panel_labels_are_bilingual() -> None:

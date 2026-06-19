@@ -312,8 +312,8 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
           <label class="word-detail-label">Meaning
             <input id="toolbar-word-detail-meaning" type="text" placeholder="Definition…">
           </label>
-          <label class="word-detail-label">Note
-            <input id="toolbar-word-detail-note" type="text" placeholder="Your note…">
+          <label class="word-detail-label">Takeaway
+            <input id="toolbar-word-detail-note" type="text" placeholder="What I should remember…">
           </label>
         </div>
         <div class="word-detail-actions">
@@ -435,7 +435,7 @@ def _analysis_panel() -> str:
           <div id="analysis-word-vs-simpler"></div>
         </section>
         <section id="analysis-word-note-check-section" class="analysis-section" hidden>
-          <h3>Your note check</h3>
+          <h3>Takeaway check</h3>
           <p id="analysis-word-note-check" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
@@ -447,13 +447,13 @@ def _analysis_panel() -> str:
           <p id="analysis-word-errors" class="analysis-text analysis-codes"></p>
         </section>
         <section id="word-panel-notes" class="analysis-section">
-          <h3>My notes</h3>
+          <h3>My word card</h3>
           <div class="word-notes-fields">
             <label class="word-notes-label">Definition
               <input id="word-panel-meaning" type="text" placeholder="My definition…">
             </label>
-            <label class="word-notes-label">Notes
-              <input id="word-panel-note" type="text" placeholder="My understanding…">
+            <label class="word-notes-label">Takeaway
+              <input id="word-panel-note" type="text" placeholder="What I should remember…">
             </label>
           </div>
           <div class="word-notes-actions">
