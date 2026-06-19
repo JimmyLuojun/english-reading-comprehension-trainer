@@ -15,6 +15,9 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     css = _css()
 
     assert ".reader-sentence" in css
+    assert ".reader-sentence.editing-target" in css
+    assert "background: rgba(96, 165, 250, 0.16)" in css
+    assert "box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.10)" in css
     assert ".hover-popover-panel" in css
     assert "bottom: calc(100% + 8px)" in css
     assert "right: 0" in css

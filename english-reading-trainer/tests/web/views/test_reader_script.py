@@ -22,6 +22,8 @@ def test_analysis_panel_opens_at_top_without_progress_scroll_restore() -> None:
     script = _selection_script()
     open_panel = script[script.index("function openPanel()") :]
     open_panel = open_panel[: open_panel.index("function closePanel")]
+    focus_after_render = script[script.index("function focusAnalysisPanelAfterRender") :]
+    focus_after_render = focus_after_render[: focus_after_render.index("function openPanel")]
     restore_saved = script[script.index("async function restoreSavedAnalysisPanel") :]
     restore_saved = restore_saved[: restore_saved.index("function scheduleProgressSave")]
     restore_previous = script[script.index("function restorePreviousAnalysis") :]
@@ -29,6 +31,11 @@ def test_analysis_panel_opens_at_top_without_progress_scroll_restore() -> None:
 
     assert "function scrollAnalysisPanelToTop()" in script
     assert "panel.scrollTop = 0;" in script
+    assert "function focusAnalysisPanelAfterRender(focusAfterRender)" in script
+    assert 'if (focusAfterRender === "structure-feedback")' in focus_after_render
+    assert "structureAttemptSection" in focus_after_render
+    assert 'target?.scrollIntoView({ block: "start" });' in focus_after_render
+    assert "scrollAnalysisPanelToTop();" in focus_after_render
     assert "scrollAnalysisPanelToTop();" in open_panel
     assert open_panel.index("panel.hidden = false;") < open_panel.index(
         "scrollAnalysisPanelToTop();"
@@ -153,6 +160,7 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     retry = retry[: retry.index("async function saveWordDetailEdits")]
 
     assert 'document.getElementById("sentence-panel-translation")' in script
+    assert 'document.getElementById("analysis-structure-attempt-section")' in script
     assert 'document.getElementById("sentence-panel-structure")' in script
     assert 'document.getElementById("analysis-structure-feedback-section")' in script
     assert 'document.getElementById("analysis-structure-feedback")' in script
@@ -305,8 +313,8 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;" in open_structure
     assert "translationEditorDirty = true;" in listeners
     assert "structureEditorDirty = true;" in listeners
-    assert 'enqueueTranslationSave({ keepOpen: true });' in listeners
-    assert 'enqueueStructureSave({ keepOpen: true });' in listeners
+    assert 'enqueueTranslationSave({ keepOpen: true });' in script
+    assert 'enqueueStructureSave({ keepOpen: true });' in script
     assert "closeTranslationEditor();" in listeners
     assert "closeStructureEditor();" in listeners
     assert "if (!keepOpen)" in save_translation
@@ -339,6 +347,57 @@ def test_bare_structure_template_is_not_saved_or_analyzed() -> None:
     assert "Fill in your structure judgement first." in save_structure
     assert "if (!structureAttemptHasContent(value)) {" in structure_analyze
     assert "if (structureAttemptHasContent(value) && value !== lastSavedStructure) {" in script
+
+
+def test_structure_only_analysis_focuses_structure_feedback_after_render() -> None:
+    script = _selection_script()
+    render_payload = script[script.index("function renderAnalysisPayload"):]
+    render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
+    request_analysis = script[script.index("async function requestAnalysis"):]
+    request_analysis = request_analysis[: request_analysis.index("function clearPanelAutoSaveTimers")]
+    structure_analyze = script[script.index('structureAnalyze.addEventListener("click"'):]
+    structure_analyze = structure_analyze[: structure_analyze.index('analysisOpen.addEventListener("click"')]
+    analysis_open = script[script.index('analysisOpen.addEventListener("click"'):]
+    analysis_open = analysis_open[: analysis_open.index('crossSentenceDelete.addEventListener("click"')]
+
+    assert "renderOptions = {}" in render_payload
+    assert 'focusAnalysisPanelAfterRender(options.focusAfterRender);' in render_payload
+    assert "focusAfterRender: options.focusAfterRender" in request_analysis
+    assert "const hasAnyTranslation = Boolean(translation);" in structure_analyze
+    assert 'focusAfterRender: !hasAnyTranslation ? "structure-feedback" : undefined' in structure_analyze
+    assert "const hasAnyTranslation = Boolean(translation);" in analysis_open
+    assert 'structureAttemptHasContent(structure) && !hasAnyTranslation' in analysis_open
+    assert "focusAfterRender," in analysis_open
+    assert "userStructure: structure" in analysis_open
+    assert "scrollAnalysisPanelToTop();" in script
+
+
+def test_toolbar_editing_target_highlight_is_temporary() -> None:
+    script = _selection_script()
+    helper = script[script.index("function setEditingTarget(sentenceEl)"):]
+    helper = helper[: helper.index("function selectedSentenceSpans")]
+    hide_all = script[script.index("function hideAllPanels()"):]
+    hide_all = hide_all[: hide_all.index("function clearScheduledToolbarHide")]
+    open_translation = script[script.index("function openTranslationEditor()"):]
+    open_translation = open_translation[: open_translation.index("function openStructureEditor")]
+    open_structure = script[script.index("function openStructureEditor()"):]
+    open_structure = open_structure[: open_structure.index("async function saveTranslationOnly")]
+    listeners = script[script.index('translationAnalyze.addEventListener("click"'):]
+    listeners = listeners[: listeners.index('crossSentenceDelete.addEventListener("click"')]
+    click_handler = script[script.index('reader.addEventListener("click"'):]
+    click_handler = click_handler[: click_handler.index('reader.addEventListener("dblclick"')]
+
+    assert 'reader.querySelectorAll(".reader-sentence.editing-target")' in helper
+    assert 'el.classList.remove("editing-target");' in helper
+    assert 'sentenceEl.classList.add("editing-target");' in helper
+    assert "setEditingTarget(null);" in hide_all
+    assert "setEditingTarget(sentence);" in open_translation
+    assert "setEditingTarget(sentence);" in open_structure
+    assert "hideToolbar();" in listeners
+    assert "hideToolbar();" in click_handler
+    assert 'loadSavedAnalysis(sentence.dataset.sentenceId);' in click_handler
+    assert 'enqueueTranslationSave({ keepOpen: true });' in script
+    assert 'enqueueStructureSave({ keepOpen: true });' in script
 
 
 def test_sentence_panel_structure_and_translation_autosave() -> None:
@@ -382,7 +441,7 @@ def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> 
     assert "let toolbarInteractionSeq = 0;" in script
     assert "toolbarInteractionSeq += 1;" in position_toolbar
     assert "const seqAtRequest = toolbarInteractionSeq;" in request_analysis
-    assert "renderAnalysisPayload(payload, seqAtRequest);" in request_analysis
+    assert "renderAnalysisPayload(payload, {\n            seqAtRequest," in request_analysis
     assert "const seqAtRequest = toolbarInteractionSeq;" in request_word
     assert "renderWordAnalysis(payload, seqAtRequest);" in request_word
     assert "readerToolbarBusy = true;" in mark_reader
@@ -491,7 +550,8 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert 'translationDelete.addEventListener("click", deleteTranslationInPlace);' in script
     assert 'sentence.dataset.translation = "";' not in unmark_helper
     assert "const translation = activeSentenceTranslation || null;" in analysis_click
-    assert "requestAnalysis(sentenceId, translation);" in analysis_click
+    assert "requestAnalysis(sentenceId, translation, {" in analysis_click
+    assert "focusAfterRender," in analysis_click
 
 
 def test_translation_update_preserves_analysis_id_as_stale() -> None:

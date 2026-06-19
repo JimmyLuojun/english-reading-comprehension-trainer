@@ -89,6 +89,7 @@ def _selection_script() -> str:
       const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
       const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
       const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
+      const structureAttemptSection = document.getElementById("analysis-structure-attempt-section");
       const sentencePanelStructure = document.getElementById("sentence-panel-structure");
       const sentencePanelStructureSave = document.getElementById("sentence-panel-structure-save");
       const sentencePanelStructureStatus = document.getElementById("sentence-panel-structure-status");
@@ -498,6 +499,7 @@ def _selection_script() -> str:
       function hideAllPanels() {
         hideTranslationEditor();
         hideStructureEditor();
+        setEditingTarget(null);
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
         setVisible(analysisWordForm, false);
@@ -552,6 +554,13 @@ def _selection_script() -> str:
 
       function setVisible(element, visible) {
         element.hidden = !visible;
+      }
+
+      function setEditingTarget(sentenceEl) {
+        reader.querySelectorAll(".reader-sentence.editing-target").forEach((el) => {
+          el.classList.remove("editing-target");
+        });
+        if (sentenceEl) sentenceEl.classList.add("editing-target");
       }
 
       function selectedSentenceSpans(range) {
@@ -1615,6 +1624,7 @@ def _selection_script() -> str:
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
+        setEditingTarget(sentence);
         requestAnimationFrame(() => {
           if (sentence) positionToolbar(sentence.getBoundingClientRect());
           translationText.focus();
@@ -1639,6 +1649,7 @@ def _selection_script() -> str:
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
+        setEditingTarget(sentence);
         requestAnimationFrame(() => {
           if (sentence) positionToolbar(sentence.getBoundingClientRect());
           structureText.focus();
@@ -1892,6 +1903,20 @@ def _selection_script() -> str:
         if (!panel) return;
         panel.scrollTop = 0;
         updateAnalysisToolsVisibility(false);
+      }
+
+      function focusAnalysisPanelAfterRender(focusAfterRender) {
+        if (focusAfterRender === "structure-feedback") {
+          window.requestAnimationFrame(() => {
+            const target = structureAttemptSection
+              || sentencePanelStructure?.closest(".sentence-study-section")
+              || structureFeedbackSection;
+            target?.scrollIntoView({ block: "start" });
+            updateAnalysisToolsVisibility(false);
+          });
+          return;
+        }
+        scrollAnalysisPanelToTop();
       }
 
       function openPanel() {
@@ -2184,7 +2209,13 @@ def _selection_script() -> str:
         setSentenceStudyFields(activeAnalysisPayload);
       }
 
-      function renderAnalysisPayload(payload, seqAtRequest = toolbarInteractionSeq) {
+      function renderAnalysisPayload(payload, renderOptions = {}) {
+        const options = (
+          typeof renderOptions === "object" && renderOptions !== null
+        ) ? renderOptions : { seqAtRequest: renderOptions };
+        const seqAtRequest = Object.prototype.hasOwnProperty.call(options, "seqAtRequest")
+          ? options.seqAtRequest
+          : toolbarInteractionSeq;
         const analysis = payload.analysis || {};
         maybeHideToolbarAfterRender(seqAtRequest);
         activeAnalysisPayload = payload;
@@ -2218,6 +2249,7 @@ def _selection_script() -> str:
         renderDiagnosis(analysis);
         renderStructureFeedback(analysis.structure_feedback || null);
         renderSimilarMistakes(payload, analysis);
+        focusAnalysisPanelAfterRender(options.focusAfterRender);
       }
 
       function renderDiagnosis(analysis) {
@@ -2358,7 +2390,7 @@ def _selection_script() -> str:
             renderAnalysisError(payload.error || "No saved analysis found.", Boolean(payload.retry));
             return;
           }
-          renderAnalysisPayload(payload, seqAtRequest);
+          renderAnalysisPayload(payload, { seqAtRequest });
         } catch (error) {
           renderAnalysisError(`Could not load analysis: ${error}`, true);
         }
@@ -2390,7 +2422,10 @@ def _selection_script() -> str:
             return;
           }
           updateSentenceAnalysisState(sentenceId, payload);
-          renderAnalysisPayload(payload, seqAtRequest);
+          renderAnalysisPayload(payload, {
+            seqAtRequest,
+            focusAfterRender: options.focusAfterRender,
+          });
         } catch (error) {
           renderAnalysisError(`Analysis failed: ${error}`, true);
         }
@@ -2862,6 +2897,7 @@ def _selection_script() -> str:
         const sentenceId = activeSentenceId;
         const value = structureText.value.trim();
         const translation = activeSentenceTranslation || null;
+        const hasAnyTranslation = Boolean(translation);
         if (!structureAttemptHasContent(value)) {
           structureStatus.textContent = "Fill in your structure judgement first.";
           return;
@@ -2870,6 +2906,7 @@ def _selection_script() -> str:
         if (sentenceId) {
           requestAnalysis(sentenceId, translation, {
             userStructure: value,
+            focusAfterRender: !hasAnyTranslation ? "structure-feedback" : undefined,
           });
         }
       });
@@ -2879,10 +2916,18 @@ def _selection_script() -> str:
         const sentenceId = activeSentenceId;
         const translation = activeSentenceTranslation || null;
         const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        const structure = sentence?.dataset.structure || "";
+        const hasAnyTranslation = Boolean(translation);
+        const focusAfterRender = structureAttemptHasContent(structure) && !hasAnyTranslation
+          ? "structure-feedback"
+          : undefined;
         hideToolbar();
         restoreReadingAnchor(anchor);
         if (sentence?.dataset.analysisId) loadSavedAnalysis(sentenceId);
-        else requestAnalysis(sentenceId, translation);
+        else requestAnalysis(sentenceId, translation, {
+          focusAfterRender,
+          userStructure: structure,
+        });
       });
       crossSentenceDelete.addEventListener("click", () => {
         const ids = (crossSentenceDelete.dataset.sentenceIds || "")
@@ -3124,6 +3169,7 @@ def _selection_script() -> str:
         if (!sentence) return;
         if (hasSelection) return;
         if (sentence.dataset.analysisId) {
+          hideToolbar();
           loadSavedAnalysis(sentence.dataset.sentenceId);
           return;
         }

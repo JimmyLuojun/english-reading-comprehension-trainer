@@ -425,7 +425,7 @@ def _analysis_panel() -> str:
             <span id="sentence-panel-translation-status" class="toolbar-status" aria-live="polite"></span>
           </div>
         </section>
-        <section class="analysis-section sentence-study-section">
+        <section id="analysis-structure-attempt-section" class="analysis-section sentence-study-section">
           <h3><span class="section-label-zh">我的结构</span><span class="section-label-en">Your structure attempt</span></h3>
           <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代逻辑："></textarea>
           <div class="word-notes-actions">

@@ -298,6 +298,11 @@ def _css() -> str:
       scroll-margin-top: 72px;
       text-underline-offset: 0.22em;
     }
+    .reader-sentence.editing-target {
+      background: rgba(96, 165, 250, 0.16);
+      border-radius: 4px;
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.10);
+    }
     [data-sentence-id].marked {
       background: linear-gradient(transparent 60%, #ffe58a 60%);
       box-decoration-break: clone;

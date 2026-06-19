@@ -203,6 +203,7 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert 'id="sentence-panel-translation"' in html
     assert "Your translation" in html
     assert 'id="sentence-panel-structure"' in html
+    assert 'id="analysis-structure-attempt-section"' in html
     assert 'id="analysis-structure-feedback-section"' in html
     assert "Your structure attempt" in html
     assert "Structure feedback" in html
