@@ -18,6 +18,7 @@ def _selection_script() -> str:
       const sentenceSubmit = document.getElementById("toolbar-sentence-submit");
       const sentenceDelete = document.getElementById("toolbar-sentence-delete");
       const translationOpen = document.getElementById("toolbar-translation-open");
+      const structureOpen = document.getElementById("toolbar-structure-open");
       const translationDelete = document.getElementById("toolbar-translation-delete");
       const analysisOpen = document.getElementById("toolbar-analysis-open");
       const translationForm = document.getElementById("toolbar-translation-form");
@@ -28,6 +29,12 @@ def _selection_script() -> str:
       const translationSave = document.getElementById("toolbar-translation-save");
       const translationAnalyze = document.getElementById("toolbar-translation-analyze");
       const translationStatus = document.getElementById("toolbar-translation-status");
+      const structureEditor = document.getElementById("toolbar-structure-editor");
+      const structureText = document.getElementById("toolbar-structure-text");
+      const structureCancel = document.getElementById("toolbar-structure-cancel");
+      const structureSave = document.getElementById("toolbar-structure-save");
+      const structureAnalyze = document.getElementById("toolbar-structure-analyze");
+      const structureStatus = document.getElementById("toolbar-structure-status");
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
@@ -82,6 +89,11 @@ def _selection_script() -> str:
       const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
       const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
       const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
+      const sentencePanelStructure = document.getElementById("sentence-panel-structure");
+      const sentencePanelStructureSave = document.getElementById("sentence-panel-structure-save");
+      const sentencePanelStructureStatus = document.getElementById("sentence-panel-structure-status");
+      const structureFeedbackSection = document.getElementById("analysis-structure-feedback-section");
+      const structureFeedback = document.getElementById("analysis-structure-feedback");
       const sentencePanelNoteSuggestion = document.getElementById("sentence-panel-note-suggestion");
       const sentencePanelNoteAccept = document.getElementById("sentence-panel-note-accept");
       const sentencePanelNote = document.getElementById("sentence-panel-note");
@@ -161,6 +173,7 @@ def _selection_script() -> str:
 
       let activeSentenceId = null;
       let activeSentenceTranslation = "";
+      let activeSentenceStructure = "";
       let activeWordCardId = null;
       let activeWordCardIds = [];
       let activeCrossSentenceIds = [];
@@ -174,6 +187,7 @@ def _selection_script() -> str:
       let activeWordDetailFromAnalysis = false;
       let panelMode = "sentence";
       let translationEditorOpen = false;
+      let structureEditorOpen = false;
       let progressTimer = null;
       let toolbarHideTimer = null;
       let analysisWordActionInProgress = false;
@@ -313,8 +327,18 @@ def _selection_script() -> str:
         }
       }
 
+      function hideStructureEditor() {
+        structureEditor.hidden = true;
+        structureEditorOpen = false;
+        structureStatus.textContent = "";
+        if (structureEditor.contains(document.activeElement)) {
+          blurToolbarFocus();
+        }
+      }
+
       function hideAllPanels() {
         hideTranslationEditor();
+        hideStructureEditor();
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
         setVisible(analysisWordForm, false);
@@ -345,6 +369,7 @@ def _selection_script() -> str:
         toolbar.hidden = true;
         activeSentenceId = null;
         activeSentenceTranslation = "";
+        activeSentenceStructure = "";
         activeWordCardId = null;
         activeWordCardIds = [];
         activeCrossSentenceIds = [];
@@ -356,7 +381,7 @@ def _selection_script() -> str:
       }
 
       function hideToolbarUnlessEditing() {
-        if (translationEditorOpen) return;
+        if (translationEditorOpen || structureEditorOpen) return;
         hideToolbar();
       }
 
@@ -681,6 +706,7 @@ def _selection_script() -> str:
         const lines = [];
         appendCopyLine(lines, "Original sentence", sentenceTextForId(payload.sentence_id));
         appendCopyLine(lines, "Your translation", payload.user_translation);
+        appendCopyLine(lines, "Your structure attempt", payload.user_structure);
         return lines;
       }
 
@@ -723,6 +749,22 @@ def _selection_script() -> str:
           const code = item.error_type ? `${ERROR_CODE_LABELS[item.error_type] || item.error_type}: ` : "";
           return `${code}${item.evidence || ""}`.trim();
         });
+        appendCopyItems(
+          lines,
+          "Structure feedback",
+          analysis.structure_feedback?.missed_or_wrong || [],
+          (item) => {
+            const code = item.error_code ? `${ERROR_CODE_LABELS[item.error_code] || item.error_code}: ` : "";
+            return `${code}${item.learner_claim || ""} -> ${item.correction || ""} ${item.reason || ""}`.trim();
+          },
+        );
+        appendCopyLine(lines, "Corrected structure", analysis.structure_feedback?.corrected_structure);
+        appendCopyLine(
+          lines,
+          "Why it matters for translation",
+          analysis.structure_feedback?.why_it_matters_for_translation,
+        );
+        appendCopyLine(lines, "Next structure check", analysis.structure_feedback?.next_check);
         appendCopyItems(lines, "Similar past mistakes", payload.similar_mistakes, (item) => {
           const codes = (item.shared_error_codes || []).map((code) => ERROR_CODE_LABELS[code] || code).join(", ");
           const sentence = item.sentence_text || "";
@@ -852,6 +894,7 @@ def _selection_script() -> str:
         hideAllPanels();
         activeSentenceId = sentence.dataset.sentenceId;
         activeSentenceTranslation = sentence.dataset.translation || "";
+        activeSentenceStructure = sentence.dataset.structure || "";
         activeWordCardId = null;
         activeWordCardIds = [];
 
@@ -860,9 +903,11 @@ def _selection_script() -> str:
         sentenceSubmit.hidden = true;
         sentenceDelete.hidden = sentence.dataset.marked !== "1";
         translationOpen.hidden = false;
+        structureOpen.hidden = false;
         translationDelete.hidden = !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
+        structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
         analysisOpen.textContent = analysisButtonLabel(sentence);
         configureCrossSentenceActions([]);
         setVisible(sentenceForm, true);
@@ -873,6 +918,7 @@ def _selection_script() -> str:
         if (!sentence?.dataset.translation?.trim()) return false;
         activeSentenceId = sentence.dataset.sentenceId;
         activeSentenceTranslation = sentence.dataset.translation || "";
+        activeSentenceStructure = sentence.dataset.structure || "";
         if (sentence.dataset.analysisId) {
           hideToolbar();
           loadSavedAnalysis(activeSentenceId);
@@ -1139,9 +1185,11 @@ def _selection_script() -> str:
         sentenceSubmit.hidden = !wholeSentence || markedSentence;
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
         translationOpen.hidden = !wholeSentence;
+        structureOpen.hidden = !wholeSentence;
         translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
+        structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
         analysisOpen.textContent = analysisButtonLabel(sentence);
 
         wordSentenceId.value = activeSentenceId;
@@ -1392,6 +1440,7 @@ def _selection_script() -> str:
       function openTranslationEditor() {
         if (!activeSentenceId) return;
         const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        hideStructureEditor();
         translationText.value = activeSentenceTranslation;
         translationEditor.hidden = false;
         translationEditorOpen = true;
@@ -1402,6 +1451,23 @@ def _selection_script() -> str:
         requestAnimationFrame(() => {
           if (sentence) positionToolbar(sentence.getBoundingClientRect());
           translationText.focus();
+        });
+      }
+
+      function openStructureEditor() {
+        if (!activeSentenceId) return;
+        const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        hideTranslationEditor();
+        structureText.value = activeSentenceStructure;
+        structureEditor.hidden = false;
+        structureEditorOpen = true;
+        structureStatus.textContent = "";
+        setVisible(wordForm, false);
+        setVisible(wordDetail, false);
+        setVisible(crossSentence, false);
+        requestAnimationFrame(() => {
+          if (sentence) positionToolbar(sentence.getBoundingClientRect());
+          structureText.focus();
         });
       }
 
@@ -1429,6 +1495,50 @@ def _selection_script() -> str:
           const sentence = document.getElementById(`sentence-${activeSentenceId}`);
           markSentenceTranslated(sentence, value);
           activeSentenceTranslation = value;
+          window.getSelection()?.removeAllRanges();
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+        } catch {
+          window.location.assign(returnTo);
+        } finally {
+          readerToolbarBusy = false;
+        }
+      }
+
+      function markSentenceStructured(sentence, structure) {
+        if (!sentence) return;
+        sentence.dataset.structure = structure;
+        if (sentence.dataset.analysisId) {
+          sentence.dataset.analysisStale = "1";
+          sentence.classList.remove("analyzed");
+          sentence.classList.add("analyzed-stale");
+        }
+      }
+
+      async function saveStructureOnly() {
+        const value = structureText.value.trim();
+        if (!value) {
+          structureStatus.textContent = "Enter a structure attempt first.";
+          return;
+        }
+        if (!activeSentenceId) return;
+        const anchor = captureReadingAnchor();
+        structureStatus.textContent = "Saving...";
+        const body = new URLSearchParams({ user_structure: value, return_to: returnTo });
+        readerToolbarBusy = true;
+        try {
+          const response = await fetch(`/mark/sentence/${activeSentenceId}/structure`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          if (!response.ok) {
+            window.location.assign(response.url || returnTo);
+            return;
+          }
+          const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+          markSentenceStructured(sentence, value);
+          activeSentenceStructure = value;
           window.getSelection()?.removeAllRanges();
           hideToolbar();
           restoreReadingAnchor(anchor);
@@ -1608,11 +1718,14 @@ def _selection_script() -> str:
         clearSentenceStructure();
         diagnosis.replaceChildren();
         if (sentencePanelTranslation) sentencePanelTranslation.value = "";
+        if (sentencePanelStructure) sentencePanelStructure.value = "";
         if (sentencePanelNote) sentencePanelNote.value = "";
         if (sentencePanelNoteSuggestion) sentencePanelNoteSuggestion.textContent = "";
         if (sentencePanelNoteAccept) sentencePanelNoteAccept.hidden = true;
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
+        renderStructureFeedback(null);
       }
 
       function setPanelLoading(message) {
@@ -1629,11 +1742,14 @@ def _selection_script() -> str:
         clearSentenceStructure();
         diagnosis.replaceChildren();
         if (sentencePanelTranslation) sentencePanelTranslation.value = "";
+        if (sentencePanelStructure) sentencePanelStructure.value = "";
         if (sentencePanelNote) sentencePanelNote.value = "";
         if (sentencePanelNoteSuggestion) sentencePanelNoteSuggestion.textContent = "";
         if (sentencePanelNoteAccept) sentencePanelNoteAccept.hidden = true;
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
+        renderStructureFeedback(null);
       }
 
       function setPanelLoadingWord(message) {
@@ -1685,6 +1801,9 @@ def _selection_script() -> str:
         if (sentencePanelTranslation) {
           sentencePanelTranslation.value = payload.user_translation || "";
         }
+        if (sentencePanelStructure) {
+          sentencePanelStructure.value = payload.user_structure || "";
+        }
         if (sentencePanelNote) {
           sentencePanelNote.value = payload.user_note || "";
         }
@@ -1695,6 +1814,7 @@ def _selection_script() -> str:
           sentencePanelNoteAccept.hidden = !(payload.analysis?.takeaway_suggestion || "").trim();
         }
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "";
+        if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "";
         if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "";
       }
 
@@ -1765,12 +1885,54 @@ def _selection_script() -> str:
         }
       }
 
+      function renderStructureFeedback(feedback) {
+        if (!structureFeedbackSection || !structureFeedback) return;
+        structureFeedback.replaceChildren();
+        if (!feedback) {
+          structureFeedbackSection.hidden = true;
+          return;
+        }
+        structureFeedbackSection.hidden = false;
+        const status = document.createElement("p");
+        status.className = "analysis-text";
+        status.textContent = feedback.is_correct
+          ? "Your structure attempt is correct."
+          : "Your structure attempt needs correction.";
+        structureFeedback.append(status);
+
+        const items = feedback.missed_or_wrong || [];
+        for (const item of items) {
+          const block = document.createElement("article");
+          block.className = "similar-mistake-comparison";
+          const code = item.error_code || "";
+          const codeLine = document.createElement("p");
+          codeLine.className = "analysis-codes";
+          codeLine.textContent = ERROR_CODE_LABELS[code] || code;
+          const claim = comparisonLine("Your claim", item.learner_claim || "");
+          const correction = comparisonLine("Correction", item.correction || "");
+          const reason = comparisonLine("Why", item.reason || "");
+          block.append(codeLine, claim, correction, reason);
+          structureFeedback.append(block);
+        }
+
+        structureFeedback.append(
+          comparisonLine("Corrected structure", feedback.corrected_structure || ""),
+          comparisonLine(
+            "Translation impact",
+            feedback.why_it_matters_for_translation || "",
+          ),
+          comparisonLine("Next check", feedback.next_check || ""),
+        );
+        applyGlossaryHighlights(structureFeedback);
+      }
+
       function renderSentenceStudyPanel(sentence, message, seqAtRequest = toolbarInteractionSeq) {
         maybeHideToolbarAfterRender(seqAtRequest);
         const sentenceId = sentence?.dataset.sentenceId || "";
         activeAnalysisPayload = {
           sentence_id: sentenceId,
           user_translation: sentence?.dataset.translation || "",
+          user_structure: sentence?.dataset.structure || "",
           user_note: sentence?.dataset.note || "",
         };
         activeAnalysisLabel = "sentence";
@@ -1788,6 +1950,7 @@ def _selection_script() -> str:
         skeleton.textContent = "";
         clearSentenceStructure();
         diagnosis.replaceChildren();
+        renderStructureFeedback(null);
         setSentenceStudyFields(activeAnalysisPayload);
       }
 
@@ -1823,6 +1986,7 @@ def _selection_script() -> str:
         if (backToWhole) applyGlossaryHighlights(backToWhole);
         renderSentenceStructure(analysis);
         renderDiagnosis(analysis);
+        renderStructureFeedback(analysis.structure_feedback || null);
         renderSimilarMistakes(payload, analysis);
       }
 
@@ -1941,6 +2105,7 @@ def _selection_script() -> str:
         sentence.dataset.analysisId = payload.cache_id || "";
         sentence.dataset.analysisStale = payload.is_stale ? "1" : "0";
         sentence.dataset.translation = payload.user_translation || sentence.dataset.translation || "";
+        sentence.dataset.structure = payload.user_structure || sentence.dataset.structure || "";
         sentence.dataset.note = payload.user_note || sentence.dataset.note || "";
         sentence.classList.add("marked");
         if (sentence.dataset.translation.trim()) {
@@ -1977,6 +2142,10 @@ def _selection_script() -> str:
         const params = new URLSearchParams();
         params.set("return_to", returnTo);
         if (translation && translation.trim()) params.set("user_translation", translation.trim());
+        const structure = Object.prototype.hasOwnProperty.call(options, "userStructure")
+          ? options.userStructure
+          : (sentencePanelStructure?.value || document.getElementById(`sentence-${sentenceId}`)?.dataset.structure || "");
+        if (structure && structure.trim()) params.set("user_structure", structure.trim());
         if (options.preferPro) params.set("prefer_pro", "1");
         if (options.forceRefresh) params.set("force_refresh", "1");
         try {
@@ -2026,6 +2195,38 @@ def _selection_script() -> str:
           if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saved";
         } catch (error) {
           if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = `Save failed: ${error}`;
+        }
+      }
+
+      async function savePanelStructure() {
+        const sentenceId = activeAnalysisSentenceId;
+        const value = (sentencePanelStructure?.value || "").trim();
+        if (!sentenceId) return;
+        if (!value) {
+          if (sentencePanelStructureStatus) {
+            sentencePanelStructureStatus.textContent = "Enter a structure attempt first.";
+          }
+          return;
+        }
+        if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "Saving...";
+        const body = new URLSearchParams({ user_structure: value, return_to: returnTo });
+        try {
+          const response = await fetch(`/mark/sentence/${sentenceId}/structure`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          if (!response.ok) throw new Error("Save failed");
+          markSentenceStructured(document.getElementById(`sentence-${sentenceId}`), value);
+          activeSentenceStructure = value;
+          if (activeAnalysisPayload) {
+            activeAnalysisPayload.user_structure = value;
+            activeAnalysisPayload.is_stale = true;
+          }
+          if (panelStatus) panelStatus.textContent = "Analysis is stale. Reanalyze when ready.";
+          if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "Saved";
+        } catch (error) {
+          if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = `Save failed: ${error}`;
         }
       }
 
@@ -2323,15 +2524,34 @@ def _selection_script() -> str:
         hideToolbar();
         if (sentenceId) requestAnalysis(sentenceId, value || null);
       });
+      structureOpen.addEventListener("click", openStructureEditor);
+      structureCancel.addEventListener("click", hideStructureEditor);
+      structureSave.addEventListener("click", saveStructureOnly);
+      structureAnalyze.addEventListener("click", () => {
+        const sentenceId = activeSentenceId;
+        const value = structureText.value.trim();
+        const translation = activeSentenceTranslation || null;
+        if (!value) {
+          structureStatus.textContent = "Enter a structure attempt first.";
+          return;
+        }
+        hideToolbar();
+        if (sentenceId) {
+          requestAnalysis(sentenceId, translation, {
+            userStructure: value,
+          });
+        }
+      });
       analysisOpen.addEventListener("click", () => {
         if (!activeSentenceId) return;
         const anchor = captureReadingAnchor(analysisOpen);
         const sentenceId = activeSentenceId;
+        const translation = activeSentenceTranslation || null;
         const sentence = document.getElementById(`sentence-${activeSentenceId}`);
         hideToolbar();
         restoreReadingAnchor(anchor);
         if (sentence?.dataset.analysisId) loadSavedAnalysis(sentenceId);
-        else requestAnalysis(sentenceId, activeSentenceTranslation || null);
+        else requestAnalysis(sentenceId, translation);
       });
       crossSentenceDelete.addEventListener("click", () => {
         const ids = (crossSentenceDelete.dataset.sentenceIds || "")
@@ -2357,6 +2577,9 @@ def _selection_script() -> str:
       }
       if (sentencePanelTranslationSave) {
         sentencePanelTranslationSave.addEventListener("click", savePanelTranslation);
+      }
+      if (sentencePanelStructureSave) {
+        sentencePanelStructureSave.addEventListener("click", savePanelStructure);
       }
       if (sentencePanelNoteSave) {
         sentencePanelNoteSave.addEventListener("click", savePanelNote);
@@ -2447,7 +2670,10 @@ def _selection_script() -> str:
           requestAnalysis(
             activeAnalysisSentenceId,
             sentencePanelTranslation?.value || null,
-            { forceRefresh: true },
+            {
+              forceRefresh: true,
+              userStructure: sentencePanelStructure?.value || "",
+            },
           );
         }
       });
@@ -2462,7 +2688,11 @@ def _selection_script() -> str:
             requestAnalysis(
               activeAnalysisSentenceId,
               sentencePanelTranslation?.value || null,
-              { preferPro: true, forceRefresh: true },
+              {
+                preferPro: true,
+                forceRefresh: true,
+                userStructure: sentencePanelStructure?.value || "",
+              },
             );
           }
         });

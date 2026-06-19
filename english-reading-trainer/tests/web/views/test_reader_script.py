@@ -139,18 +139,23 @@ def test_sentence_deep_link_opens_analysis_panel_without_auto_ai() -> None:
     assert "openInitialSentenceAnalysis();" in boot
 
 
-def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
+def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> None:
     script = _selection_script()
     render_payload = script[script.index("function renderAnalysisPayload"):]
     render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
     save_translation = script[script.index("async function savePanelTranslation"):]
-    save_translation = save_translation[: save_translation.index("async function savePanelNote")]
+    save_translation = save_translation[: save_translation.index("async function savePanelStructure")]
+    save_structure = script[script.index("async function savePanelStructure"):]
+    save_structure = save_structure[: save_structure.index("async function savePanelNote")]
     save_note = script[script.index("async function savePanelNote"):]
     save_note = save_note[: save_note.index("function renderVsSimpler")]
     retry = script[script.index('panelRetry.addEventListener("click"'):]
     retry = retry[: retry.index("async function saveWordDetailEdits")]
 
     assert 'document.getElementById("sentence-panel-translation")' in script
+    assert 'document.getElementById("sentence-panel-structure")' in script
+    assert 'document.getElementById("analysis-structure-feedback-section")' in script
+    assert 'document.getElementById("analysis-structure-feedback")' in script
     assert 'document.getElementById("analysis-blocking-point")' in script
     assert 'document.getElementById("analysis-clauses")' in script
     assert 'document.getElementById("analysis-modifiers-section")' in script
@@ -161,6 +166,7 @@ def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
     assert 'document.getElementById("sentence-panel-note-accept")' in script
     assert 'document.getElementById("sentence-panel-note")' in script
     assert "renderSentenceStructure(analysis);" in render_payload
+    assert "renderStructureFeedback(analysis.structure_feedback || null);" in render_payload
     assert "analysis.blocking_point || \"\"" in render_payload
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
@@ -168,15 +174,19 @@ def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
     assert "function acceptTakeawaySuggestion()" in script
     assert 'sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);' in script
     assert "payload.user_note || \"\"" in script
+    assert "payload.user_structure || \"\"" in script
     assert "function toggleAnalysisSection(section, items)" in script
     assert "toggleAnalysisSection(modifiersSection, analysis.modifiers || []);" in script
     assert "toggleAnalysisSection(logicMarkersSection, analysis.logic_markers || []);" in script
     assert "toggleAnalysisSection(anaphoraSection, analysis.anaphora || []);" in script
     assert 'fetch(`/mark/sentence/${sentenceId}/translation`' in save_translation
+    assert 'fetch(`/mark/sentence/${sentenceId}/structure`' in save_structure
+    assert "markSentenceStructured" in save_structure
     assert 'fetch(`/mark/sentence/${sentenceId}`' in save_note
     assert 'method: "PATCH"' in save_note
     assert "updateSentenceNote(sentenceId, value);" in save_note
     assert "sentencePanelTranslation?.value || null" in retry
+    assert "userStructure: sentencePanelStructure?.value || \"\"" in retry
 
 
 def test_word_analysis_panel_shows_role_in_sentence() -> None:
@@ -200,7 +210,8 @@ def test_reader_script_supports_pro_reanalysis_button() -> None:
     assert "params.set(\"force_refresh\", \"1\");" in script
     assert 'requestWordAnalysis(activeAnalysisWordCardId, { forceRefresh: true });' in script
     assert "sentencePanelTranslation?.value || null" in script
-    assert "{ preferPro: true, forceRefresh: true }" in script
+    assert "preferPro: true" in script
+    assert "userStructure: sentencePanelStructure?.value || \"\"" in script
 
 
 def test_analysis_toolbar_actions_run_on_single_click_only() -> None:
@@ -256,7 +267,7 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     translation_analyze = script[script.index('translationAnalyze.addEventListener("click"'):]
     translation_analyze = translation_analyze[: translation_analyze.index('analysisOpen.addEventListener("click"')]
 
-    assert "if (translationEditorOpen) return;" in helper
+    assert "if (translationEditorOpen || structureEditorOpen) return;" in helper
     assert "hideToolbar();" in helper
     assert "if (readerToolbarBusy) return;" in guarded_helper
     assert "if (seqAtRequest !== toolbarInteractionSeq) return;" in guarded_helper
@@ -392,7 +403,8 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert 'translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;' in script
     assert 'translationDelete.addEventListener("click", deleteTranslationInPlace);' in script
     assert 'sentence.dataset.translation = "";' not in unmark_helper
-    assert "requestAnalysis(sentenceId, activeSentenceTranslation || null);" in analysis_click
+    assert "const translation = activeSentenceTranslation || null;" in analysis_click
+    assert "requestAnalysis(sentenceId, translation);" in analysis_click
 
 
 def test_translation_update_preserves_analysis_id_as_stale() -> None:

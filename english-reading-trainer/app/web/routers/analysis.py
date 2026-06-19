@@ -45,6 +45,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             db_factory(),
             sentence_id,
             user_translation=form.get("user_translation"),
+            user_structure=form.get("user_structure"),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
             force_refresh=_truthy_form_value(form.get("force_refresh")),
         )

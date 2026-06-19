@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
+    SENTENCE_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
@@ -72,10 +73,13 @@ def save_sentence_analysis(
             "SELECT text FROM sentences WHERE id = ?", (sentence_id,)
         ).fetchone()["text"]
         card_row = conn.execute(
-            "SELECT user_translation FROM sentence_cards WHERE sentence_id = ?",
+            """SELECT user_translation, user_structure
+                 FROM sentence_cards
+                WHERE sentence_id = ?""",
             (sentence_id,),
         ).fetchone()
         user_translation = card_row["user_translation"] if card_row else None
+        user_structure = card_row["user_structure"] if card_row else None
 
     is_valid = True
     error = ""
@@ -89,7 +93,7 @@ def save_sentence_analysis(
         error = str(exc)
         response_json = raw_json
 
-    content_hash = compute_content_hash(sent_text, "", user_translation)
+    content_hash = compute_content_hash(sent_text, "", user_translation, user_structure)
     cache_id = save_to_cache(
         db, content_hash, prompt_version, model, response_json, is_valid
     )
@@ -311,6 +315,8 @@ def _word_analysis_schema(prompt_version: str) -> dict:
 def _sentence_analysis_schema(prompt_version: str) -> dict:
     if prompt_version == "v1":
         return SENTENCE_ANALYSIS_SCHEMA
+    if prompt_version == "v5":
+        return SENTENCE_ANALYSIS_SCHEMA_V3
     return SENTENCE_ANALYSIS_SCHEMA_V2
 
 

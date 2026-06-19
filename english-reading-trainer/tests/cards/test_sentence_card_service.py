@@ -17,6 +17,7 @@ from app.cards.sentence_card_service import (
     get_sentence_card,
     get_sentence_card_by_sentence,
     list_sentence_cards,
+    save_sentence_structure,
     save_sentence_translation,
     update_sentence_card_note,
 )
@@ -187,6 +188,59 @@ class TestGetSentenceCard:
         for field in ["id", "sentence_id", "mastery_state", "ef",
                       "interval_days", "repetitions", "due_at", "sentence_text"]:
             assert field in card
+
+
+# ---------------------------------------------------------------------------
+# save_sentence_structure
+# ---------------------------------------------------------------------------
+
+class TestSaveSentenceStructure:
+    def test_saves_structure_on_archived_container_card(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = save_sentence_structure(db, sid, "主干：The cat sat")
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_structure, structure_created_at, archived_at
+                     FROM sentence_cards
+                    WHERE id = ?""",
+                (card_id,),
+            ).fetchone()
+
+        assert row["user_structure"] == "主干：The cat sat"
+        assert row["structure_created_at"] is not None
+        assert row["archived_at"] is not None
+
+    def test_updates_existing_card_without_archiving(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = create_sentence_card(db, sid)
+
+        assert save_sentence_structure(db, sid, "主干：A") == card_id
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_structure, archived_at FROM sentence_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+
+        assert row["user_structure"] == "主干：A"
+        assert row["archived_at"] is None
+
+    def test_rejects_empty_structure(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db)
+
+        with pytest.raises(ValueError, match="user_structure"):
+            save_sentence_structure(db, sid, "   ")
+
+    def test_invalid_sentence_id_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            save_sentence_structure(db, 99999, "主干：A")
 
 
 # ---------------------------------------------------------------------------

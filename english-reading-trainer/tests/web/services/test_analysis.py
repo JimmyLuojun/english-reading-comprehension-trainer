@@ -135,6 +135,59 @@ def test_analyze_sentence_for_reader_passes_force_refresh(monkeypatch) -> None:
     assert captured["force_refresh"] is True
 
 
+def test_analyze_sentence_for_reader_saves_and_passes_user_structure(monkeypatch) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    captured: dict[str, object] = {}
+    saved: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {
+            "text": "The cat sat.",
+            "user_translation": "",
+            "user_structure": "主干：The cat sat",
+        },
+    )
+    monkeypatch.setattr(analysis, "_fetch_cache_metadata", lambda db, cache_id: {})
+    monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v5")
+    monkeypatch.setattr(analysis, "save_sentence_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_analysis_payload",
+        lambda db, sentence_id: {"is_stale": False},
+    )
+
+    def fake_save_structure(db, sentence_id, user_structure):
+        saved["sentence_id"] = sentence_id
+        saved["user_structure"] = user_structure
+
+    def fake_analyze_sentence(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            data={},
+            cache_id=1,
+            from_cache=False,
+            is_stale=False,
+            is_valid=True,
+        )
+
+    monkeypatch.setattr(analysis, "save_sentence_structure", fake_save_structure)
+    monkeypatch.setattr(fastapi_app, "analyze_sentence", fake_analyze_sentence)
+
+    outcome = analysis.analyze_sentence_for_reader(
+        object(),
+        1,
+        user_translation=None,
+        user_structure="主干：The cat sat",
+    )
+
+    assert outcome.is_error is False
+    assert saved == {"sentence_id": 1, "user_structure": "主干：The cat sat"}
+    assert captured["user_structure"] == "主干：The cat sat"
+
+
 def test_analyze_word_card_for_reader_uses_pro_model_when_requested(monkeypatch) -> None:
     import app.web.fastapi_app as fastapi_app
 

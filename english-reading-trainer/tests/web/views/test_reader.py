@@ -54,6 +54,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
             "analysis_is_stale": 1,
             "user_translation": "<translation>",
             "user_note": "<takeaway>",
+            "user_structure": "<structure>",
             "ai_analysis_id": 9,
         },
         2,
@@ -72,6 +73,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
     assert 'title="Translation saved"' in html
     assert 'data-translation="&lt;translation&gt;"' in html
     assert 'data-note="&lt;takeaway&gt;"' in html
+    assert 'data-structure="&lt;structure&gt;"' in html
     assert 'data-analysis-id="9"' in html
     assert 'data-word-card="3"' in html
     assert 'data-lexical-type="word"' in html
@@ -136,6 +138,10 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
 
     assert 'id="toolbar-translation-delete"' in html
     assert "Delete translation" in html
+    assert 'id="toolbar-structure-open"' in html
+    assert 'id="toolbar-structure-editor"' in html
+    assert "Write structure" in html
+    assert "Save and AI check" in html
     assert "hidden" in html
     assert '"lexical_type": "word"' in html
     assert 'data-analysis-mark="word">Mark word</button>' in html
@@ -194,6 +200,10 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
 
     assert 'id="sentence-panel-translation"' in html
     assert "Your translation" in html
+    assert 'id="sentence-panel-structure"' in html
+    assert 'id="analysis-structure-feedback-section"' in html
+    assert "Your structure attempt" in html
+    assert "Structure feedback" in html
     assert 'id="analysis-blocking-point"' in html
     assert 'id="analysis-clauses"' in html
     assert 'id="analysis-back-to-whole"' in html
@@ -210,6 +220,8 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert html.index("Structure") < html.index("Diagnosis")
     assert html.index("Diagnosis") < html.index("Back to whole sentence")
     assert html.index("Back to whole sentence") < html.index("Your translation")
+    assert html.index("Your translation") < html.index("Your structure attempt")
+    assert html.index("Your structure attempt") < html.index("Structure feedback")
     assert html.index("Your translation") < html.index("Takeaway")
 
 

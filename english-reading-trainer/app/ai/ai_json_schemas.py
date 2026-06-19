@@ -7,6 +7,7 @@ enumeration from db_models.VALID_ERROR_CODES.
 
 SENTENCE_ANALYSIS_SCHEMA    — v1 sentence prompt fields
 SENTENCE_ANALYSIS_SCHEMA_V2 — v2 prompt, adds blocking point and takeaway suggestion
+SENTENCE_ANALYSIS_SCHEMA_V3 — v5 prompt, adds optional structure feedback
 WORD_ANALYSIS_SCHEMA        — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
@@ -14,11 +15,17 @@ WORD_ANALYSIS_SCHEMA_V4     — v4 prompt, adds learner-note feedback
 WORD_ANALYSIS_SCHEMA_V5     — v5 prompt, adds role in sentence
 """
 
-from app.db_models import VALID_ERROR_CODES
+from app.db_models import ERROR_TYPES, ErrorLayer, VALID_ERROR_CODES
 
 # Sorted for determinism in error messages and test assertions
 _ERROR_CODES = sorted(VALID_ERROR_CODES)
 _DIAGNOSIS_EVIDENCE_CODES = _ERROR_CODES + ["OK"]
+STRUCTURE_SKILL_CODES = sorted(
+    entry["code"]
+    for entry in ERROR_TYPES
+    if entry["layer"] == ErrorLayer.GRAMMAR
+    or entry["code"] in {"D01", "D04", "D05"}
+)
 
 # ---------------------------------------------------------------------------
 # Sentence analysis schema  (§9.1)
@@ -167,6 +174,52 @@ SENTENCE_ANALYSIS_SCHEMA_V2: dict = {
         **SENTENCE_ANALYSIS_SCHEMA["properties"],
         "blocking_point": {"type": "string", "minLength": 1},
         "takeaway_suggestion": {"type": "string", "minLength": 1},
+    },
+}
+
+SENTENCE_ANALYSIS_SCHEMA_V3: dict = {
+    **SENTENCE_ANALYSIS_SCHEMA_V2,
+    "properties": {
+        **SENTENCE_ANALYSIS_SCHEMA_V2["properties"],
+        "structure_feedback": {
+            "type": "object",
+            "required": [
+                "is_correct",
+                "missed_or_wrong",
+                "corrected_structure",
+                "why_it_matters_for_translation",
+                "next_check",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "is_correct": {"type": "boolean"},
+                "missed_or_wrong": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "error_code",
+                            "learner_claim",
+                            "correction",
+                            "reason",
+                        ],
+                        "additionalProperties": False,
+                        "properties": {
+                            "error_code": {
+                                "type": "string",
+                                "enum": STRUCTURE_SKILL_CODES,
+                            },
+                            "learner_claim": {"type": "string", "minLength": 1},
+                            "correction": {"type": "string", "minLength": 1},
+                            "reason": {"type": "string", "minLength": 1},
+                        },
+                    },
+                },
+                "corrected_structure": {"type": "string", "minLength": 1},
+                "why_it_matters_for_translation": {"type": "string", "minLength": 1},
+                "next_check": {"type": "string", "minLength": 1},
+            },
+        },
     },
 }
 

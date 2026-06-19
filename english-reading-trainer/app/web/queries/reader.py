@@ -20,6 +20,7 @@ def _fetch_chapter_sentences(
                       CASE WHEN sc.id IS NULL THEN 0 ELSE 1 END AS has_card,
                       COALESCE(st.user_translation, '') AS user_translation,
                       COALESCE(st.user_note, '') AS user_note,
+                      COALESCE(st.user_structure, '') AS user_structure,
                       sc.ai_analysis_id,
                       ac.content_hash AS analysis_content_hash,
                       ac.prompt_version AS analysis_prompt_version,
@@ -48,6 +49,7 @@ def _fetch_chapter_sentences(
             row.get("text") or "",
             "",
             row.get("user_translation") or None,
+            row.get("user_structure") or None,
         )
         row["has_analysis"] = 1 if has_analysis else 0
         row["analysis_is_stale"] = (

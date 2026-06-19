@@ -230,6 +230,8 @@ class SentenceCardRecord:
     ai_analysis_id: Optional[int] = None
     user_translation: Optional[str] = None
     translation_created_at: Optional[datetime] = None
+    user_structure: Optional[str] = None
+    structure_created_at: Optional[datetime] = None
 
 
 @dataclass

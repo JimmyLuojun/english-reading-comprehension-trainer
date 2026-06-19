@@ -27,7 +27,10 @@ from pathlib import Path
 import pytest
 
 from app.ai.analysis_saver import SaveResult, save_sentence_analysis, save_word_analysis
-from app.cards.sentence_card_service import save_sentence_translation
+from app.cards.sentence_card_service import (
+    save_sentence_structure,
+    save_sentence_translation,
+)
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 
@@ -71,6 +74,24 @@ _VALID_SENTENCE_JSON_V2 = json.dumps({
     "diagnosis_evidence": [],
     "takeaway_suggestion": "遇到长主语，先检查真正的谓语，否则易犯 G01。",
     "confidence": 0.95,
+})
+
+_VALID_SENTENCE_JSON_V5 = json.dumps({
+    **json.loads(_VALID_SENTENCE_JSON_V2),
+    "structure_feedback": {
+        "is_correct": False,
+        "missed_or_wrong": [
+            {
+                "error_code": "G02",
+                "learner_claim": "quick brown modifies dog",
+                "correction": "quick brown modifies fox",
+                "reason": "The adjectives come before fox.",
+            }
+        ],
+        "corrected_structure": "Subject: the quick brown fox; predicate: jumps.",
+        "why_it_matters_for_translation": "The modifier belongs to the subject.",
+        "next_check": "Attach pre-noun adjectives before translating the predicate.",
+    },
 })
 
 _VALID_DIAGNOSED_SENTENCE_JSON = json.dumps({
@@ -321,6 +342,23 @@ class TestSaveSentenceAnalysisHappyPath:
         )
 
         assert r.is_valid is True
+
+    def test_v5_structure_feedback_valid_but_not_synced_to_card_errors(
+        self,
+        db: DatabaseConnection,
+        sid: int,
+    ):
+        save_sentence_structure(db, sid, "主干：fox jumps")
+
+        r = save_sentence_analysis(
+            db,
+            sid,
+            _VALID_SENTENCE_JSON_V5,
+            prompt_version="v5",
+        )
+
+        assert r.is_valid is True
+        assert _sentence_error_codes(db, r.card_id) == {"G01"}
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ from app.cards.sentence_card_service import (
     create_sentence_card,
     delete_sentence_translation,
     list_sentence_cards,
+    save_sentence_structure,
     save_sentence_translation,
     update_sentence_card_note,
 )
@@ -72,6 +73,21 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
                 db,
                 sentence_id,
                 form.get("user_translation", ""),
+            )
+        except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        return _redirect(return_to)
+
+    @web_app.post("/mark/sentence/{sentence_id}/structure")
+    async def mark_sentence_structure(sentence_id: int, request: Request) -> Any:
+        form = await _read_form(request)
+        return_to = _safe_return_to(form.get("return_to", "/cards"))
+        db = db_factory()
+        try:
+            save_sentence_structure(
+                db,
+                sentence_id,
+                form.get("user_structure", ""),
             )
         except ValueError as exc:
             return _error_page(str(exc), status_code=400)

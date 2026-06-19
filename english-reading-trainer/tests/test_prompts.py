@@ -23,8 +23,8 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v4.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v4.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v5.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v5.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
@@ -34,6 +34,10 @@ SENTENCE_ANALYSIS_PREDICT_V2 = PROMPTS_DIR / "sentence_analysis_predict.v2.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V2 = PROMPTS_DIR / "sentence_analysis_diagnose.v2.md"
 SENTENCE_ANALYSIS_PREDICT_V3 = PROMPTS_DIR / "sentence_analysis_predict.v3.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V3 = PROMPTS_DIR / "sentence_analysis_diagnose.v3.md"
+SENTENCE_ANALYSIS_PREDICT_V4 = PROMPTS_DIR / "sentence_analysis_predict.v4.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V4 = PROMPTS_DIR / "sentence_analysis_diagnose.v4.md"
+SENTENCE_ANALYSIS_PREDICT_V5 = PROMPTS_DIR / "sentence_analysis_predict.v5.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V5 = PROMPTS_DIR / "sentence_analysis_diagnose.v5.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
@@ -41,10 +45,11 @@ WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
 # Required template variables per prompt
 REQUIRED_VARS = {
     "sentence_analysis_predict": ["sentence", "context", "chapter_title",
-                                  "related_cards", "learner_profile"],
+                                  "related_cards", "learner_profile",
+                                  "user_structure"],
     "sentence_analysis_diagnose": ["sentence", "user_translation", "context",
                                    "chapter_title", "related_cards",
-                                   "learner_profile"],
+                                   "learner_profile", "user_structure"],
     "word_analysis": ["surface_form", "sentence", "context",
                       "related_cards", "learner_note", "learner_profile"],
     "profile_summary": ["lookback_days", "total_reviews",
@@ -160,8 +165,8 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v4"),
-        ("sentence_analysis_diagnose", "v4"),
+        ("sentence_analysis_predict", "v5"),
+        ("sentence_analysis_diagnose", "v5"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
@@ -237,7 +242,9 @@ class TestJSONSchemaFieldsInPrompts:
         "anaphora", "simplified_en", "chinese_gloss", "blocking_point",
         "predicted_error_types", "diagnosis_basis",
         "diagnosed_error_types", "diagnosis_evidence",
-        "takeaway_suggestion", "confidence",
+        "takeaway_suggestion", "structure_feedback", "error_code",
+        "corrected_structure", "why_it_matters_for_translation",
+        "next_check", "confidence",
     ]
     WORD_FIELDS = [
         "lemma", "lexical_type", "pos", "meaning_in_context",
@@ -289,11 +296,20 @@ class TestJSONSchemaFieldsInPrompts:
         assert SENTENCE_ANALYSIS_DIAGNOSE_V3.exists()
 
     def test_current_sentence_prompt_v4_requires_modifier_details(self) -> None:
-        for name in ["sentence_analysis_predict", "sentence_analysis_diagnose"]:
-            text = _read(name)
+        for path in [SENTENCE_ANALYSIS_PREDICT_V4, SENTENCE_ANALYSIS_DIAGNOSE_V4]:
+            text = path.read_text(encoding="utf-8")
             assert "version: v4" in text
             assert "a chain of digital signatures" in text
             assert "Use empty `modifiers: []` only when" in text
+
+    def test_current_sentence_prompt_v5_contains_structure_feedback(self) -> None:
+        for path in [SENTENCE_ANALYSIS_PREDICT_V5, SENTENCE_ANALYSIS_DIAGNOSE_V5]:
+            text = path.read_text(encoding="utf-8")
+            assert "version: v5" in text
+            assert "{{ user_structure }}" in text
+            assert "structure_feedback" in text
+            assert "error_code" in text
+            assert "Do not use L01-L06, D02, D03, I01, or I02" in text
 
 
 # ---------------------------------------------------------------------------

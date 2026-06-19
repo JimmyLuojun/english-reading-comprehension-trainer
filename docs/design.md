@@ -75,6 +75,7 @@
 - [回到上次阅读：Books 导航续读](features/dashboard-continue-and-reading-font.md)：已实现——顶部导航 "Books" 客户端改写 `#nav-books` href 直接续读（有进度跳回上次章节+滚动+面板），新增 "Library" 入口看目录，无历史时 "Books" 仍指向目录；已删除冗余工具栏 `_continue_reading_script` 按钮。字号 20px/1.8 已实现，不在本次范围。
 - [UI 一致性与密度优化](features/ui-consistency-and-density.md)：已实现的五步收尾——调浅 sepia 护眼色板（仅 sepia 块）、抽 `_page_header` 锁页头一致性、Import/Profile 收窄、表格去浮表头精修与 Delete 弱化、Review 行压缩、Import 任务卡，仍是 CSS 变量层 + 一个共享 helper，不碰默认冷白色与 reader 布局。
 - [Reader/Review 交互修复批次](features/reader-review-ux-fixes.md)：已实现的六步小修——B1 分析完成不关正在写的翻译浮层、B3 改过译文的句子仍能调回旧分析并标 stale、A2 Review 统一 takeaway 术语并区分译文/takeaway、B2 词性分色（word 绿/phrase 紫/collocation/idiom 橙，句子保持黄）、A1 面板内选词二次分析修复、B4 裸键 `S`/`T` 整句选中快捷键（含面板正文字号对齐原文 + 中英双语醒目标签）。
+- [句子结构练习与 AI 结构纠错](features/sentence-structure-practice.md)：计划中——句子浮层「写结构」按钮，写入语法结构由 AI 评估纠正；新增 `user_structure` 列、可选 `structure_feedback` schema 块。核心约束：diagnose/predict 两套 prompt 共用单一 `_PROMPT_VERSION`，升 v5 必须成对建文件、schema 出 v5 分支、空结构不改 cache hash。文档含**递归增益设计（§S7–S12）**：复用现有 `ERROR_TYPES` 闭合枚举做关节（结构反馈带 `error_code`），结构错误走并行 lane 永不进 `sentence_card_errors`；分 A（随 v1，加 `error_code`）/B（弱点画像）/C（预测式高亮+drill 队列）/D（元分析导出）四期复利。
 
 ---
 

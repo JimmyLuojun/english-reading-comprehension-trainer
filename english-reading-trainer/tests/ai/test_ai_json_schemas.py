@@ -11,6 +11,8 @@ import jsonschema
 from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
+    SENTENCE_ANALYSIS_SCHEMA_V3,
+    STRUCTURE_SKILL_CODES,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
@@ -64,6 +66,26 @@ VALID_DIAGNOSED_SENTENCE_V2 = {
     **VALID_DIAGNOSED_SENTENCE,
     "blocking_point": "The translation attaches the modifier to the wrong noun.",
     "takeaway_suggestion": "遇到名词后的从句，先检查它修饰哪个名词，否则易犯 G02。",
+}
+
+VALID_STRUCTURE_FEEDBACK = {
+    "is_correct": False,
+    "missed_or_wrong": [
+        {
+            "error_code": "G02",
+            "learner_claim": "The relative clause modifies the board.",
+            "correction": "The relative clause modifies the report.",
+            "reason": "It directly follows the report and describes what was compiled.",
+        }
+    ],
+    "corrected_structure": "Main clause plus a relative clause modifying report.",
+    "why_it_matters_for_translation": "Wrong attachment changes who compiled the report.",
+    "next_check": "Attach post-noun clauses to the nearest valid noun first.",
+}
+
+VALID_SENTENCE_V3 = {
+    **VALID_SENTENCE_V2,
+    "structure_feedback": VALID_STRUCTURE_FEEDBACK,
 }
 
 VALID_WORD = {
@@ -379,6 +401,80 @@ class TestSentenceSchemaV2InvalidInstances:
     def test_extra_field_rejected_by_v2_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate({**VALID_SENTENCE_V2, "extra_field": "oops"}, SENTENCE_ANALYSIS_SCHEMA_V2)
+
+
+# ---------------------------------------------------------------------------
+# SENTENCE_ANALYSIS_SCHEMA_V3
+# ---------------------------------------------------------------------------
+
+class TestSentenceSchemaV3Structure:
+    def test_v3_schema_is_dict(self) -> None:
+        assert isinstance(SENTENCE_ANALYSIS_SCHEMA_V3, dict)
+
+    def test_v3_structure_feedback_is_optional(self) -> None:
+        assert "structure_feedback" in SENTENCE_ANALYSIS_SCHEMA_V3["properties"]
+        assert "structure_feedback" not in SENTENCE_ANALYSIS_SCHEMA_V3["required"]
+
+    def test_structure_skill_codes_are_structure_subset(self) -> None:
+        assert set(STRUCTURE_SKILL_CODES) == {
+            "G01", "G02", "G03", "G04", "G05", "G06", "G07",
+            "D01", "D04", "D05",
+        }
+
+
+class TestSentenceSchemaV3ValidInstances:
+    def test_v3_accepts_sentence_without_structure_feedback(self) -> None:
+        _validate(VALID_SENTENCE_V2, SENTENCE_ANALYSIS_SCHEMA_V3)
+
+    def test_v3_accepts_sentence_with_structure_feedback(self) -> None:
+        _validate(VALID_SENTENCE_V3, SENTENCE_ANALYSIS_SCHEMA_V3)
+
+    def test_v3_accepts_correct_empty_structure_feedback_items(self) -> None:
+        data = {
+            **VALID_SENTENCE_V2,
+            "structure_feedback": {
+                **VALID_STRUCTURE_FEEDBACK,
+                "is_correct": True,
+                "missed_or_wrong": [],
+            },
+        }
+        _validate(data, SENTENCE_ANALYSIS_SCHEMA_V3)
+
+
+class TestSentenceSchemaV3InvalidInstances:
+    def test_v3_rejects_structure_feedback_extra_field(self) -> None:
+        bad_feedback = {**VALID_STRUCTURE_FEEDBACK, "extra": "nope"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
+                SENTENCE_ANALYSIS_SCHEMA_V3,
+            )
+
+    def test_v3_rejects_missing_structure_error_code(self) -> None:
+        bad_item = {
+            key: value
+            for key, value in VALID_STRUCTURE_FEEDBACK["missed_or_wrong"][0].items()
+            if key != "error_code"
+        }
+        bad_feedback = {**VALID_STRUCTURE_FEEDBACK, "missed_or_wrong": [bad_item]}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
+                SENTENCE_ANALYSIS_SCHEMA_V3,
+            )
+
+    @pytest.mark.parametrize("code", ["L01", "I01", "D02"])
+    def test_v3_rejects_non_structure_error_code(self, code: str) -> None:
+        bad_item = {
+            **VALID_STRUCTURE_FEEDBACK["missed_or_wrong"][0],
+            "error_code": code,
+        }
+        bad_feedback = {**VALID_STRUCTURE_FEEDBACK, "missed_or_wrong": [bad_item]}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
+                SENTENCE_ANALYSIS_SCHEMA_V3,
+            )
 
 
 # ---------------------------------------------------------------------------

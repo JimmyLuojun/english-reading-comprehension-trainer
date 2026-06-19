@@ -47,6 +47,7 @@ class TestMigrationRunner:
         assert "007_pdf_source_format.sql" in applied
         assert "008_word_card_sources.sql" in applied
         assert "009_inference_error_layer.sql" in applied
+        assert "010_sentence_user_structure.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -63,6 +64,7 @@ class TestMigrationRunner:
         assert "007_pdf_source_format.sql" in recorded
         assert "008_word_card_sources.sql" in recorded
         assert "009_inference_error_layer.sql" in recorded
+        assert "010_sentence_user_structure.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -184,7 +186,10 @@ class TestMigrationRunner:
 
         applied = db.apply_migrations(MIGRATIONS_DIR)
 
-        assert applied == ["009_inference_error_layer.sql"]
+        assert applied == [
+            "009_inference_error_layer.sql",
+            "010_sentence_user_structure.sql",
+        ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
                 """SELECT et.code
@@ -294,7 +299,7 @@ class TestColumns:
         for col in [
             "ef", "interval_days", "repetitions", "due_at",
             "mastery_state", "archived_at", "user_translation",
-            "translation_created_at",
+            "translation_created_at", "user_structure", "structure_created_at",
         ]:
             assert col in cols, f"SM-2 field '{col}' missing from sentence_cards"
 
@@ -443,6 +448,7 @@ class TestConstraints:
             "007_pdf_source_format.sql",
             "008_word_card_sources.sql",
             "009_inference_error_layer.sql",
+            "010_sentence_user_structure.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -485,6 +491,64 @@ class TestConstraints:
             "chapter_blocks": 1,
         }
         assert sentence["text"] == "Existing EPUB sentence."
+
+    def test_sentence_user_structure_migration_preserves_existing_cards(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("00[1-9]_*.sql")):
+            shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "structure_upgrade.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('B', 'txt', 'h_structure', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters (book_id, idx, title, sentence_start, sentence_end) "
+                "VALUES (?, 1, 'Ch', 0, 1)",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx, sentence_start, sentence_end) "
+                "VALUES (?, 1, 0, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                """INSERT INTO sentences
+                   (book_id, chapter_id, paragraph_id, idx, text, text_hash,
+                    char_offset_start, char_offset_end)
+                   VALUES (?, ?, ?, 0, 'A sentence.', 'h_structure_sentence', 0, 11)""",
+                (book_id, chapter_id, paragraph_id),
+            ).lastrowid
+            card_id = conn.execute(
+                """INSERT INTO sentence_cards
+                   (sentence_id, created_at, due_at, user_translation)
+                   VALUES (?, '2026-01-01T00:00:00+00:00',
+                           '2026-01-01T00:00:00+00:00', '一句话。')""",
+                (sentence_id,),
+            ).lastrowid
+
+        applied = db.apply_migrations(MIGRATIONS_DIR)
+
+        assert applied == ["010_sentence_user_structure.sql"]
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_translation, user_structure, structure_created_at
+                     FROM sentence_cards
+                    WHERE id = ?""",
+                (card_id,),
+            ).fetchone()
+            fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+
+        assert row["user_translation"] == "一句话。"
+        assert row["user_structure"] is None
+        assert row["structure_created_at"] is None
+        assert fk_errors == []
 
     def test_chapter_blocks_kind_check(self, db: DatabaseConnection) -> None:
         with pytest.raises(sqlite3.IntegrityError):

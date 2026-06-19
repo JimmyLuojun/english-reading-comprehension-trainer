@@ -83,6 +83,25 @@ class TestComputeContentHash:
             == compute_content_hash("Hello.", "", "你好 世界")
         )
 
+    def test_empty_structure_preserves_legacy_hash(self) -> None:
+        assert (
+            compute_content_hash("Hello.", "context", "你好。")
+            == compute_content_hash("Hello.", "context", "你好。", "")
+            == compute_content_hash("Hello.", "context", "你好。", "   ")
+        )
+
+    def test_non_empty_structure_changes_hash(self) -> None:
+        assert (
+            compute_content_hash("Hello.", "context", "你好。")
+            != compute_content_hash("Hello.", "context", "你好。", "主干：Hello")
+        )
+
+    def test_structure_is_normalized(self) -> None:
+        assert (
+            compute_content_hash("Hello.", "", None, "  主干：Hello   world  ")
+            == compute_content_hash("Hello.", "", None, "主干：Hello world")
+        )
+
     def test_case_insensitive_sentence(self) -> None:
         # normalize_for_hash lowercases, so these should be equal
         assert (
@@ -111,6 +130,23 @@ class TestComputeContentHash:
         )
         expected = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
         assert compute_content_hash(sentence, context, translation) == expected
+
+    def test_hash_with_structure_matches_manual_sha256(self) -> None:
+        sentence = "The cat sat."
+        context = "prev sentence"
+        translation = "猫坐着。"
+        structure = "主干：The cat sat"
+        normalised = (
+            normalize_for_hash(sentence)
+            + "|"
+            + context.strip()
+            + "|"
+            + normalize_for_hash(translation)
+            + "|"
+            + normalize_for_hash(structure)
+        )
+        expected = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+        assert compute_content_hash(sentence, context, translation, structure) == expected
 
 
 # ---------------------------------------------------------------------------

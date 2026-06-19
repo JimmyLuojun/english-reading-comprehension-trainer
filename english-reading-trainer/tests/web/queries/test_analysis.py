@@ -9,7 +9,11 @@ import pytest
 
 from app.ai.ai_response_cache import compute_content_hash
 from app.ai.analysis_saver import save_sentence_analysis
-from app.cards.sentence_card_service import create_sentence_card, save_sentence_translation
+from app.cards.sentence_card_service import (
+    create_sentence_card,
+    save_sentence_structure,
+    save_sentence_translation,
+)
 from app.cards.word_card_service import create_or_update_word_card
 from app.db_connection import DatabaseConnection
 from app.db_models import LexicalType
@@ -128,6 +132,19 @@ def test_fetch_sentence_for_analysis_includes_takeaway_note(
     assert sentence["user_note"] == "注意 sat 的状态"
 
 
+def test_fetch_sentence_for_analysis_includes_user_structure(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    save_sentence_structure(db, sentence_id, "主干：The cat sat")
+
+    sentence = _fetch_sentence_for_analysis(db, sentence_id)
+
+    assert sentence["user_structure"] == "主干：The cat sat"
+
+
 def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
     db = DatabaseConnection(tmp_path / "test.db")
     db.apply_migrations(MIGRATIONS_DIR)
@@ -196,6 +213,32 @@ def test_sentence_analysis_payload_is_stale_when_translation_changes(
     assert sentence_payload["cache_id"] == cache_id
     assert sentence_payload["is_stale"] is True
     assert sentence_payload["user_translation"] == "新译文。"
+
+
+def test_sentence_analysis_payload_is_stale_when_structure_changes(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    card_id = create_sentence_card(db, sentence_id)
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", None),
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    save_sentence_structure(db, sentence_id, "主干：The cat sat")
+
+    sentence_payload = _fetch_sentence_analysis_payload(db, sentence_id)
+
+    assert sentence_payload["cache_id"] == cache_id
+    assert sentence_payload["is_stale"] is True
+    assert sentence_payload["user_structure"] == "主干：The cat sat"
 
 
 def test_sentence_analysis_payload_includes_similar_translation_mistakes(

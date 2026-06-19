@@ -141,6 +141,53 @@ def save_sentence_translation(
         )
 
 
+def save_sentence_structure(
+    db: DatabaseConnection,
+    sentence_id: int,
+    user_structure: str,
+) -> int:
+    """
+    Store the latest learner structure attempt for *sentence_id*.
+
+    Creating a structure-only record keeps it archived so structure practice
+    does not add the sentence to Review. Existing AI analysis remains attached
+    as a stale reference until a fresh check replaces it.
+    """
+    cleaned_structure = user_structure.strip()
+    if not cleaned_structure:
+        raise ValueError("user_structure must not be empty.")
+
+    now = _utcnow()
+    with db.get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
+        ).fetchone():
+            raise ValueError(f"Sentence id={sentence_id} not found.")
+
+        existing = conn.execute(
+            "SELECT id FROM sentence_cards WHERE sentence_id = ?",
+            (sentence_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE sentence_cards
+                      SET user_structure = ?,
+                          structure_created_at = ?
+                    WHERE id = ?""",
+                (cleaned_structure, now, existing["id"]),
+            )
+            return existing["id"]
+
+        return _insert_sentence_card(
+            conn,
+            sentence_id=sentence_id,
+            user_note="",
+            user_translation=None,
+            user_structure=cleaned_structure,
+            archived_at=now,
+        )
+
+
 def delete_sentence_translation(db: DatabaseConnection, sentence_id: int) -> int:
     """
     Clear the saved translation for *sentence_id* and archive its review card.
@@ -330,16 +377,19 @@ def _insert_sentence_card(
     sentence_id: int,
     user_note: str,
     user_translation: str | None,
+    user_structure: str | None = None,
     archived_at: str | None = None,
 ) -> int:
     now = _utcnow()
     translation_created_at = now if user_translation is not None else None
+    structure_created_at = now if user_structure is not None else None
     return conn.execute(
         """INSERT INTO sentence_cards
            (sentence_id, created_at, last_reviewed_at, review_count,
             mastery_state, ef, interval_days, repetitions, due_at, user_note,
-            user_translation, translation_created_at, archived_at)
-           VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            user_translation, translation_created_at, user_structure,
+            structure_created_at, archived_at)
+           VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             sentence_id, now,
             MasteryState.NEW.value,
@@ -350,6 +400,8 @@ def _insert_sentence_card(
             user_note,
             user_translation,
             translation_created_at,
+            user_structure,
+            structure_created_at,
             archived_at,
         ),
     ).lastrowid

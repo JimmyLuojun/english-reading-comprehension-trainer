@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.ai.llm_sentence_analyzer import (
-    SentenceAnalysisResult,
+    _load_prompt,
     _render,
     _strip_frontmatter,
     analyze_sentence,
@@ -76,6 +76,31 @@ _VALID_DIAGNOSED_RESPONSE = json.dumps({
     "confidence": 0.9,
 })
 
+_VALID_STRUCTURE_FEEDBACK = {
+    "is_correct": False,
+    "missed_or_wrong": [
+        {
+            "error_code": "G02",
+            "learner_claim": "The modifier attaches to the board.",
+            "correction": "The modifier attaches to the report.",
+            "reason": "The modifier follows report and describes it.",
+        }
+    ],
+    "corrected_structure": "The report was dismissed; the relative clause modifies report.",
+    "why_it_matters_for_translation": "Wrong attachment changes the Chinese subject-object relation.",
+    "next_check": "Attach post-noun modifiers before translating the main action.",
+}
+
+_VALID_STRUCTURE_RESPONSE = json.dumps({
+    **json.loads(_VALID_RESPONSE),
+    "structure_feedback": _VALID_STRUCTURE_FEEDBACK,
+})
+
+_VALID_DIAGNOSED_STRUCTURE_RESPONSE = json.dumps({
+    **json.loads(_VALID_DIAGNOSED_RESPONSE),
+    "structure_feedback": _VALID_STRUCTURE_FEEDBACK,
+})
+
 _SENTENCE = "The cat sat on the mat."
 _MODEL = "gpt-4o-mini"
 
@@ -131,6 +156,11 @@ class TestRender:
     def test_empty_variables_dict(self) -> None:
         template = "No vars here."
         assert _render(template, {}) == template
+
+
+def test_both_sentence_prompt_v5_files_load() -> None:
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v5")
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v5")
 
 
 def test_analyze_sentence_defaults_to_sentence_model(
@@ -252,6 +282,60 @@ class TestAnalyzeSentenceLLMSuccess:
 
         assert result.data["diagnosis_basis"] == "user_translation"
         assert "USER TRANSLATION" in mock.call_args.args[0]
+
+    def test_user_structure_without_translation_uses_predict_prompt(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_STRUCTURE_RESPONSE]) as mock:
+            result = analyze_sentence(
+                db,
+                _SENTENCE,
+                user_structure="主干：The cat sat",
+                model=_MODEL,
+            )
+
+        assert result.data["diagnosis_basis"] == "predicted"
+        assert result.data["structure_feedback"]["missed_or_wrong"][0]["error_code"] == "G02"
+        prompt = mock.call_args.args[0]
+        assert "USER STRUCTURE ATTEMPT" in prompt
+        assert "主干：The cat sat" in prompt
+        assert "USER TRANSLATION" not in prompt
+
+    def test_user_structure_with_translation_uses_diagnosis_prompt(
+        self, db: DatabaseConnection
+    ) -> None:
+        with _mock_llm([_VALID_DIAGNOSED_STRUCTURE_RESPONSE]) as mock:
+            result = analyze_sentence(
+                db,
+                _SENTENCE,
+                user_translation="猫坐着。",
+                user_structure="主干：The cat sat",
+                model=_MODEL,
+            )
+
+        assert result.data["diagnosis_basis"] == "user_translation"
+        assert "structure_feedback" in result.data
+        prompt = mock.call_args.args[0]
+        assert "USER TRANSLATION" in prompt
+        assert "USER STRUCTURE ATTEMPT" in prompt
+
+    @pytest.mark.parametrize("translation", [None, "猫坐着。"])
+    def test_no_structure_response_valid_without_structure_feedback(
+        self,
+        db: DatabaseConnection,
+        translation: str | None,
+    ) -> None:
+        response = _VALID_DIAGNOSED_RESPONSE if translation else _VALID_RESPONSE
+        with _mock_llm([response]):
+            result = analyze_sentence(
+                db,
+                f"{_SENTENCE} {translation or 'predict'}",
+                user_translation=translation,
+                model=_MODEL,
+            )
+
+        assert result.is_valid is True
+        assert "structure_feedback" not in result.data
 
     def test_different_translations_do_not_share_cache(
         self, db: DatabaseConnection

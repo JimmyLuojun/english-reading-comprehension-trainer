@@ -28,7 +28,8 @@ def _fetch_sentence_for_analysis(
         row = conn.execute(
             """SELECT s.id, s.text,
                       COALESCE(sc.user_translation, '') AS user_translation,
-                      COALESCE(sc.user_note, '') AS user_note
+                      COALESCE(sc.user_note, '') AS user_note,
+                      COALESCE(sc.user_structure, '') AS user_structure
                  FROM sentences s
                  LEFT JOIN sentence_cards sc
                    ON sc.sentence_id = s.id
@@ -47,6 +48,7 @@ def _fetch_sentence_analysis_payload(
     with db.get_connection() as conn:
         row = conn.execute(
             """SELECT s.text, sc.id AS card_id, sc.user_translation, sc.user_note,
+                      sc.user_structure,
                       ac.id AS cache_id, ac.content_hash, ac.prompt_version, ac.model,
                       ac.response_json, ac.is_valid, ac.created_at
                  FROM sentences s
@@ -69,6 +71,7 @@ def _fetch_sentence_analysis_payload(
         row["text"] or "",
         "",
         row["user_translation"] or None,
+        row["user_structure"] or None,
     )
     similar_mistakes = [
         _serialize_similar_mistake(item)
@@ -81,6 +84,7 @@ def _fetch_sentence_analysis_payload(
         "cache_id": row["cache_id"],
         "user_translation": row["user_translation"] or "",
         "user_note": row["user_note"] or "",
+        "user_structure": row["user_structure"] or "",
         "prompt_version": row["prompt_version"],
         "active_prompt_version": active_version,
         "model": row["model"],

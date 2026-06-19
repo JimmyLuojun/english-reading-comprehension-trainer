@@ -48,7 +48,7 @@ CREATE TABLE sentence_cards (
     repetitions         INTEGER NOT NULL DEFAULT 0,
     due_at              TEXT    NOT NULL,
     user_note           TEXT    NOT NULL DEFAULT '',
-    ai_analysis_id      INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL, archived_at TEXT, user_translation TEXT, translation_created_at TEXT,
+    ai_analysis_id      INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL, archived_at TEXT, user_translation TEXT, translation_created_at TEXT, user_structure TEXT, structure_created_at TEXT,
     UNIQUE(sentence_id)   -- one card per sentence
 );
 CREATE INDEX idx_sentence_cards_due ON sentence_cards(due_at);

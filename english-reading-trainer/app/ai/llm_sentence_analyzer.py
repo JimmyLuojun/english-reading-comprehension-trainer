@@ -2,7 +2,8 @@
 Sentence analysis pipeline (§9.1, §15 + §5 of design.md).
 
 Pipeline per call:
-  1. Compute content_hash from sentence + context + optional user translation.
+  1. Compute content_hash from sentence, context, optional user translation,
+     and optional user structure attempt.
   2. Check ai_response_cache → return CachedEntry if hit.
   3. Load prompt template, fill variables, call LLM.
   4. Validate JSON response (jsonschema + semantic checks).
@@ -20,7 +21,11 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA, SENTENCE_ANALYSIS_SCHEMA_V2
+from app.ai.ai_json_schemas import (
+    SENTENCE_ANALYSIS_SCHEMA,
+    SENTENCE_ANALYSIS_SCHEMA_V2,
+    SENTENCE_ANALYSIS_SCHEMA_V3,
+)
 from app.ai.ai_provider_config import get_ai_provider_settings, get_sentence_analysis_model
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
@@ -29,7 +34,7 @@ from app.db_connection import DatabaseConnection
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
-_PROMPT_VERSION = "v4"
+_PROMPT_VERSION = "v5"
 
 # Correction suffix appended on retry to guide the LLM back on track
 _RETRY_SUFFIX = (
@@ -60,6 +65,7 @@ def analyze_sentence(
     related_cards: str = "",
     learner_profile: str = "",
     user_translation: str | None = None,
+    user_structure: str | None = None,
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
     force_refresh: bool = False,
@@ -73,7 +79,13 @@ def analyze_sentence(
     """
     model = get_sentence_analysis_model(model)
     cleaned_translation = _clean_optional_translation(user_translation)
-    content_hash = compute_content_hash(sentence_text, context, cleaned_translation)
+    cleaned_structure = _clean_optional_text(user_structure)
+    content_hash = compute_content_hash(
+        sentence_text,
+        context,
+        cleaned_translation,
+        cleaned_structure,
+    )
 
     # --- Cache check ---
     cached = None if force_refresh else get_cached(db, content_hash, prompt_version, model)
@@ -96,6 +108,7 @@ def analyze_sentence(
         "related_cards":  related_cards or "(none)",
         "learner_profile": learner_profile or "(none)",
         "user_translation": cleaned_translation or "(none)",
+        "user_structure": cleaned_structure or "(none)",
     })
 
     schema = _sentence_analysis_schema(prompt_version)
@@ -150,10 +163,16 @@ def _prompt_name_for_translation(user_translation: str | None) -> str:
 def _sentence_analysis_schema(prompt_version: str) -> dict:
     if prompt_version == "v1":
         return SENTENCE_ANALYSIS_SCHEMA
+    if prompt_version == "v5":
+        return SENTENCE_ANALYSIS_SCHEMA_V3
     return SENTENCE_ANALYSIS_SCHEMA_V2
 
 
 def _clean_optional_translation(value: str | None) -> str | None:
+    return _clean_optional_text(value)
+
+
+def _clean_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
     cleaned = value.strip()

@@ -204,6 +204,7 @@ def _reader_sentence_span(
         f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
         f'data-translation="{_escape(row.get("user_translation", ""))}" '
         f'data-note="{_escape(row.get("user_note", ""))}" '
+        f'data-structure="{_escape(row.get("user_structure", ""))}" '
         f'data-analysis-id="{_escape(analysis_id or "")}" '
         f'data-analysis-stale="{int(row.get("analysis_is_stale") or 0)}">'
         f'{text}</span>'
@@ -272,6 +273,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-sentence-submit" type="submit">Mark sentence</button>
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="toolbar-translation-open" type="button">Write translation</button>
+        <button id="toolbar-structure-open" type="button">Write structure</button>
         <button id="toolbar-translation-delete" type="button" class="danger" hidden>Delete translation</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
@@ -287,6 +289,16 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
           <button id="toolbar-translation-analyze" type="button">Save and AI analyze</button>
         </div>
         <p id="toolbar-translation-status" class="toolbar-status" aria-live="polite"></p>
+      </div>
+      <div id="toolbar-structure-editor" class="translation-editor" hidden>
+        <label for="toolbar-structure-text">Your structure attempt</label>
+        <textarea id="toolbar-structure-text" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代/逻辑："></textarea>
+        <div class="translation-actions">
+          <button id="toolbar-structure-cancel" type="button">Cancel</button>
+          <button id="toolbar-structure-save" type="button">Save only</button>
+          <button id="toolbar-structure-analyze" type="button">Save and AI check</button>
+        </div>
+        <p id="toolbar-structure-status" class="toolbar-status" aria-live="polite"></p>
       </div>
       <form id="toolbar-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>
         <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
@@ -412,6 +424,18 @@ def _analysis_panel() -> str:
             <button id="sentence-panel-translation-save" type="button">Save translation</button>
             <span id="sentence-panel-translation-status" class="toolbar-status" aria-live="polite"></span>
           </div>
+        </section>
+        <section class="analysis-section sentence-study-section">
+          <h3><span class="section-label-zh">我的结构</span><span class="section-label-en">Your structure attempt</span></h3>
+          <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代/逻辑："></textarea>
+          <div class="word-notes-actions">
+            <button id="sentence-panel-structure-save" type="button">Save structure</button>
+            <span id="sentence-panel-structure-status" class="toolbar-status" aria-live="polite"></span>
+          </div>
+        </section>
+        <section id="analysis-structure-feedback-section" class="analysis-section" hidden>
+          <h3><span class="section-label-zh">结构反馈</span><span class="section-label-en">Structure feedback</span></h3>
+          <div id="analysis-structure-feedback"></div>
         </section>
         <section class="analysis-section sentence-study-section">
           <h3><span class="section-label-zh">收获</span><span class="section-label-en">Takeaway</span></h3>

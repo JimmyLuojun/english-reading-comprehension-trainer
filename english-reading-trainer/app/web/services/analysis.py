@@ -8,7 +8,10 @@ from typing import Any
 
 from app.ai.ai_provider_config import get_ai_provider_settings, get_pro_analysis_model
 from app.ai.analysis_saver import save_sentence_analysis
-from app.cards.sentence_card_service import save_sentence_translation
+from app.cards.sentence_card_service import (
+    save_sentence_structure,
+    save_sentence_translation,
+)
 from app.cards.word_card_service import get_word_card
 from app.db_connection import DatabaseConnection
 from app.web.queries import (
@@ -49,6 +52,7 @@ def analyze_sentence_for_reader(
     sentence_id: int,
     *,
     user_translation: str | None,
+    user_structure: str | None = None,
     prefer_pro: bool = False,
     force_refresh: bool = False,
 ) -> AnalysisOutcome:
@@ -58,12 +62,15 @@ def analyze_sentence_for_reader(
     try:
         if user_translation is not None and user_translation.strip():
             save_sentence_translation(db, sentence_id, user_translation)
+        if user_structure is not None and user_structure.strip():
+            save_sentence_structure(db, sentence_id, user_structure)
 
         sentence = _fetch_sentence_for_analysis(db, sentence_id)
         result = fastapi_app.analyze_sentence(
             db,
             sentence["text"],
             user_translation=sentence.get("user_translation") or None,
+            user_structure=sentence.get("user_structure") or None,
             model=get_pro_analysis_model() if prefer_pro else None,
             force_refresh=force_refresh,
         )

@@ -40,12 +40,17 @@ def test_sentence_analysis_route_parses_force_refresh(monkeypatch) -> None:
 
     response = TestClient(app).post(
         "/analysis/sentence/1",
-        data={"force_refresh": "1", "prefer_pro": "1"},
+        data={
+            "force_refresh": "1",
+            "prefer_pro": "1",
+            "user_structure": "主干：The cat sat",
+        },
     )
 
     assert response.status_code == 200
     assert captured["force_refresh"] is True
     assert captured["prefer_pro"] is True
+    assert captured["user_structure"] == "主干：The cat sat"
 
 
 def test_word_analysis_route_parses_force_refresh(monkeypatch) -> None:
