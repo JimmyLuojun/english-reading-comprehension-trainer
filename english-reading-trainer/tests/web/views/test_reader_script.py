@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.web.views.reader_script import _selection_script
+
+
+def test_selection_script_matches_golden_fixture() -> None:
+    fixture = Path(__file__).resolve().parents[2] / "fixtures/reader_selection_script.js"
+
+    assert _selection_script() == fixture.read_text(encoding="utf-8")
 
 
 def test_selection_script_contains_reader_toolbar_contracts() -> None:

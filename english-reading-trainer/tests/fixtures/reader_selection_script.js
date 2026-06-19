@@ -1,10 +1,6 @@
-"""Browser script for reader selection and analysis interactions."""
 
-from __future__ import annotations
-
-
-def _fragment_refs_and_state() -> str:
-    return r"""      const reader = document.querySelector("[data-reader]");
+    (() => {
+      const reader = document.querySelector("[data-reader]");
       const toolbar = document.getElementById("selection-toolbar");
       if (!reader || !toolbar) return;
 
@@ -244,10 +240,8 @@ def _fragment_refs_and_state() -> str:
         return cleanNote === String(meaning || "").trim() ? "" : cleanNote;
       };
       let glossaryRegex = null;
-"""
 
-def _fragment_glossary_helpers() -> str:
-    return r"""      function addGlossaryEntry(term, entry) {
+      function addGlossaryEntry(term, entry) {
         const key = lemmaKey(String(term || ""));
         if (!key || seenGlossaryTerms.has(key)) return;
         seenGlossaryTerms.add(key);
@@ -316,10 +310,8 @@ def _fragment_glossary_helpers() -> str:
         });
       }
       rebuildGlossaryRegex();
-"""
 
-def _fragment_toolbar_selection() -> str:
-    return r"""      function toolbarContainsFocus() {
+      function toolbarContainsFocus() {
         return Boolean(document.activeElement && toolbar.contains(document.activeElement));
       }
 
@@ -1392,10 +1384,8 @@ def _fragment_toolbar_selection() -> str:
         }
         showToolbar(range);
       }
-"""
 
-def _fragment_reader_progress_and_actions() -> str:
-    return r"""      function readProgress() {
+      function readProgress() {
         if (!progressKey) return null;
         try {
           return JSON.parse(window.localStorage.getItem(progressKey) || "null");
@@ -1809,10 +1799,8 @@ def _fragment_reader_progress_and_actions() -> str:
           readerToolbarBusy = false;
         }
       }
-"""
 
-def _fragment_analysis_panel_rendering() -> str:
-    return r"""      function setSentenceMode() {
+      function setSentenceMode() {
         panelMode = "sentence";
         if (panelKicker) panelKicker.textContent = "Sentence analysis";
         if (panelTitle) panelTitle.textContent = "AI Analysis";
@@ -2366,10 +2354,8 @@ def _fragment_analysis_panel_rendering() -> str:
         line.append(strong, document.createTextNode(text || ""));
         return line;
       }
-"""
 
-def _fragment_analysis_requests_and_evidence() -> str:
-    return r"""      function updateSentenceAnalysisState(sentenceId, payload) {
+      function updateSentenceAnalysisState(sentenceId, payload) {
         const sentence = document.getElementById(`sentence-${sentenceId}`);
         if (!sentence) return;
         sentence.dataset.marked = "1";
@@ -2858,10 +2844,8 @@ def _fragment_analysis_requests_and_evidence() -> str:
         }
         sentence.classList.add("analysis-highlight-fallback");
       }
-"""
 
-def _fragment_bootstrap() -> str:
-    return r"""      toolbar.addEventListener("mousedown", (event) => {
+      toolbar.addEventListener("mousedown", (event) => {
         if (event.target.closest("textarea, input")) return;
         event.preventDefault();
       });
@@ -3228,21 +3212,6 @@ def _fragment_bootstrap() -> str:
         restoreSavedAnalysisPanel(restoredProgress).then((restoredPanel) => {
           if (!restoredPanel) openInitialSentenceAnalysis();
         });
-      }"""
-
-def _selection_script() -> str:
-    return "\n".join(
-        [
-            r"""
-    (() => {""",
-            _fragment_refs_and_state(),
-            _fragment_glossary_helpers(),
-            _fragment_toolbar_selection(),
-            _fragment_reader_progress_and_actions(),
-            _fragment_analysis_panel_rendering(),
-            _fragment_analysis_requests_and_evidence(),
-            _fragment_bootstrap(),
-            r"""    })();
-    """,
-        ]
-    )
+      }
+    })();
+    
