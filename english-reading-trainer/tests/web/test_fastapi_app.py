@@ -740,7 +740,9 @@ class TestReadingAndMarking:
         assert 'id="analysis-panel"' in response.text
         assert 'id="analysis-panel-tab"' in response.text
         assert 'id="analysis-word-meaning-zh"' in response.text
-        assert ".analysis-panel {\n      position: fixed;" in response.text
+        assert ".analysis-panel {" in response.text
+        assert "--analysis-panel-padding: 18px;" in response.text
+        assert "position: fixed;" in response.text
         assert "--analysis-panel-width: 520px" in response.text
         assert "padding-right: var(--analysis-panel-width);" in response.text
         assert "width: min(var(--analysis-panel-width), 92vw);" in response.text

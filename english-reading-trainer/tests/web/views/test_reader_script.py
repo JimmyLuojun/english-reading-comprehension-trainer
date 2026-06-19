@@ -18,6 +18,50 @@ def test_selection_script_contains_reader_toolbar_contracts() -> None:
     assert "Select a sentence or marked word, then choose AI analysis." in script
 
 
+def test_analysis_panel_opens_at_top_without_progress_scroll_restore() -> None:
+    script = _selection_script()
+    open_panel = script[script.index("function openPanel()") :]
+    open_panel = open_panel[: open_panel.index("function closePanel")]
+    restore_saved = script[script.index("async function restoreSavedAnalysisPanel") :]
+    restore_saved = restore_saved[: restore_saved.index("function scheduleProgressSave")]
+    restore_previous = script[script.index("function restorePreviousAnalysis") :]
+    restore_previous = restore_previous[: restore_previous.index("function scrollAnalysisPanelToTop")]
+
+    assert "function scrollAnalysisPanelToTop()" in script
+    assert "panel.scrollTop = 0;" in script
+    assert "scrollAnalysisPanelToTop();" in open_panel
+    assert open_panel.index("panel.hidden = false;") < open_panel.index(
+        "scrollAnalysisPanelToTop();"
+    )
+    assert "panel_scroll_top" not in script
+    assert "panelScrollTop" not in restore_saved
+    assert "previous.scrollTop || 0" in restore_previous
+
+
+def test_analysis_panel_toolbar_auto_collapses_and_peeks() -> None:
+    script = _selection_script()
+    visibility = script[script.index("function updateAnalysisToolsVisibility") :]
+    visibility = visibility[: visibility.index("function scrollAnalysisPanelToTop")]
+    listeners = script[script.index('panel.addEventListener("click"') :]
+    listeners = listeners[: listeners.index("if (panelUnmark)")]
+
+    assert 'panel?.querySelector(".analysis-panel-header")' in script
+    assert "ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP" in script
+    assert "ANALYSIS_TOOLS_HOT_ZONE_PX" in script
+    assert 'panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);' in visibility
+    assert (
+        'panel.classList.toggle("analysis-tools-peeking", shouldCollapse && Boolean(peek));'
+        in visibility
+    )
+    assert "pointerIsInAnalysisToolsHotZone(event)" in visibility
+    assert 'target?.closest(".analysis-panel-header")' in visibility
+    assert 'panel.addEventListener("scroll"' in listeners
+    assert 'panel.addEventListener("mousemove", handleAnalysisPanelPointerMove);' in listeners
+    assert 'panel.addEventListener("mouseleave"' in listeners
+    assert 'panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);' in listeners
+    assert 'panelHeader.addEventListener("focusout"' in listeners
+
+
 def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
     script = _selection_script()
 

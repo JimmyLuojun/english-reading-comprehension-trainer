@@ -27,6 +27,16 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "@media (max-width: 1179px)" in css
     assert ".analysis-panel-tab" in css
     assert ".analysis-open .analysis-panel-tab" in css
+    assert "position: sticky;" in css
+    assert "top: 0;" in css
+    assert "--analysis-panel-padding: 18px" in css
+    assert "--analysis-panel-padding: 16px" in css
+    assert "--analysis-panel-tools-handle-width: 44px" in css
+    assert ".analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)" in css
+    assert ".analysis-panel-header:not(:hover):not(:focus-within)" in css
+    assert 'content: "...";' in css
+    assert "cursor: pointer;" in css
+    assert "pointer-events: none;" in css
     assert "--reader-max-width: 840px" in css
     assert "max-width: var(--reader-max-width)" in css
     assert "#toolbar-analysis-word-status" in css

@@ -47,6 +47,7 @@ def _selection_script() -> str:
       const crossSentenceDelete = document.getElementById("toolbar-cross-sentence-delete");
       const dismissButton = document.getElementById("toolbar-dismiss");
       const panel = document.getElementById("analysis-panel");
+      const panelHeader = panel?.querySelector(".analysis-panel-header");
       const panelTab = document.getElementById("analysis-panel-tab");
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
@@ -108,6 +109,8 @@ def _selection_script() -> str:
       const initialSentenceId = initialParams.get("sentence_id") || "";
       const initialPanel = initialParams.get("panel") || "";
       const MAX_ANALYSIS_CONTEXT_TEXT = 1600;
+      const ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP = 56;
+      const ANALYSIS_TOOLS_HOT_ZONE_PX = 84;
 
       const ERROR_CODE_LABELS = {
         G01: "G01 长主语识别失败",
@@ -1225,7 +1228,6 @@ def _selection_script() -> str:
         const state = {
           open: true,
           mode: panelMode,
-          panel_scroll_top: panel.scrollTop || 0,
         };
         if (panelMode === "word" && activeAnalysisWordCardId) {
           state.card_id = activeAnalysisWordCardId;
@@ -1239,7 +1241,6 @@ def _selection_script() -> str:
       async function restoreSavedAnalysisPanel(saved) {
         const state = saved?.analysis_state || {};
         if (!state.open) return false;
-        const panelScrollTop = Number.parseInt(state.panel_scroll_top, 10) || 0;
         if (state.mode === "word" && state.card_id) {
           await loadSavedWordAnalysis(String(state.card_id));
         } else if (state.sentence_id) {
@@ -1255,9 +1256,6 @@ def _selection_script() -> str:
         } else {
           openPanelPlaceholder();
         }
-        window.setTimeout(() => {
-          panel.scrollTop = panelScrollTop;
-        }, 0);
         return true;
       }
 
@@ -1530,11 +1528,45 @@ def _selection_script() -> str:
         updatePreviousAnalysisButton();
         window.setTimeout(() => {
           panel.scrollTop = previous.scrollTop || 0;
+          updateAnalysisToolsVisibility(false);
         }, 0);
+      }
+
+      function updateAnalysisToolsVisibility(peek) {
+        if (!panel || panel.hidden) return;
+        const shouldCollapse = panel.scrollTop > ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP;
+        panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);
+        panel.classList.toggle("analysis-tools-peeking", shouldCollapse && Boolean(peek));
+      }
+
+      function pointerIsInAnalysisToolsHotZone(event) {
+        if (!panel) return false;
+        const rect = panel.getBoundingClientRect();
+        return event.clientX >= rect.right - ANALYSIS_TOOLS_HOT_ZONE_PX
+          && event.clientX <= rect.right
+          && event.clientY >= rect.top
+          && event.clientY <= rect.bottom;
+      }
+
+      function handleAnalysisPanelPointerMove(event) {
+        const target = event.target?.closest ? event.target : null;
+        const inHeader = Boolean(target?.closest(".analysis-panel-header"));
+        updateAnalysisToolsVisibility(inHeader || pointerIsInAnalysisToolsHotZone(event));
+      }
+
+      function syncAnalysisToolsFocusState() {
+        updateAnalysisToolsVisibility(Boolean(panelHeader?.contains(document.activeElement)));
+      }
+
+      function scrollAnalysisPanelToTop() {
+        if (!panel) return;
+        panel.scrollTop = 0;
+        updateAnalysisToolsVisibility(false);
       }
 
       function openPanel() {
         panel.hidden = false;
+        scrollAnalysisPanelToTop();
         if (panelTab) panelTab.hidden = true;
         document.body.classList.add("analysis-open");
         updatePreviousAnalysisButton();
@@ -2369,6 +2401,19 @@ def _selection_script() -> str:
         event.stopPropagation();
         showGlossaryWordDetail(hit);
       });
+      panel.addEventListener("scroll", () => {
+        updateAnalysisToolsVisibility(false);
+      }, { passive: true });
+      panel.addEventListener("mousemove", handleAnalysisPanelPointerMove);
+      panel.addEventListener("mouseleave", () => {
+        updateAnalysisToolsVisibility(false);
+      });
+      if (panelHeader) {
+        panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);
+        panelHeader.addEventListener("focusout", () => {
+          window.setTimeout(syncAnalysisToolsFocusState, 0);
+        });
+      }
       if (panelUnmark) {
         panelUnmark.addEventListener("click", async () => {
           const sentenceId = activeAnalysisSentenceId;
