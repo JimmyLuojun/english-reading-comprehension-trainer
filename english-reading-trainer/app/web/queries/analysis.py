@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.ai.ai_response_cache import compute_content_hash
 from app.cards.similar_card_finder import (
     SimilarSentenceMistake,
     find_similar_sentence_mistakes,
@@ -45,8 +46,8 @@ def _fetch_sentence_analysis_payload(
 ) -> dict[str, Any] | None:
     with db.get_connection() as conn:
         row = conn.execute(
-            """SELECT sc.id AS card_id, sc.user_translation, sc.user_note,
-                      ac.id AS cache_id, ac.prompt_version, ac.model,
+            """SELECT s.text, sc.id AS card_id, sc.user_translation, sc.user_note,
+                      ac.id AS cache_id, ac.content_hash, ac.prompt_version, ac.model,
                       ac.response_json, ac.is_valid, ac.created_at
                  FROM sentences s
                  JOIN sentence_cards sc
@@ -64,6 +65,11 @@ def _fetch_sentence_analysis_payload(
         db,
         row["user_translation"] or None,
     )
+    current_content_hash = compute_content_hash(
+        row["text"] or "",
+        "",
+        row["user_translation"] or None,
+    )
     similar_mistakes = [
         _serialize_similar_mistake(item)
         for item in find_similar_sentence_mistakes(db, row["card_id"])
@@ -79,7 +85,10 @@ def _fetch_sentence_analysis_payload(
         "active_prompt_version": active_version,
         "model": row["model"],
         "created_at": row["created_at"],
-        "is_stale": row["prompt_version"] != active_version,
+        "is_stale": (
+            row["prompt_version"] != active_version
+            or row["content_hash"] != current_content_hash
+        ),
         "from_cache": True,
         "analysis": analysis,
         "similar_mistakes": similar_mistakes,

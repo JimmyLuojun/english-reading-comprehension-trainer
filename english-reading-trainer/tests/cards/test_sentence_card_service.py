@@ -390,7 +390,7 @@ class TestSaveSentenceTranslation:
         with pytest.raises(ValueError, match="not found"):
             save_sentence_translation(db, 99999, "译文")
 
-    def test_translation_update_clears_stale_analysis_and_errors(
+    def test_translation_update_preserves_stale_analysis_and_clears_errors(
         self, db: DatabaseConnection
     ) -> None:
         sid = _seed_sentence(db)
@@ -426,7 +426,7 @@ class TestSaveSentenceTranslation:
                 "SELECT COUNT(*) FROM sentence_card_errors WHERE card_id = ?",
                 (card_id,),
             ).fetchone()[0]
-        assert card_row["ai_analysis_id"] is None
+        assert card_row["ai_analysis_id"] == cache_id
         assert error_count == 0
 
 

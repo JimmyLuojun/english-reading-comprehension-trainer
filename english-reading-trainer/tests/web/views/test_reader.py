@@ -72,8 +72,30 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
     assert 'title="Translation saved"' in html
     assert 'data-translation="&lt;translation&gt;"' in html
     assert 'data-note="&lt;takeaway&gt;"' in html
+    assert 'data-analysis-id="9"' in html
     assert 'data-word-card="3"' in html
     assert 'data-lexical-type="word"' in html
+
+
+def test_reader_sentence_span_omits_invalid_analysis_id() -> None:
+    html = _reader_sentence_span(
+        {
+            "id": 1,
+            "text": "The cat sat.",
+            "has_card": 1,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "user_note": "",
+            "ai_analysis_id": 9,
+        },
+        2,
+        [],
+    )
+
+    assert 'class="reader-sentence marked"' in html
+    assert 'data-analysis-id=""' in html
+    assert "analyzed" not in html
 
 
 def test_reader_sentence_span_can_show_translation_without_marked_state() -> None:

@@ -67,8 +67,7 @@ def create_sentence_card(
                               SET archived_at = NULL,
                                   user_note = ?,
                                   user_translation = ?,
-                                  translation_created_at = ?,
-                                  ai_analysis_id = NULL
+                                  translation_created_at = ?
                             WHERE id = ?""",
                         (note, cleaned_translation, now, existing["id"]),
                     )
@@ -99,9 +98,11 @@ def save_sentence_translation(
     Store the latest user translation for *sentence_id* and return the card id.
 
     Creates an archived translation record if needed. Re-submission overwrites
-    the previous translation and clears stale AI analysis/error links so the next
-    analysis uses a cache key that includes the latest translation. Saving a
-    translation alone must not add the sentence to the active Review queue.
+    the previous translation and clears stale error links so the next analysis
+    uses a cache key that includes the latest translation. Existing AI analysis
+    remains attached as a stale reference until a fresh check replaces it.
+    Saving a translation alone must not add the sentence to the active Review
+    queue.
     """
     cleaned_translation = user_translation.strip()
     if not cleaned_translation:
@@ -124,8 +125,7 @@ def save_sentence_translation(
                 """UPDATE sentence_cards
                       SET user_note = ?,
                           user_translation = ?,
-                          translation_created_at = ?,
-                          ai_analysis_id = NULL
+                          translation_created_at = ?
                     WHERE id = ?""",
                 (note, cleaned_translation, now, existing["id"]),
             )

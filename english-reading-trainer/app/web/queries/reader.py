@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.ai.ai_response_cache import compute_content_hash
 from app.db_connection import DatabaseConnection
 from app.web.queries.analysis import _active_sentence_prompt_version
 
@@ -20,6 +21,7 @@ def _fetch_chapter_sentences(
                       COALESCE(st.user_translation, '') AS user_translation,
                       COALESCE(st.user_note, '') AS user_note,
                       sc.ai_analysis_id,
+                      ac.content_hash AS analysis_content_hash,
                       ac.prompt_version AS analysis_prompt_version,
                       ac.model AS analysis_model,
                       COALESCE(ac.is_valid, 0) AS analysis_is_valid
@@ -42,10 +44,19 @@ def _fetch_chapter_sentences(
             db,
             row.get("user_translation") or None,
         )
+        current_content_hash = compute_content_hash(
+            row.get("text") or "",
+            "",
+            row.get("user_translation") or None,
+        )
         row["has_analysis"] = 1 if has_analysis else 0
         row["analysis_is_stale"] = (
             1
-            if has_analysis and row.get("analysis_prompt_version") != active_version
+            if has_analysis
+            and (
+                row.get("analysis_prompt_version") != active_version
+                or row.get("analysis_content_hash") != current_content_hash
+            )
             else 0
         )
     return result

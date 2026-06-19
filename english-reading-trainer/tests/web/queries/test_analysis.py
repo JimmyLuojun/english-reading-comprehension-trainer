@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.ai.ai_response_cache import compute_content_hash
 from app.ai.analysis_saver import save_sentence_analysis
 from app.cards.sentence_card_service import create_sentence_card, save_sentence_translation
 from app.cards.word_card_service import create_or_update_word_card
@@ -49,13 +50,18 @@ def _seed_sentences(db: DatabaseConnection, tmp_path: Path, text: str) -> list[i
     return [row["id"] for row in rows]
 
 
-def _insert_cache(db: DatabaseConnection, payload: dict[str, object]) -> int:
+def _insert_cache(
+    db: DatabaseConnection,
+    payload: dict[str, object],
+    *,
+    content_hash: str = "hash",
+) -> int:
     with db.get_connection() as conn:
         return conn.execute(
             """INSERT INTO ai_cache
                (content_hash, prompt_version, model, response_json, is_valid, created_at)
-               VALUES ('hash', 'v1', 'model', ?, 1, '2026-06-17T00:00:00+00:00')""",
-            (json.dumps(payload),),
+               VALUES (?, 'v1', 'model', ?, 1, '2026-06-17T00:00:00+00:00')""",
+            (content_hash, json.dumps(payload)),
         ).lastrowid
 
 
@@ -127,7 +133,11 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
     db.apply_migrations(MIGRATIONS_DIR)
     sentence_id = _seed_sentence(db, tmp_path)
     create_sentence_card(db, sentence_id, user_translation="猫坐着。")
-    cache_id = _insert_cache(db, {"ok": True})
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", "猫坐着。"),
+    )
     with db.get_connection() as conn:
         card_id = conn.execute(
             "SELECT id FROM sentence_cards WHERE sentence_id = ?",
@@ -160,6 +170,32 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
 
     assert word_payload["surface_form"] == "cat"
     assert word_payload["analysis"] == {"ok": True}
+
+
+def test_sentence_analysis_payload_is_stale_when_translation_changes(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    card_id = create_sentence_card(db, sentence_id, user_translation="旧译文。")
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", "旧译文。"),
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    save_sentence_translation(db, sentence_id, "新译文。")
+
+    sentence_payload = _fetch_sentence_analysis_payload(db, sentence_id)
+
+    assert sentence_payload["cache_id"] == cache_id
+    assert sentence_payload["is_stale"] is True
+    assert sentence_payload["user_translation"] == "新译文。"
 
 
 def test_sentence_analysis_payload_includes_similar_translation_mistakes(

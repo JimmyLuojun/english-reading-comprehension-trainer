@@ -195,6 +195,7 @@ def _reader_sentence_span(
         classes.append("translated")
     if row.get("has_analysis"):
         classes.append("analyzed-stale" if row.get("analysis_is_stale") else "analyzed")
+    analysis_id = row.get("ai_analysis_id") if row.get("has_analysis") else ""
     text = _highlight_word_cards(row["text"], word_cards)
     title_attr = ' title="Translation saved"' if "translated" in classes else ""
     return (
@@ -203,7 +204,7 @@ def _reader_sentence_span(
         f'data-chapter-id="{chapter_id}" data-marked="{marked}" '
         f'data-translation="{_escape(row.get("user_translation", ""))}" '
         f'data-note="{_escape(row.get("user_note", ""))}" '
-        f'data-analysis-id="{_escape(row.get("ai_analysis_id") or "")}" '
+        f'data-analysis-id="{_escape(analysis_id or "")}" '
         f'data-analysis-stale="{int(row.get("analysis_is_stale") or 0)}">'
         f'{text}</span>'
     )

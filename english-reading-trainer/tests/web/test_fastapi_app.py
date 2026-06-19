@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai.ai_response_cache import compute_content_hash
 from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import import_epub
@@ -197,12 +198,23 @@ def _attach_sentence_analysis(
     prompt_version: str = "v3",
 ) -> int:
     with db.get_connection() as conn:
+        sentence = conn.execute(
+            """SELECT s.text, COALESCE(sc.user_translation, '') AS user_translation
+                 FROM sentences s
+                 LEFT JOIN sentence_cards sc ON sc.sentence_id = s.id
+                WHERE s.id = ?""",
+            (sentence_id,),
+        ).fetchone()
         cache_id = conn.execute(
             """INSERT INTO ai_cache
                (content_hash, prompt_version, model, response_json, is_valid, created_at)
                VALUES (?, ?, 'manual', ?, 1, ?)""",
             (
-                f"analysis-{sentence_id}-{prompt_version}",
+                compute_content_hash(
+                    sentence["text"],
+                    "",
+                    sentence["user_translation"] or None,
+                ),
                 prompt_version,
                 json.dumps(_VALID_SENTENCE_ANALYSIS),
                 datetime.now(timezone.utc).isoformat(),
