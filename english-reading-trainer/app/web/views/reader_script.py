@@ -58,6 +58,10 @@ def _selection_script() -> str:
       const panelTitle = document.getElementById("analysis-panel-title");
       const panelMeta = document.getElementById("analysis-panel-meta");
       const panelStatus = document.getElementById("analysis-panel-status");
+      const copyAll = document.getElementById("analysis-copy-all");
+      const copySource = document.getElementById("analysis-copy-source");
+      const copyAnalysis = document.getElementById("analysis-copy-analysis");
+      const copyStatus = document.getElementById("analysis-copy-status");
       const wordPronunciation = document.getElementById("analysis-word-pronunciation");
       const sentenceSections = document.getElementById("analysis-sentence-sections");
       const wordSections = document.getElementById("analysis-word-sections");
@@ -66,8 +70,11 @@ def _selection_script() -> str:
       const blockingPoint = document.getElementById("analysis-blocking-point");
       const skeleton = document.getElementById("analysis-skeleton");
       const clauses = document.getElementById("analysis-clauses");
+      const modifiersSection = document.getElementById("analysis-modifiers-section");
       const modifiers = document.getElementById("analysis-modifiers");
+      const logicMarkersSection = document.getElementById("analysis-logic-markers-section");
       const logicMarkers = document.getElementById("analysis-logic-markers");
+      const anaphoraSection = document.getElementById("analysis-anaphora-section");
       const anaphora = document.getElementById("analysis-anaphora");
       const diagnosis = document.getElementById("analysis-diagnosis");
       const backToWhole = document.getElementById("analysis-back-to-whole");
@@ -167,7 +174,10 @@ def _selection_script() -> str:
       let progressTimer = null;
       let toolbarHideTimer = null;
       let analysisWordActionInProgress = false;
+      let readerToolbarBusy = false;
+      let toolbarInteractionSeq = 0;
       let activeSelectionAnalysisContextText = "";
+      let copyStatusTimer = null;
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
@@ -345,6 +355,12 @@ def _selection_script() -> str:
       function hideToolbarUnlessEditing() {
         if (translationEditorOpen) return;
         hideToolbar();
+      }
+
+      function maybeHideToolbarAfterRender(seqAtRequest) {
+        if (readerToolbarBusy) return;
+        if (seqAtRequest !== toolbarInteractionSeq) return;
+        hideToolbarUnlessEditing();
       }
 
       function setVisible(element, visible) {
@@ -545,6 +561,7 @@ def _selection_script() -> str:
       function positionToolbar(anchor) {
         clearScheduledToolbarHide();
         toolbar.hidden = false;
+        toolbarInteractionSeq += 1;
         requestAnimationFrame(() => {
           const toolbarRect = toolbar.getBoundingClientRect();
           const viewportPadding = 8;
@@ -639,6 +656,176 @@ def _selection_script() -> str:
         if (sentencePanelNoteStatus) {
           sentencePanelNoteStatus.textContent = "Suggestion inserted. Edit or save it.";
         }
+      }
+
+      function sentenceTextForId(sentenceId) {
+        return normalizeText(document.getElementById(`sentence-${sentenceId}`)?.textContent || "");
+      }
+
+      function appendCopyLine(lines, label, value) {
+        const text = Array.isArray(value)
+          ? value.filter(Boolean).join("; ")
+          : String(value || "").trim();
+        if (text) lines.push(`${label}: ${text}`);
+      }
+
+      function appendCopyItems(lines, label, items, formatter) {
+        const formatted = (items || []).map(formatter).filter(Boolean);
+        if (formatted.length) lines.push(`${label}:\n- ${formatted.join("\n- ")}`);
+      }
+
+      function buildSentenceSourceCopyText(payload) {
+        const lines = [];
+        appendCopyLine(lines, "Original sentence", sentenceTextForId(payload.sentence_id));
+        appendCopyLine(lines, "Your translation", payload.user_translation);
+        return lines;
+      }
+
+      function buildSentenceAnalysisCopyText(payload) {
+        const analysis = payload.analysis || {};
+        const lines = [];
+        appendCopyLine(lines, "Simplified English", analysis.simplified_en);
+        appendCopyLine(lines, "Chinese meaning", analysis.chinese_gloss);
+        appendCopyLine(lines, "Blocking point", analysis.blocking_point);
+        appendCopyLine(lines, "Subject skeleton", analysis.subject_skeleton);
+        appendCopyItems(lines, "Clauses", analysis.clauses, (item) => {
+          const type = item.type ? `${item.type}: ` : "";
+          const role = item.role ? ` — ${item.role}` : "";
+          return `${type}${item.text || ""}${role}`.trim();
+        });
+        appendCopyItems(lines, "Modifiers", analysis.modifiers, (item) => {
+          const modifier = item.modifier || "";
+          const target = item.target || "";
+          const type = item.type ? ` (${item.type})` : "";
+          return `${modifier} -> ${target}${type}`.trim();
+        });
+        appendCopyItems(lines, "Logic markers", analysis.logic_markers, (item) => {
+          return `${item.marker || ""} -> ${item.function || ""}`.trim();
+        });
+        appendCopyItems(lines, "Anaphora", analysis.anaphora, (item) => {
+          return `${item.pronoun || ""} -> ${item.refers_to || ""}`.trim();
+        });
+        appendCopyLine(
+          lines,
+          "Diagnosis basis",
+          analysis.diagnosis_basis === "user_translation"
+            ? "Based on your translation"
+            : "Predicted without a translation",
+        );
+        const errorCodes = analysis.diagnosis_basis === "user_translation"
+          ? analysis.diagnosed_error_types
+          : analysis.predicted_error_types;
+        appendCopyLine(lines, "Error types", (errorCodes || []).map((code) => ERROR_CODE_LABELS[code] || code));
+        appendCopyItems(lines, "Diagnosis evidence", analysis.diagnosis_evidence, (item) => {
+          const code = item.error_type ? `${ERROR_CODE_LABELS[item.error_type] || item.error_type}: ` : "";
+          return `${code}${item.evidence || ""}`.trim();
+        });
+        appendCopyItems(lines, "Similar past mistakes", payload.similar_mistakes, (item) => {
+          const codes = (item.shared_error_codes || []).map((code) => ERROR_CODE_LABELS[code] || code).join(", ");
+          const sentence = item.sentence_text || "";
+          return [codes, sentence].filter(Boolean).join(" | ");
+        });
+        appendCopyLine(lines, "Takeaway suggestion", analysis.takeaway_suggestion);
+        appendCopyLine(lines, "Takeaway", payload.user_note);
+        return lines;
+      }
+
+      function buildSentenceCopyText(payload, kind) {
+        const source = buildSentenceSourceCopyText(payload);
+        const analysis = buildSentenceAnalysisCopyText(payload);
+        if (kind === "source") return source;
+        if (kind === "analysis") return analysis;
+        return source.concat(analysis);
+      }
+
+      function buildWordSourceCopyText(payload) {
+        const lines = [];
+        appendCopyLine(lines, "Word or phrase", payload.surface_form || payload.lemma);
+        appendCopyLine(lines, "Source sentence", sentenceTextForId(payload.sentence_id));
+        appendCopyLine(lines, "Context", wordAnalysisContextByCardId.get(String(payload.card_id || "")));
+        return lines;
+      }
+
+      function buildWordAnalysisCopyText(payload) {
+        const analysis = payload.analysis || {};
+        const lines = [];
+        appendCopyLine(lines, "In this sentence", analysis.role_in_sentence);
+        appendCopyLine(lines, "Meaning in context", analysis.meaning_in_context);
+        appendCopyLine(lines, "Chinese meaning", analysis.chinese_meaning || analysis.chinese_gloss);
+        appendCopyLine(lines, "Register", analysis.register);
+        appendCopyLine(lines, "Why this word", analysis.why_this_word);
+        appendCopyItems(lines, "vs. simpler alternatives", analysis.vs_simpler, (item) => {
+          return `${item.simpler || ""}: ${item.difference || ""}`.trim();
+        });
+        const check = analysis.learner_note_check || {};
+        appendCopyLine(
+          lines,
+          "Takeaway check",
+          [check.status, check.feedback, check.corrected_understanding].filter(Boolean).join(" "),
+        );
+        const root = analysis.morphology?.root || "";
+        const family = (analysis.morphology?.family || []).join(", ");
+        appendCopyLine(lines, "Morphology", root ? (family ? `${root} -> ${family}` : root) : family);
+        appendCopyLine(
+          lines,
+          "Predicted error types",
+          (analysis.predicted_error_types || []).map((code) => ERROR_CODE_LABELS[code] || code),
+        );
+        appendCopyLine(lines, "Definition", wordPanelMeaning?.value);
+        appendCopyLine(lines, "Takeaway", wordPanelNote?.value);
+        return lines;
+      }
+
+      function buildWordCopyText(payload, kind) {
+        const source = buildWordSourceCopyText(payload);
+        const analysis = buildWordAnalysisCopyText(payload);
+        if (kind === "source") return source;
+        if (kind === "analysis") return analysis;
+        return source.concat(analysis);
+      }
+
+      function setCopyStatus(message) {
+        if (!copyStatus) return;
+        copyStatus.textContent = message;
+        if (copyStatusTimer !== null) window.clearTimeout(copyStatusTimer);
+        copyStatusTimer = window.setTimeout(() => {
+          copyStatusTimer = null;
+          if (copyStatus) copyStatus.textContent = "";
+        }, 1500);
+      }
+
+      async function writeClipboard(text) {
+        if (!text.trim()) {
+          setCopyStatus("Nothing to copy");
+          return;
+        }
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+          await navigator.clipboard.writeText(text);
+          setCopyStatus("Copied");
+        } catch {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          const copied = document.execCommand("copy");
+          textarea.remove();
+          setCopyStatus(copied ? "Copied" : "Copy failed");
+        }
+      }
+
+      function copyAnalysisPayload(kind) {
+        if (!activeAnalysisPayload) {
+          setCopyStatus("Nothing to copy");
+          return;
+        }
+        const isWord = panelMode === "word" || (activeAnalysisLabel && activeAnalysisLabel !== "sentence");
+        const parts = isWord
+          ? buildWordCopyText(activeAnalysisPayload, kind)
+          : buildSentenceCopyText(activeAnalysisPayload, kind);
+        writeClipboard(parts.filter(Boolean).join("\n"));
       }
 
       function showWordDetail(span) {
@@ -857,6 +1044,7 @@ def _selection_script() -> str:
           lexical_type: lexicalType,
           return_to: returnTo,
         });
+        readerToolbarBusy = true;
         try {
           const response = await fetch("/mark/word", {
             method: "POST",
@@ -883,6 +1071,8 @@ def _selection_script() -> str:
           restoreReadingAnchor(anchor);
         } catch {
           window.location.assign(returnTo);
+        } finally {
+          readerToolbarBusy = false;
         }
       }
 
@@ -1080,24 +1270,29 @@ def _selection_script() -> str:
         const ids = cardIds.filter(Boolean);
         if (!ids.length) return;
         const anchor = captureReadingAnchor(wordDetailRemove);
-        for (const cardId of ids) {
-          const separator = `/mark/word/${cardId}`.includes("?") ? "&" : "?";
-          const response = await fetch(
-            `/mark/word/${cardId}${separator}return_to=${encodeURIComponent(returnTo)}`,
-            { method: "DELETE" },
-          );
-          if (!response.ok) {
-            window.location.assign(response.url || returnTo);
-            return;
+        readerToolbarBusy = true;
+        try {
+          for (const cardId of ids) {
+            const separator = `/mark/word/${cardId}`.includes("?") ? "&" : "?";
+            const response = await fetch(
+              `/mark/word/${cardId}${separator}return_to=${encodeURIComponent(returnTo)}`,
+              { method: "DELETE" },
+            );
+            if (!response.ok) {
+              window.location.assign(response.url || returnTo);
+              return;
+            }
           }
+          ids.forEach((cardId) => {
+            unregisterWordCard(cardId);
+            reader.querySelectorAll(`[data-word-card="${cardId}"]`).forEach(clearWordCardElement);
+          });
+          window.getSelection()?.removeAllRanges();
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+        } finally {
+          readerToolbarBusy = false;
         }
-        ids.forEach((cardId) => {
-          unregisterWordCard(cardId);
-          reader.querySelectorAll(`[data-word-card="${cardId}"]`).forEach(clearWordCardElement);
-        });
-        window.getSelection()?.removeAllRanges();
-        hideToolbar();
-        restoreReadingAnchor(anchor);
       }
 
       async function deleteAnalysisWordCardInPlace(cardId) {
@@ -1146,6 +1341,7 @@ def _selection_script() -> str:
         if (!sentenceId) return;
         const anchor = captureReadingAnchor();
         const body = new URLSearchParams({ return_to: returnTo });
+        readerToolbarBusy = true;
         try {
           const response = await fetch(`/mark/sentence/${sentenceId}`, {
             method: "POST",
@@ -1162,6 +1358,8 @@ def _selection_script() -> str:
           restoreReadingAnchor(anchor);
         } catch {
           window.location.assign(returnTo);
+        } finally {
+          readerToolbarBusy = false;
         }
       }
 
@@ -1170,22 +1368,27 @@ def _selection_script() -> str:
         if (!ids.length) return;
         const anchor = captureReadingAnchor();
         ids.forEach(markSentenceSpanUnmarked);
-        const requests = ids.map((sentenceId) => {
-          const url = `/mark/sentence/${sentenceId}?return_to=${encodeURIComponent(returnTo)}`;
-          return fetch(url, { method: "DELETE" }).then((response) => ({
-            sentenceId,
-            response,
-          }));
-        });
-        const results = await Promise.all(requests);
-        const failed = results.find((result) => !result.response.ok);
-        if (failed) {
-          window.location.assign(failed.response.url || returnTo);
-          return;
+        readerToolbarBusy = true;
+        try {
+          const requests = ids.map((sentenceId) => {
+            const url = `/mark/sentence/${sentenceId}?return_to=${encodeURIComponent(returnTo)}`;
+            return fetch(url, { method: "DELETE" }).then((response) => ({
+              sentenceId,
+              response,
+            }));
+          });
+          const results = await Promise.all(requests);
+          const failed = results.find((result) => !result.response.ok);
+          if (failed) {
+            window.location.assign(failed.response.url || returnTo);
+            return;
+          }
+          window.getSelection()?.removeAllRanges();
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+        } finally {
+          readerToolbarBusy = false;
         }
-        window.getSelection()?.removeAllRanges();
-        hideToolbar();
-        restoreReadingAnchor(anchor);
       }
 
       function openTranslationEditor() {
@@ -1214,6 +1417,7 @@ def _selection_script() -> str:
         const anchor = captureReadingAnchor();
         translationStatus.textContent = "Saving...";
         const body = new URLSearchParams({ user_translation: value, return_to: returnTo });
+        readerToolbarBusy = true;
         try {
           const response = await fetch(`/mark/sentence/${activeSentenceId}/translation`, {
             method: "POST",
@@ -1232,6 +1436,8 @@ def _selection_script() -> str:
           restoreReadingAnchor(anchor);
         } catch {
           window.location.assign(returnTo);
+        } finally {
+          readerToolbarBusy = false;
         }
       }
 
@@ -1239,6 +1445,7 @@ def _selection_script() -> str:
         if (!activeSentenceId) return;
         const sentenceId = activeSentenceId;
         const anchor = captureReadingAnchor(translationDelete);
+        readerToolbarBusy = true;
         try {
           const url = `/mark/sentence/${sentenceId}/translation?return_to=${encodeURIComponent(returnTo)}`;
           const response = await fetch(url, { method: "DELETE" });
@@ -1254,6 +1461,8 @@ def _selection_script() -> str:
           restoreReadingAnchor(anchor);
         } catch {
           window.location.assign(returnTo);
+        } finally {
+          readerToolbarBusy = false;
         }
       }
 
@@ -1463,6 +1672,9 @@ def _selection_script() -> str:
         if (modifiers) modifiers.replaceChildren();
         if (logicMarkers) logicMarkers.replaceChildren();
         if (anaphora) anaphora.replaceChildren();
+        if (modifiersSection) modifiersSection.hidden = true;
+        if (logicMarkersSection) logicMarkersSection.hidden = true;
+        if (anaphoraSection) anaphoraSection.hidden = true;
         if (backToWhole) backToWhole.textContent = "";
       }
 
@@ -1485,6 +1697,11 @@ def _selection_script() -> str:
         }
       }
 
+      function toggleAnalysisSection(section, items) {
+        if (!section) return;
+        section.hidden = !items.length;
+      }
+
       function renderSentenceStructure(analysis) {
         if (clauses) {
           appendAnalysisList(clauses, analysis.clauses || [], (item) => {
@@ -1493,6 +1710,7 @@ def _selection_script() -> str:
             return `${type}${item.text || ""}${role}`;
           });
         }
+        toggleAnalysisSection(modifiersSection, analysis.modifiers || []);
         if (modifiers) {
           appendAnalysisList(modifiers, analysis.modifiers || [], (item) => {
             const target = item.target || "";
@@ -1501,11 +1719,13 @@ def _selection_script() -> str:
             return `${modifier} → ${target}${type}`;
           });
         }
+        toggleAnalysisSection(logicMarkersSection, analysis.logic_markers || []);
         if (logicMarkers) {
           appendAnalysisList(logicMarkers, analysis.logic_markers || [], (item) => {
             return `${item.marker || ""} → ${item.function || ""}`;
           });
         }
+        toggleAnalysisSection(anaphoraSection, analysis.anaphora || []);
         if (anaphora) {
           appendAnalysisList(anaphora, analysis.anaphora || [], (item) => {
             return `${item.pronoun || ""} → ${item.refers_to || ""}`;
@@ -1513,8 +1733,8 @@ def _selection_script() -> str:
         }
       }
 
-      function renderSentenceStudyPanel(sentence, message) {
-        hideToolbarUnlessEditing();
+      function renderSentenceStudyPanel(sentence, message, seqAtRequest = toolbarInteractionSeq) {
+        maybeHideToolbarAfterRender(seqAtRequest);
         const sentenceId = sentence?.dataset.sentenceId || "";
         activeAnalysisPayload = {
           sentence_id: sentenceId,
@@ -1539,9 +1759,9 @@ def _selection_script() -> str:
         setSentenceStudyFields(activeAnalysisPayload);
       }
 
-      function renderAnalysisPayload(payload) {
+      function renderAnalysisPayload(payload, seqAtRequest = toolbarInteractionSeq) {
         const analysis = payload.analysis || {};
-        hideToolbarUnlessEditing();
+        maybeHideToolbarAfterRender(seqAtRequest);
         activeAnalysisPayload = payload;
         activeAnalysisLabel = "sentence";
         activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
@@ -1702,6 +1922,7 @@ def _selection_script() -> str:
       async function loadSavedAnalysis(sentenceId) {
         activeAnalysisSentenceId = sentenceId;
         clearAnalysisHistory();
+        const seqAtRequest = toolbarInteractionSeq;
         setPanelLoading("Loading analysis...");
         try {
           const response = await fetch(`/analysis/sentence/${sentenceId}`);
@@ -1710,7 +1931,7 @@ def _selection_script() -> str:
             renderAnalysisError(payload.error || "No saved analysis found.", Boolean(payload.retry));
             return;
           }
-          renderAnalysisPayload(payload);
+          renderAnalysisPayload(payload, seqAtRequest);
         } catch (error) {
           renderAnalysisError(`Could not load analysis: ${error}`, true);
         }
@@ -1719,11 +1940,13 @@ def _selection_script() -> str:
       async function requestAnalysis(sentenceId, translation, options = {}) {
         activeAnalysisSentenceId = sentenceId;
         clearAnalysisHistory();
+        const seqAtRequest = toolbarInteractionSeq;
         setPanelLoading(options.preferPro ? "Analyzing sentence with Pro..." : "Analyzing sentence...");
         const params = new URLSearchParams();
         params.set("return_to", returnTo);
         if (translation && translation.trim()) params.set("user_translation", translation.trim());
         if (options.preferPro) params.set("prefer_pro", "1");
+        if (options.forceRefresh) params.set("force_refresh", "1");
         try {
           const response = await fetch(`/analysis/sentence/${sentenceId}`, {
             method: "POST",
@@ -1736,7 +1959,7 @@ def _selection_script() -> str:
             return;
           }
           updateSentenceAnalysisState(sentenceId, payload);
-          renderAnalysisPayload(payload);
+          renderAnalysisPayload(payload, seqAtRequest);
         } catch (error) {
           renderAnalysisError(`Analysis failed: ${error}`, true);
         }
@@ -1809,9 +2032,9 @@ def _selection_script() -> str:
         applyGlossaryHighlights(container);
       }
 
-      function renderWordAnalysis(payload) {
+      function renderWordAnalysis(payload, seqAtRequest = toolbarInteractionSeq) {
         const a = payload.analysis || {};
-        hideToolbarUnlessEditing();
+        maybeHideToolbarAfterRender(seqAtRequest);
         activeAnalysisPayload = payload;
         activeAnalysisLabel = (payload.surface_form || payload.lemma || "word").trim();
         activeAnalysisWordCardId = String(payload.card_id || "");
@@ -1940,11 +2163,13 @@ def _selection_script() -> str:
         const contextText = normalizeContextText(
           options.contextText || wordAnalysisContextByCardId.get(String(cardId)) || "",
         );
+        const seqAtRequest = toolbarInteractionSeq;
         setPanelLoadingWord(options.preferPro ? "Analyzing word with Pro..." : "Analyzing word...");
         hideToolbar();
         try {
           const body = new URLSearchParams();
           if (options.preferPro) body.set("prefer_pro", "1");
+          if (options.forceRefresh) body.set("force_refresh", "1");
           if (contextText) body.set("context_text", contextText);
           const response = await fetch(`/analysis/word/${cardId}`, {
             method: "POST",
@@ -1956,7 +2181,7 @@ def _selection_script() -> str:
             renderWordAnalysisError(payload.error || "Word analysis failed.", Boolean(payload.retry));
             return;
           }
-          renderWordAnalysis(payload);
+          renderWordAnalysis(payload, seqAtRequest);
         } catch (error) {
           renderWordAnalysisError(`Word analysis failed: ${error}`, true);
         }
@@ -1966,6 +2191,7 @@ def _selection_script() -> str:
         if (!cardId) return;
         clearAnalysisHistory();
         activeAnalysisWordCardId = cardId;
+        const seqAtRequest = toolbarInteractionSeq;
         setPanelLoadingWord("Loading word analysis...");
         hideToolbar();
         try {
@@ -1975,7 +2201,7 @@ def _selection_script() -> str:
             renderWordAnalysisError(payload.error || "No saved word analysis found.", Boolean(payload.retry));
             return;
           }
-          renderWordAnalysis(payload);
+          renderWordAnalysis(payload, seqAtRequest);
         } catch (error) {
           renderWordAnalysisError(`Could not load word analysis: ${error}`, true);
         }
@@ -2091,6 +2317,9 @@ def _selection_script() -> str:
       if (panelTab) {
         panelTab.addEventListener("click", openPanelPlaceholder);
       }
+      if (copyAll) copyAll.addEventListener("click", () => copyAnalysisPayload("all"));
+      if (copySource) copySource.addEventListener("click", () => copyAnalysisPayload("source"));
+      if (copyAnalysis) copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"));
       if (panelPrevious) {
         panelPrevious.addEventListener("click", restorePreviousAnalysis);
       }
@@ -2168,20 +2397,27 @@ def _selection_script() -> str:
       });
       panelRetry.addEventListener("click", () => {
         if (panelMode === "word" && activeAnalysisWordCardId) {
-          requestWordAnalysis(activeAnalysisWordCardId);
+          requestWordAnalysis(activeAnalysisWordCardId, { forceRefresh: true });
         } else if (activeAnalysisSentenceId) {
-          requestAnalysis(activeAnalysisSentenceId, sentencePanelTranslation?.value || null);
+          requestAnalysis(
+            activeAnalysisSentenceId,
+            sentencePanelTranslation?.value || null,
+            { forceRefresh: true },
+          );
         }
       });
       if (panelRetryPro) {
         panelRetryPro.addEventListener("click", () => {
           if (panelMode === "word" && activeAnalysisWordCardId) {
-            requestWordAnalysis(activeAnalysisWordCardId, { preferPro: true });
+            requestWordAnalysis(
+              activeAnalysisWordCardId,
+              { preferPro: true, forceRefresh: true },
+            );
           } else if (activeAnalysisSentenceId) {
             requestAnalysis(
               activeAnalysisSentenceId,
               sentencePanelTranslation?.value || null,
-              { preferPro: true },
+              { preferPro: true, forceRefresh: true },
             );
           }
         });
@@ -2192,13 +2428,18 @@ def _selection_script() -> str:
         const meaning = wordDetailMeaning.value;
         const note = wordDetailNote.value;
         const body = new URLSearchParams({ current_meaning: meaning, user_note: note });
-        const resp = await fetch(`/mark/word/${cardId}`, { method: "PATCH", body });
-        if (resp.ok) {
-          updateWordCardElements(cardId, meaning, note);
-          if (options.hideAfter !== false) hideToolbar();
-          return true;
+        readerToolbarBusy = true;
+        try {
+          const resp = await fetch(`/mark/word/${cardId}`, { method: "PATCH", body });
+          if (resp.ok) {
+            updateWordCardElements(cardId, meaning, note);
+            if (options.hideAfter !== false) hideToolbar();
+            return true;
+          }
+          return false;
+        } finally {
+          readerToolbarBusy = false;
         }
-        return false;
       }
       wordDetailSave.addEventListener("click", () => {
         saveWordDetailEdits();

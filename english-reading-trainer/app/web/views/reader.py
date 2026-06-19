@@ -354,6 +354,12 @@ def _analysis_panel() -> str:
               aria-label="Play pronunciation"
               hidden>▶</button>
           </div>
+          <div class="analysis-copy-row">
+            <button id="analysis-copy-all" type="button" class="copy-button">Copy all</button>
+            <button id="analysis-copy-source" type="button" class="copy-button">Copy source</button>
+            <button id="analysis-copy-analysis" type="button" class="copy-button">Copy analysis</button>
+            <span id="analysis-copy-status" class="copy-status" aria-live="polite"></span>
+          </div>
           <p id="analysis-panel-meta" class="muted"></p>
         </div>
         <button id="analysis-panel-close" type="button">Close panel</button>
@@ -378,12 +384,18 @@ def _analysis_panel() -> str:
           <p id="analysis-skeleton" class="analysis-text"></p>
           <h4><span class="section-label-zh">从句</span><span class="section-label-en">Clauses</span></h4>
           <div id="analysis-clauses"></div>
-          <h4><span class="section-label-zh">修饰成分</span><span class="section-label-en">Modifiers</span></h4>
-          <div id="analysis-modifiers"></div>
-          <h4><span class="section-label-zh">逻辑连接词</span><span class="section-label-en">Logic markers</span></h4>
-          <div id="analysis-logic-markers"></div>
-          <h4><span class="section-label-zh">指代关系</span><span class="section-label-en">Anaphora</span></h4>
-          <div id="analysis-anaphora"></div>
+          <div id="analysis-modifiers-section">
+            <h4><span class="section-label-zh">修饰成分</span><span class="section-label-en">Modifiers</span></h4>
+            <div id="analysis-modifiers"></div>
+          </div>
+          <div id="analysis-logic-markers-section">
+            <h4><span class="section-label-zh">逻辑连接词</span><span class="section-label-en">Logic markers</span></h4>
+            <div id="analysis-logic-markers"></div>
+          </div>
+          <div id="analysis-anaphora-section">
+            <h4><span class="section-label-zh">指代关系</span><span class="section-label-en">Anaphora</span></h4>
+            <div id="analysis-anaphora"></div>
+          </div>
         </section>
         <section class="analysis-section">
           <h3><span class="section-label-zh">问题诊断</span><span class="section-label-en">Diagnosis</span></h3>

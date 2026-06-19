@@ -533,6 +533,22 @@ def _css() -> str:
       align-items: center;
       flex-wrap: wrap;
     }
+    .analysis-copy-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .analysis-copy-row .copy-button {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    .copy-status {
+      color: var(--muted);
+      font-size: 12px;
+      min-height: 1em;
+    }
     .panel-kicker {
       margin: 0 0 2px;
       color: var(--muted);

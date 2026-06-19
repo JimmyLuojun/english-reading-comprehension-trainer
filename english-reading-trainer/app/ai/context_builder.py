@@ -23,6 +23,8 @@ _MIGRATIONS   = _PROJECT_ROOT / "migrations"
 
 _CONTEXT_WINDOW = 2   # sentences before/after to include as context
 _MAX_RELATED    = 5   # max related cards to include in prompt
+_SENTENCE_PROMPT_VERSION = "v4"
+_WORD_PROMPT_VERSION = "v5"
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +51,7 @@ def build_sentence_prompt(
         if cleaned_translation
         else "sentence_analysis_predict"
     )
-    template = _load_prompt(prompt_name, "v3")
+    template = _load_prompt(prompt_name, _SENTENCE_PROMPT_VERSION)
     return _render(template, {
         "sentence":        ctx["sentence_text"],
         "context":         ctx["context"],
@@ -70,7 +72,7 @@ def build_word_prompt(
     as it appears in *sentence_id*.
     """
     ctx = _fetch_sentence_context(db, sentence_id)
-    template = _load_prompt("word_analysis", "v5")
+    template = _load_prompt("word_analysis", _WORD_PROMPT_VERSION)
     return _render(template, {
         "surface_form":    surface_form,
         "sentence":        ctx["sentence_text"],

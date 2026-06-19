@@ -119,13 +119,18 @@ def save_to_cache(
     model: str,
     response_json: str,
     is_valid: bool,
+    *,
+    replace_valid: bool = False,
 ) -> int:
     """
     Insert a new cache entry. Returns the cache row id.
 
     The UNIQUE(content_hash, prompt_version, model) constraint means a failed
     LLM attempt can occupy the same key as a later retry. Keep valid cached
-    entries stable, but allow a later valid response to replace an invalid row.
+    entries stable by default, but allow a later valid response to replace an
+    invalid row. When *replace_valid* is true, a new valid response may also
+    replace an existing valid row for explicit force-refresh actions; invalid
+    responses still never overwrite valid cached data.
     """
     now = datetime.now(timezone.utc).isoformat()
 
@@ -140,9 +145,10 @@ def save_to_cache(
                    response_json = excluded.response_json,
                    is_valid = excluded.is_valid,
                    created_at = excluded.created_at
-               WHERE ai_cache.is_valid = 0""",
+               WHERE ai_cache.is_valid = 0
+                  OR (? = 1 AND excluded.is_valid = 1)""",
             (content_hash, prompt_version, model,
-             response_json, 1 if is_valid else 0, now),
+             response_json, 1 if is_valid else 0, now, 1 if replace_valid else 0),
         )
         row = conn.execute(
             """SELECT id FROM ai_cache

@@ -29,7 +29,7 @@ from app.db_connection import DatabaseConnection
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
-_PROMPT_VERSION = "v3"
+_PROMPT_VERSION = "v4"
 
 # Correction suffix appended on retry to guide the LLM back on track
 _RETRY_SUFFIX = (
@@ -62,6 +62,7 @@ def analyze_sentence(
     user_translation: str | None = None,
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
+    force_refresh: bool = False,
 ) -> SentenceAnalysisResult:
     """
     Analyse *sentence_text* and return a structured result.
@@ -75,7 +76,7 @@ def analyze_sentence(
     content_hash = compute_content_hash(sentence_text, context, cleaned_translation)
 
     # --- Cache check ---
-    cached = get_cached(db, content_hash, prompt_version, model)
+    cached = None if force_refresh else get_cached(db, content_hash, prompt_version, model)
     if cached is not None:
         return SentenceAnalysisResult(
             data=cached.data,
@@ -111,7 +112,13 @@ def analyze_sentence(
     response_json = json.dumps(data) if is_valid else raw
 
     cache_id = save_to_cache(
-        db, content_hash, prompt_version, model, response_json, is_valid
+        db,
+        content_hash,
+        prompt_version,
+        model,
+        response_json,
+        is_valid,
+        replace_valid=force_refresh,
     )
 
     return SentenceAnalysisResult(

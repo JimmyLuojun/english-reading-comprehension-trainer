@@ -194,6 +194,49 @@ class TestSaveToCache:
         assert result.is_valid is True
         assert result.data == json.loads(_SAMPLE_RESPONSE)
 
+    def test_replace_valid_updates_existing_valid_row(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("force refreshed sentence.")
+        updated_response = json.dumps({"subject_skeleton": "The dog ran", "confidence": 0.8})
+        cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)
+        cid2 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            updated_response,
+            True,
+            replace_valid=True,
+        )
+
+        assert cid1 == cid2
+        result = get_cached(db, h, _PROMPT_V1, _MODEL)
+        assert result is not None
+        assert result.data == json.loads(updated_response)
+
+    def test_replace_valid_does_not_let_invalid_response_replace_valid_row(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("force refreshed invalid sentence.")
+        cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)
+        cid2 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            "bad json",
+            False,
+            replace_valid=True,
+        )
+
+        assert cid1 == cid2
+        result = get_cached(db, h, _PROMPT_V1, _MODEL)
+        assert result is not None
+        assert result.data == json.loads(_SAMPLE_RESPONSE)
+
     def test_different_prompt_version_creates_new_row(self, db: DatabaseConnection) -> None:
         h = compute_content_hash("version test sentence.")
         cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)

@@ -46,6 +46,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             sentence_id,
             user_translation=form.get("user_translation"),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
+            force_refresh=_truthy_form_value(form.get("force_refresh")),
         )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
@@ -69,6 +70,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             card_id,
             context_text=form.get("context_text", ""),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
+            force_refresh=_truthy_form_value(form.get("force_refresh")),
         )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)

@@ -23,8 +23,8 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v3.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v3.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v4.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v4.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
@@ -32,6 +32,8 @@ SENTENCE_ANALYSIS_PREDICT_V1 = PROMPTS_DIR / "sentence_analysis_predict.v1.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V1 = PROMPTS_DIR / "sentence_analysis_diagnose.v1.md"
 SENTENCE_ANALYSIS_PREDICT_V2 = PROMPTS_DIR / "sentence_analysis_predict.v2.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V2 = PROMPTS_DIR / "sentence_analysis_diagnose.v2.md"
+SENTENCE_ANALYSIS_PREDICT_V3 = PROMPTS_DIR / "sentence_analysis_predict.v3.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V3 = PROMPTS_DIR / "sentence_analysis_diagnose.v3.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
@@ -158,8 +160,8 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v3"),
-        ("sentence_analysis_diagnose", "v3"),
+        ("sentence_analysis_predict", "v4"),
+        ("sentence_analysis_diagnose", "v4"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
@@ -281,6 +283,17 @@ class TestJSONSchemaFieldsInPrompts:
     def test_historical_sentence_prompt_v2_files_remain(self) -> None:
         assert SENTENCE_ANALYSIS_PREDICT_V2.exists()
         assert SENTENCE_ANALYSIS_DIAGNOSE_V2.exists()
+
+    def test_historical_sentence_prompt_v3_files_remain(self) -> None:
+        assert SENTENCE_ANALYSIS_PREDICT_V3.exists()
+        assert SENTENCE_ANALYSIS_DIAGNOSE_V3.exists()
+
+    def test_current_sentence_prompt_v4_requires_modifier_details(self) -> None:
+        for name in ["sentence_analysis_predict", "sentence_analysis_diagnose"]:
+            text = _read(name)
+            assert "version: v4" in text
+            assert "a chain of digital signatures" in text
+            assert "Use empty `modifiers: []` only when" in text
 
 
 # ---------------------------------------------------------------------------

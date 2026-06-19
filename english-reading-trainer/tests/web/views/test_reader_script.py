@@ -75,7 +75,7 @@ def test_source_word_card_param_loads_saved_word_analysis() -> None:
 
     assert 'initialParams.get("word_card")' in script
     assert 'fetch(`/analysis/word/${cardId}`)' in load_saved
-    assert "renderWordAnalysis(payload);" in load_saved
+    assert "renderWordAnalysis(payload, seqAtRequest);" in load_saved
     assert "if (initialWordCardId)" in boot
     assert "loadSavedWordAnalysis(initialWordCardId)" in boot
 
@@ -109,6 +109,9 @@ def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
     assert 'document.getElementById("sentence-panel-translation")' in script
     assert 'document.getElementById("analysis-blocking-point")' in script
     assert 'document.getElementById("analysis-clauses")' in script
+    assert 'document.getElementById("analysis-modifiers-section")' in script
+    assert 'document.getElementById("analysis-logic-markers-section")' in script
+    assert 'document.getElementById("analysis-anaphora-section")' in script
     assert 'document.getElementById("analysis-back-to-whole")' in script
     assert 'document.getElementById("sentence-panel-note-suggestion")' in script
     assert 'document.getElementById("sentence-panel-note-accept")' in script
@@ -121,6 +124,10 @@ def test_sentence_analysis_panel_edits_translation_and_takeaway() -> None:
     assert "function acceptTakeawaySuggestion()" in script
     assert 'sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);' in script
     assert "payload.user_note || \"\"" in script
+    assert "function toggleAnalysisSection(section, items)" in script
+    assert "toggleAnalysisSection(modifiersSection, analysis.modifiers || []);" in script
+    assert "toggleAnalysisSection(logicMarkersSection, analysis.logic_markers || []);" in script
+    assert "toggleAnalysisSection(anaphoraSection, analysis.anaphora || []);" in script
     assert 'fetch(`/mark/sentence/${sentenceId}/translation`' in save_translation
     assert 'fetch(`/mark/sentence/${sentenceId}`' in save_note
     assert 'method: "PATCH"' in save_note
@@ -145,9 +152,11 @@ def test_reader_script_supports_pro_reanalysis_button() -> None:
 
     assert 'document.getElementById("analysis-panel-retry-pro")' in script
     assert 'body.set("prefer_pro", "1");' in request_word
-    assert 'requestWordAnalysis(activeAnalysisWordCardId, { preferPro: true });' in script
+    assert 'body.set("force_refresh", "1");' in request_word
+    assert "params.set(\"force_refresh\", \"1\");" in script
+    assert 'requestWordAnalysis(activeAnalysisWordCardId, { forceRefresh: true });' in script
     assert "sentencePanelTranslation?.value || null" in script
-    assert "{ preferPro: true }" in script
+    assert "{ preferPro: true, forceRefresh: true }" in script
 
 
 def test_analysis_toolbar_actions_run_on_single_click_only() -> None:
@@ -192,6 +201,8 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     script = _selection_script()
     helper = script[script.index("function hideToolbarUnlessEditing"):]
     helper = helper[: helper.index("function setVisible")]
+    guarded_helper = script[script.index("function maybeHideToolbarAfterRender"):]
+    guarded_helper = guarded_helper[: guarded_helper.index("function setVisible")]
     study_panel = script[script.index("function renderSentenceStudyPanel"):]
     study_panel = study_panel[: study_panel.index("function renderAnalysisPayload")]
     render_payload = script[script.index("function renderAnalysisPayload"):]
@@ -203,10 +214,68 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
 
     assert "if (translationEditorOpen) return;" in helper
     assert "hideToolbar();" in helper
-    assert "hideToolbarUnlessEditing();" in study_panel
-    assert "hideToolbarUnlessEditing();" in render_payload
-    assert "hideToolbarUnlessEditing();" in render_word
+    assert "if (readerToolbarBusy) return;" in guarded_helper
+    assert "if (seqAtRequest !== toolbarInteractionSeq) return;" in guarded_helper
+    assert "hideToolbarUnlessEditing();" in guarded_helper
+    assert "maybeHideToolbarAfterRender(seqAtRequest);" in study_panel
+    assert "maybeHideToolbarAfterRender(seqAtRequest);" in render_payload
+    assert "maybeHideToolbarAfterRender(seqAtRequest);" in render_word
     assert "hideToolbar();" in translation_analyze
+
+
+def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> None:
+    script = _selection_script()
+    position_toolbar = script[script.index("function positionToolbar(anchor)"):]
+    position_toolbar = position_toolbar[: position_toolbar.index("function showToolbar")]
+    request_analysis = script[script.index("async function requestAnalysis"):]
+    request_analysis = request_analysis[: request_analysis.index("async function savePanelTranslation")]
+    request_word = script[script.index("async function requestWordAnalysis"):]
+    request_word = request_word[: request_word.index("async function loadSavedWordAnalysis")]
+    mark_reader = script[script.index("async function markReaderSelection"):]
+    mark_reader = mark_reader[: mark_reader.index("function updateToolbar")]
+    save_translation = script[script.index("async function saveTranslationOnly"):]
+    save_translation = save_translation[: save_translation.index("async function deleteTranslationInPlace")]
+
+    assert "let readerToolbarBusy = false;" in script
+    assert "let toolbarInteractionSeq = 0;" in script
+    assert "toolbarInteractionSeq += 1;" in position_toolbar
+    assert "const seqAtRequest = toolbarInteractionSeq;" in request_analysis
+    assert "renderAnalysisPayload(payload, seqAtRequest);" in request_analysis
+    assert "const seqAtRequest = toolbarInteractionSeq;" in request_word
+    assert "renderWordAnalysis(payload, seqAtRequest);" in request_word
+    assert "readerToolbarBusy = true;" in mark_reader
+    assert "readerToolbarBusy = false;" in mark_reader
+    assert "readerToolbarBusy = true;" in save_translation
+    assert "readerToolbarBusy = false;" in save_translation
+
+
+def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> None:
+    script = _selection_script()
+    copy_helper = script[script.index("function copyAnalysisPayload"):]
+    copy_helper = copy_helper[: copy_helper.index("function showWordDetail")]
+    sentence_builder = script[script.index("function buildSentenceAnalysisCopyText"):]
+    sentence_builder = sentence_builder[: sentence_builder.index("function buildSentenceCopyText")]
+    word_builder = script[script.index("function buildWordAnalysisCopyText"):]
+    word_builder = word_builder[: word_builder.index("function buildWordCopyText")]
+    clipboard = script[script.index("async function writeClipboard"):]
+    clipboard = clipboard[: clipboard.index("function copyAnalysisPayload")]
+
+    assert 'document.getElementById("analysis-copy-all")' in script
+    assert 'document.getElementById("analysis-copy-source")' in script
+    assert 'document.getElementById("analysis-copy-analysis")' in script
+    assert 'copyAll.addEventListener("click", () => copyAnalysisPayload("all"))' in script
+    assert 'copySource.addEventListener("click", () => copyAnalysisPayload("source"))' in script
+    assert 'copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"))' in script
+    assert "activeAnalysisPayload" in copy_helper
+    assert "buildWordCopyText(activeAnalysisPayload, kind)" in copy_helper
+    assert "buildSentenceCopyText(activeAnalysisPayload, kind)" in copy_helper
+    assert "analysis.simplified_en" in sentence_builder
+    assert "analysis.chinese_gloss" in sentence_builder
+    assert "analysis.diagnosis_evidence" in sentence_builder
+    assert "analysis.meaning_in_context" in word_builder
+    assert "analysis.learner_note_check" in word_builder
+    assert "navigator.clipboard?.writeText" in clipboard
+    assert 'document.execCommand("copy")' in clipboard
 
 
 def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -> None:

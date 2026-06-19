@@ -195,7 +195,7 @@ def _attach_sentence_analysis(
     db: DatabaseConnection,
     sentence_id: int,
     *,
-    prompt_version: str = "v3",
+    prompt_version: str = "v4",
 ) -> int:
     with db.get_connection() as conn:
         sentence = conn.execute(
@@ -267,7 +267,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 12
+        assert count == 14
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:

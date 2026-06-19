@@ -118,6 +118,34 @@ class TestAnalyzeWordCacheHit:
         assert result.is_stale is False
         assert result.from_cache is False
 
+    def test_force_refresh_ignores_exact_cache_and_replaces_it(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        refreshed_response = _VALID_WORD_RESPONSE.replace(
+            "to make the harmful effects of something less severe",
+            "to reduce the force of something harmful",
+        )
+        with _mock_llm([_VALID_WORD_RESPONSE]):
+            first = analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL)
+
+        with _mock_llm([refreshed_response]) as mock:
+            refreshed = analyze_word(
+                db,
+                _SURFACE,
+                _SENTENCE,
+                model=_MODEL,
+                force_refresh=True,
+            )
+
+        mock.assert_called_once()
+        assert refreshed.cache_id == first.cache_id
+        assert refreshed.from_cache is False
+        assert refreshed.data["meaning_in_context"] == "to reduce the force of something harmful"
+        cached = analyze_word(db, _SURFACE, _SENTENCE, model=_MODEL)
+        assert cached.from_cache is True
+        assert cached.data["meaning_in_context"] == "to reduce the force of something harmful"
+
 
 # ---------------------------------------------------------------------------
 # LLM success

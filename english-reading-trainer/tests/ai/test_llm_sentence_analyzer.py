@@ -178,6 +178,30 @@ class TestAnalyzeSentenceCacheHit:
         result = analyze_sentence(db, _SENTENCE, model=_MODEL)
         assert "subject_skeleton" in result.data
 
+    def test_force_refresh_ignores_exact_cache_and_replaces_it(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        refreshed_response = _VALID_RESPONSE.replace("The cat sat", "The dog ran")
+        with _mock_llm([_VALID_RESPONSE]):
+            first = analyze_sentence(db, _SENTENCE, model=_MODEL)
+
+        with _mock_llm([refreshed_response]) as mock:
+            refreshed = analyze_sentence(
+                db,
+                _SENTENCE,
+                model=_MODEL,
+                force_refresh=True,
+            )
+
+        mock.assert_called_once()
+        assert refreshed.cache_id == first.cache_id
+        assert refreshed.from_cache is False
+        assert refreshed.data["subject_skeleton"] == "The dog ran"
+        cached = analyze_sentence(db, _SENTENCE, model=_MODEL)
+        assert cached.from_cache is True
+        assert cached.data["subject_skeleton"] == "The dog ran"
+
     def test_stale_cache_flagged(self, db: DatabaseConnection) -> None:
         with _mock_llm([_VALID_RESPONSE_V1]):
             analyze_sentence(db, _SENTENCE, model=_MODEL, prompt_version="v1")

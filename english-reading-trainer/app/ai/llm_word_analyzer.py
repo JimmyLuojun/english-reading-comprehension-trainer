@@ -65,11 +65,13 @@ def analyze_word(
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
     allow_stale: bool = True,
+    force_refresh: bool = False,
 ) -> WordAnalysisResult:
     """
     Analyse *surface_form* as it appears in *sentence_text*.
 
-    When *allow_stale* is False, a cache entry from a different prompt version
+    When *force_refresh* is True, no cache entry is reused. When *allow_stale*
+    is False, a cache entry from a different prompt version
     is ignored and a fresh LLM call is made instead. Use this in the POST
     endpoint so a stale entry never blocks the current prompt analysis.
 
@@ -86,7 +88,7 @@ def analyze_word(
         "\n\n".join([context, f"LEARNER NOTE: {learner_note}"]),
     )
 
-    cached = get_cached(db, content_hash, prompt_version, model)
+    cached = None if force_refresh else get_cached(db, content_hash, prompt_version, model)
     if cached is not None and (not cached.is_stale or allow_stale):
         return WordAnalysisResult(
             data=cached.data,
@@ -117,7 +119,13 @@ def analyze_word(
     response_json = json.dumps(data) if is_valid else raw
 
     cache_id = save_to_cache(
-        db, content_hash, prompt_version, model, response_json, is_valid
+        db,
+        content_hash,
+        prompt_version,
+        model,
+        response_json,
+        is_valid,
+        replace_valid=force_refresh,
     )
 
     return WordAnalysisResult(

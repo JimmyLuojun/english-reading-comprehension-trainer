@@ -152,6 +152,24 @@ def test_selection_toolbar_word_detail_uses_takeaway_label() -> None:
     assert "Your note…" not in html
 
 
+def test_analysis_panel_wraps_optional_structure_sections() -> None:
+    html = _analysis_panel()
+
+    assert 'id="analysis-modifiers-section"' in html
+    assert 'id="analysis-logic-markers-section"' in html
+    assert 'id="analysis-anaphora-section"' in html
+    assert 'id="analysis-copy-all"' in html
+    assert 'id="analysis-copy-source"' in html
+    assert 'id="analysis-copy-analysis"' in html
+    assert 'id="analysis-copy-status"' in html
+    assert "Copy all" in html
+    assert "Copy source" in html
+    assert "Copy analysis" in html
+    assert html.index('id="analysis-modifiers-section"') < html.index(
+        'id="analysis-modifiers"'
+    )
+
+
 def test_reader_view_has_book_and_chapter_navigation() -> None:
     html = _reader_view(
         rows=[],

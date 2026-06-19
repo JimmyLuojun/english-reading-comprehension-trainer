@@ -50,6 +50,7 @@ def analyze_sentence_for_reader(
     *,
     user_translation: str | None,
     prefer_pro: bool = False,
+    force_refresh: bool = False,
 ) -> AnalysisOutcome:
     """Analyze a sentence, save the result, and return its reader payload."""
     import app.web.fastapi_app as fastapi_app
@@ -64,6 +65,7 @@ def analyze_sentence_for_reader(
             sentence["text"],
             user_translation=sentence.get("user_translation") or None,
             model=get_pro_analysis_model() if prefer_pro else None,
+            force_refresh=force_refresh,
         )
         if not result.is_valid:
             return AnalysisOutcome(
@@ -119,6 +121,7 @@ def analyze_word_card_for_reader(
     *,
     context_text: str = "",
     prefer_pro: bool = False,
+    force_refresh: bool = False,
 ) -> AnalysisOutcome:
     """Analyze a word card, attach the cache id, and return its reader payload."""
     import app.web.fastapi_app as fastapi_app
@@ -136,6 +139,7 @@ def analyze_word_card_for_reader(
             learner_note=(card.get("user_note") or "").strip(),
             model=get_pro_analysis_model() if prefer_pro else None,
             allow_stale=False,
+            force_refresh=force_refresh,
         )
         if not result.is_valid:
             payload = _fallback_word_analysis_payload(db, card_id)
