@@ -284,7 +284,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <label for="toolbar-translation-text">Your understanding</label>
         <textarea id="toolbar-translation-text" rows="4" placeholder="Write your Chinese understanding"></textarea>
         <div class="translation-actions">
-          <button id="toolbar-translation-cancel" type="button">Cancel</button>
+          <button id="toolbar-translation-cancel" type="button">Close</button>
           <button id="toolbar-translation-save" type="button">Save only</button>
           <button id="toolbar-translation-analyze" type="button">Save and AI analyze</button>
         </div>
@@ -292,9 +292,9 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
       </div>
       <div id="toolbar-structure-editor" class="translation-editor" hidden>
         <label for="toolbar-structure-text">Your structure attempt</label>
-        <textarea id="toolbar-structure-text" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代/逻辑："></textarea>
+        <textarea id="toolbar-structure-text" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代逻辑："></textarea>
         <div class="translation-actions">
-          <button id="toolbar-structure-cancel" type="button">Cancel</button>
+          <button id="toolbar-structure-cancel" type="button">Close</button>
           <button id="toolbar-structure-save" type="button">Save only</button>
           <button id="toolbar-structure-analyze" type="button">Save and AI check</button>
         </div>
@@ -427,7 +427,7 @@ def _analysis_panel() -> str:
         </section>
         <section class="analysis-section sentence-study-section">
           <h3><span class="section-label-zh">我的结构</span><span class="section-label-en">Your structure attempt</span></h3>
-          <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代/逻辑："></textarea>
+          <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代逻辑："></textarea>
           <div class="word-notes-actions">
             <button id="sentence-panel-structure-save" type="button">Save structure</button>
             <span id="sentence-panel-structure-status" class="toolbar-status" aria-live="polite"></span>

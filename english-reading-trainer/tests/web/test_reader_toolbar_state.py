@@ -37,6 +37,7 @@ PANEL_IDS = {
     "analysis_word": "toolbar-analysis-word-form",
     "cross_sentence": "toolbar-cross-sentence",
     "translation": "toolbar-translation-editor",
+    "structure": "toolbar-structure-editor",
 }
 
 
@@ -342,6 +343,7 @@ def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) ->
         "analysis_word": False,
         "cross_sentence": False,
         "translation": False,
+        "structure": False,
     }
 
 
@@ -468,6 +470,39 @@ def test_translation_editor_does_not_cover_target_sentence(
     assert geometry["toolbarBottom"] <= geometry["viewportHeight"] + 1
 
 
+def test_structure_editor_autosaves_and_survives_reader_selection(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_sentence_contents(page, 0)
+        page.locator("#toolbar-structure-open").click()
+        page.wait_for_function('!document.getElementById("toolbar-structure-editor").hidden')
+        initial_value = page.locator("#toolbar-structure-text").input_value()
+        page.locator("#toolbar-structure-text").fill(
+            "主干：The cat sat\n从句：\n修饰成分：on the mat\n指代逻辑："
+        )
+        page.wait_for_function(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[0];
+              return sentence.dataset.structure.includes("The cat sat")
+                && !document.getElementById("selection-toolbar").hidden
+                && !document.getElementById("toolbar-structure-editor").hidden;
+            }"""
+        )
+
+        _select_text(page, 1, "bright")
+        state = _visible_panels(page)
+        value_after_selection = page.locator("#toolbar-structure-text").input_value()
+
+    assert initial_value == "主干：\n从句：\n修饰成分：\n指代逻辑："
+    assert state["toolbar"] is True
+    assert state["sentence"] is True
+    assert state["structure"] is True
+    assert state["word"] is False
+    assert value_after_selection.startswith("主干：The cat sat")
+
+
 def test_saved_translation_underlines_sentence_and_changes_analysis_action(
     browser: Browser,
     reader_url: str,
@@ -480,7 +515,10 @@ def test_saved_translation_underlines_sentence_and_changes_analysis_action(
         page.wait_for_function(
             """() => {
               const sentence = document.querySelectorAll("[data-sentence-id]")[0];
-              return document.getElementById("selection-toolbar").hidden
+              const toolbar = document.getElementById("selection-toolbar");
+              const editor = document.getElementById("toolbar-translation-editor");
+              return !toolbar.hidden
+                && !editor.hidden
                 && sentence.classList.contains("translated")
                 && !sentence.classList.contains("marked")
                 && sentence.dataset.translation === "猫坐在垫子上。"
@@ -489,6 +527,8 @@ def test_saved_translation_underlines_sentence_and_changes_analysis_action(
                 && !sentence.classList.contains("analyzed-stale");
             }"""
         )
+        page.locator("#toolbar-translation-cancel").click()
+        page.wait_for_function('document.getElementById("selection-toolbar").hidden')
 
         _select_sentence_contents(page, 0)
         page.wait_for_function(

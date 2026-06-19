@@ -141,6 +141,8 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
     assert 'id="toolbar-structure-open"' in html
     assert 'id="toolbar-structure-editor"' in html
     assert "Write structure" in html
+    assert "指代逻辑：" in html
+    assert ">Close</button>" in html
     assert "Save and AI check" in html
     assert "hidden" in html
     assert '"lexical_type": "word"' in html

@@ -256,6 +256,8 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     script = _selection_script()
     helper = script[script.index("function hideToolbarUnlessEditing"):]
     helper = helper[: helper.index("function setVisible")]
+    update_toolbar = script[script.index("function updateToolbar()"):]
+    update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
     guarded_helper = script[script.index("function maybeHideToolbarAfterRender"):]
     guarded_helper = guarded_helper[: guarded_helper.index("function setVisible")]
     study_panel = script[script.index("function renderSentenceStudyPanel"):]
@@ -268,6 +270,7 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     translation_analyze = translation_analyze[: translation_analyze.index('analysisOpen.addEventListener("click"')]
 
     assert "if (translationEditorOpen || structureEditorOpen) return;" in helper
+    assert "if (translationEditorOpen || structureEditorOpen) return;" in update_toolbar
     assert "hideToolbar();" in helper
     assert "if (readerToolbarBusy) return;" in guarded_helper
     assert "if (seqAtRequest !== toolbarInteractionSeq) return;" in guarded_helper
@@ -276,6 +279,90 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     assert "maybeHideToolbarAfterRender(seqAtRequest);" in render_payload
     assert "maybeHideToolbarAfterRender(seqAtRequest);" in render_word
     assert "hideToolbar();" in translation_analyze
+
+
+def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
+    script = _selection_script()
+    open_structure = script[script.index("function openStructureEditor"):]
+    open_structure = open_structure[: open_structure.index("async function saveTranslationOnly")]
+    save_translation = script[script.index("async function saveTranslationOnly"):]
+    save_translation = save_translation[: save_translation.index("function markSentenceStructured")]
+    save_structure = script[script.index("async function saveStructureOnly"):]
+    save_structure = save_structure[: save_structure.index("async function deleteTranslationInPlace")]
+    listeners = script[script.index('translationCancel.addEventListener("click"'):]
+    listeners = listeners[: listeners.index('analysisOpen.addEventListener("click"')]
+    scroll_listener = script[script.index('window.addEventListener("scroll"'):]
+    scroll_listener = scroll_listener[: scroll_listener.index("if (window.visualViewport)")]
+
+    assert 'const STRUCTURE_TEMPLATE = "主干：\\n从句：\\n修饰成分：\\n指代逻辑：";' in script
+    assert "let translationAutoSaveTimer = null;" in script
+    assert "let structureAutoSaveTimer = null;" in script
+    assert "let translationEditorDirty = false;" in script
+    assert "let structureEditorDirty = false;" in script
+    assert "function scheduleTranslationAutoSave" in script
+    assert "function scheduleStructureAutoSave" in script
+    assert "function flushPendingToolbarAutoSaveOnPageHide" in script
+    assert "structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;" in open_structure
+    assert "translationEditorDirty = true;" in listeners
+    assert "structureEditorDirty = true;" in listeners
+    assert 'enqueueTranslationSave({ keepOpen: true });' in listeners
+    assert 'enqueueStructureSave({ keepOpen: true });' in listeners
+    assert "closeTranslationEditor();" in listeners
+    assert "closeStructureEditor();" in listeners
+    assert "if (!keepOpen)" in save_translation
+    assert "if (!keepOpen)" in save_structure
+    assert "hideToolbar();" in save_translation
+    assert "hideToolbar();" in save_structure
+    assert "translationStatus.textContent = automatic ? \"Auto saved\" : \"Saved\";" in save_translation
+    assert "structureStatus.textContent = automatic ? \"Auto saved\" : \"Saved\";" in save_structure
+    assert "if (!translationEditorOpen && !structureEditorOpen) hideToolbar();" in scroll_listener
+    assert 'window.addEventListener("pagehide", flushPendingToolbarAutoSaveOnPageHide);' in script
+
+
+def test_bare_structure_template_is_not_saved_or_analyzed() -> None:
+    script = _selection_script()
+    save_structure = script[script.index("async function saveStructureOnly"):]
+    save_structure = save_structure[: save_structure.index("async function deleteTranslationInPlace")]
+    schedule_structure = script[script.index("function scheduleStructureAutoSave"):]
+    schedule_structure = schedule_structure[: schedule_structure.index("function sendPendingToolbarSave")]
+    structure_analyze = script[script.index('structureAnalyze.addEventListener("click"'):]
+    structure_analyze = structure_analyze[: structure_analyze.index('analysisOpen.addEventListener("click"')]
+
+    # The shared helper treats the bare scaffold (labels + whitespace) as empty.
+    assert "function structureAttemptHasContent(value)" in script
+    assert (
+        'const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];'
+        in script
+    )
+    assert "if (!structureAttemptHasContent(value) || value === lastSavedStructure) return;" in schedule_structure
+    assert "if (!structureAttemptHasContent(value)) {" in save_structure
+    assert "Fill in your structure judgement first." in save_structure
+    assert "if (!structureAttemptHasContent(value)) {" in structure_analyze
+    assert "if (structureAttemptHasContent(value) && value !== lastSavedStructure) {" in script
+
+
+def test_sentence_panel_structure_and_translation_autosave() -> None:
+    script = _selection_script()
+    study_fields = script[script.index("function setSentenceStudyFields(payload)"):]
+    study_fields = study_fields[: study_fields.index("function clearPanelAutoSaveTimers")]
+    request_analysis = script[script.index("async function requestAnalysis"):]
+    request_analysis = request_analysis[: request_analysis.index("function clearPanelAutoSaveTimers")]
+
+    assert "let panelStructureDirty = false;" in script
+    assert "let panelTranslationDirty = false;" in script
+    assert "function schedulePanelStructureAutoSave" in script
+    assert "function schedulePanelTranslationAutoSave" in script
+    assert "function enqueuePanelStructureSave" in script
+    assert "function enqueuePanelTranslationSave" in script
+    # Panel prefills the editable template so the learner fills only their gaps.
+    assert "sentencePanelStructure.value = payload.user_structure || STRUCTURE_TEMPLATE;" in study_fields
+    # Bare scaffold is not sent for analysis from the panel either.
+    assert 'if (structureAttemptHasContent(structure)) params.set("user_structure", structure.trim());' in request_analysis
+    # Pending panel edits flush on page hide and on panel close.
+    assert "if (panelStructureDirty && activeAnalysisSentenceId && sentencePanelStructure) {" in script
+    assert "if (panelStructureDirty) enqueuePanelStructureSave({ automatic: true });" in script
+    assert "panelStructureDirty = true;" in script
+    assert "panelTranslationDirty = true;" in script
 
 
 def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> None:

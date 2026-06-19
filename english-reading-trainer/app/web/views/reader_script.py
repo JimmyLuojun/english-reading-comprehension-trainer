@@ -123,6 +123,21 @@ def _selection_script() -> str:
       const MAX_ANALYSIS_CONTEXT_TEXT = 1600;
       const ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP = 56;
       const ANALYSIS_TOOLS_HOT_ZONE_PX = 84;
+      const AUTOSAVE_DELAY_MS = 700;
+      const STRUCTURE_TEMPLATE = "主干：\n从句：\n修饰成分：\n指代逻辑：";
+      const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];
+
+      // The structure editors prefill STRUCTURE_TEMPLATE as real text so the
+      // learner can fill in only the parts they are unsure of. Treat a value
+      // that is just the bare scaffold (labels + whitespace, no real content)
+      // as empty so we never save it or burn an AI call on an empty attempt.
+      function structureAttemptHasContent(value) {
+        let text = String(value || "");
+        for (const label of STRUCTURE_TEMPLATE_LABELS) {
+          text = text.split(label).join("");
+        }
+        return text.replace(/\s+/g, "").length > 0;
+      }
 
       const ERROR_CODE_LABELS = {
         G01: "G01 长主语识别失败",
@@ -190,11 +205,27 @@ def _selection_script() -> str:
       let structureEditorOpen = false;
       let progressTimer = null;
       let toolbarHideTimer = null;
+      let translationAutoSaveTimer = null;
+      let structureAutoSaveTimer = null;
       let analysisWordActionInProgress = false;
       let readerToolbarBusy = false;
       let toolbarInteractionSeq = 0;
       let activeSelectionAnalysisContextText = "";
       let copyStatusTimer = null;
+      let translationSaveChain = Promise.resolve();
+      let structureSaveChain = Promise.resolve();
+      let lastSavedTranslation = "";
+      let lastSavedStructure = "";
+      let translationEditorDirty = false;
+      let structureEditorDirty = false;
+      let panelTranslationAutoSaveTimer = null;
+      let panelStructureAutoSaveTimer = null;
+      let panelTranslationSaveChain = Promise.resolve();
+      let panelStructureSaveChain = Promise.resolve();
+      let lastSavedPanelTranslation = "";
+      let lastSavedPanelStructure = "";
+      let panelTranslationDirty = false;
+      let panelStructureDirty = false;
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
@@ -318,7 +349,134 @@ def _selection_script() -> str:
         return analysisContextFromElement(element);
       }
 
+      function clearTranslationAutoSaveTimer() {
+        if (translationAutoSaveTimer !== null) {
+          window.clearTimeout(translationAutoSaveTimer);
+          translationAutoSaveTimer = null;
+        }
+      }
+
+      function clearStructureAutoSaveTimer() {
+        if (structureAutoSaveTimer !== null) {
+          window.clearTimeout(structureAutoSaveTimer);
+          structureAutoSaveTimer = null;
+        }
+      }
+
+      function enqueueTranslationSave(options = {}) {
+        translationSaveChain = translationSaveChain
+          .catch(() => {})
+          .then(() => saveTranslationOnly(options));
+        return translationSaveChain;
+      }
+
+      function enqueueStructureSave(options = {}) {
+        structureSaveChain = structureSaveChain
+          .catch(() => {})
+          .then(() => saveStructureOnly(options));
+        return structureSaveChain;
+      }
+
+      function scheduleTranslationAutoSave(delay = AUTOSAVE_DELAY_MS) {
+        clearTranslationAutoSaveTimer();
+        if (!translationEditorOpen || !activeSentenceId) return;
+        const value = translationText.value.trim();
+        if (!value || value === lastSavedTranslation) return;
+        translationStatus.textContent = "Auto saving...";
+        translationAutoSaveTimer = window.setTimeout(() => {
+          translationAutoSaveTimer = null;
+          enqueueTranslationSave({ automatic: true, keepOpen: true });
+        }, delay);
+      }
+
+      function scheduleStructureAutoSave(delay = AUTOSAVE_DELAY_MS) {
+        clearStructureAutoSaveTimer();
+        if (!structureEditorOpen || !activeSentenceId) return;
+        const value = structureText.value.trim();
+        if (!structureAttemptHasContent(value) || value === lastSavedStructure) return;
+        structureStatus.textContent = "Auto saving...";
+        structureAutoSaveTimer = window.setTimeout(() => {
+          structureAutoSaveTimer = null;
+          enqueueStructureSave({ automatic: true, keepOpen: true });
+        }, delay);
+      }
+
+      function sendPendingToolbarSave(url, fieldName, value) {
+        const text = String(value || "").trim();
+        if (!text) return;
+        const body = new URLSearchParams({ [fieldName]: text, return_to: returnTo }).toString();
+        if (navigator.sendBeacon && navigator.sendBeacon(url, body)) return;
+        fetch(url, {
+          method: "POST",
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
+
+      function flushPendingToolbarAutoSaveOnPageHide() {
+        clearTranslationAutoSaveTimer();
+        clearStructureAutoSaveTimer();
+        if (translationEditorOpen && translationEditorDirty && activeSentenceId) {
+          const value = translationText.value.trim();
+          if (value && value !== lastSavedTranslation) {
+            sendPendingToolbarSave(
+              `/mark/sentence/${activeSentenceId}/translation`,
+              "user_translation",
+              value,
+            );
+          }
+        }
+        if (structureEditorOpen && structureEditorDirty && activeSentenceId) {
+          const value = structureText.value.trim();
+          if (structureAttemptHasContent(value) && value !== lastSavedStructure) {
+            sendPendingToolbarSave(
+              `/mark/sentence/${activeSentenceId}/structure`,
+              "user_structure",
+              value,
+            );
+          }
+        }
+        if (panelStructureDirty && activeAnalysisSentenceId && sentencePanelStructure) {
+          const value = (sentencePanelStructure.value || "").trim();
+          if (structureAttemptHasContent(value) && value !== lastSavedPanelStructure) {
+            sendPendingToolbarSave(
+              `/mark/sentence/${activeAnalysisSentenceId}/structure`,
+              "user_structure",
+              value,
+            );
+          }
+        }
+        if (panelTranslationDirty && activeAnalysisSentenceId && sentencePanelTranslation) {
+          const value = (sentencePanelTranslation.value || "").trim();
+          if (value && value !== lastSavedPanelTranslation) {
+            sendPendingToolbarSave(
+              `/mark/sentence/${activeAnalysisSentenceId}/translation`,
+              "user_translation",
+              value,
+            );
+          }
+        }
+      }
+
+      async function closeTranslationEditor() {
+        clearTranslationAutoSaveTimer();
+        const saved = translationEditorDirty
+          ? await enqueueTranslationSave({ automatic: true, keepOpen: true })
+          : true;
+        if (saved !== false) hideToolbar();
+      }
+
+      async function closeStructureEditor() {
+        clearStructureAutoSaveTimer();
+        const saved = structureEditorDirty
+          ? await enqueueStructureSave({ automatic: true, keepOpen: true })
+          : true;
+        if (saved !== false) hideToolbar();
+      }
+
       function hideTranslationEditor() {
+        clearTranslationAutoSaveTimer();
         translationEditor.hidden = true;
         translationEditorOpen = false;
         translationStatus.textContent = "";
@@ -328,6 +486,7 @@ def _selection_script() -> str:
       }
 
       function hideStructureEditor() {
+        clearStructureAutoSaveTimer();
         structureEditor.hidden = true;
         structureEditorOpen = false;
         structureStatus.textContent = "";
@@ -1130,7 +1289,7 @@ def _selection_script() -> str:
           suppressNextUpdate = false;
           return;
         }
-        if (translationEditorOpen) return;
+        if (translationEditorOpen || structureEditorOpen) return;
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
           if (analysisWordActionInProgress) return;
@@ -1171,6 +1330,7 @@ def _selection_script() -> str:
         const sentence = spans[0];
         activeSentenceId = sentence.dataset.sentenceId;
         activeSentenceTranslation = sentence.dataset.translation || "";
+        activeSentenceStructure = sentence.dataset.structure || "";
         const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
         const markedSentence = sentence.dataset.marked === "1";
         const selectedCardIds = selectedWordCardIds(range);
@@ -1440,8 +1600,15 @@ def _selection_script() -> str:
       function openTranslationEditor() {
         if (!activeSentenceId) return;
         const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        if (structureEditorOpen && structureEditorDirty) {
+          clearStructureAutoSaveTimer();
+          enqueueStructureSave({ automatic: true, keepOpen: true });
+        }
         hideStructureEditor();
+        clearTranslationAutoSaveTimer();
         translationText.value = activeSentenceTranslation;
+        lastSavedTranslation = activeSentenceTranslation.trim();
+        translationEditorDirty = false;
         translationEditor.hidden = false;
         translationEditorOpen = true;
         translationStatus.textContent = "";
@@ -1457,8 +1624,15 @@ def _selection_script() -> str:
       function openStructureEditor() {
         if (!activeSentenceId) return;
         const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        if (translationEditorOpen && translationEditorDirty) {
+          clearTranslationAutoSaveTimer();
+          enqueueTranslationSave({ automatic: true, keepOpen: true });
+        }
         hideTranslationEditor();
-        structureText.value = activeSentenceStructure;
+        clearStructureAutoSaveTimer();
+        structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;
+        lastSavedStructure = activeSentenceStructure.trim();
+        structureEditorDirty = false;
         structureEditor.hidden = false;
         structureEditorOpen = true;
         structureStatus.textContent = "";
@@ -1471,11 +1645,21 @@ def _selection_script() -> str:
         });
       }
 
-      async function saveTranslationOnly() {
+      async function saveTranslationOnly(options = {}) {
+        clearTranslationAutoSaveTimer();
+        const automatic = Boolean(options.automatic);
+        const keepOpen = Boolean(options.keepOpen);
         const value = translationText.value.trim();
         if (!value) {
-          translationStatus.textContent = "Enter a translation first, or use AI analysis without saving.";
-          return;
+          if (!automatic) {
+            translationStatus.textContent = "Enter a translation first, or use AI analysis without saving.";
+          }
+          return true;
+        }
+        if (value === lastSavedTranslation) {
+          translationEditorDirty = false;
+          if (!automatic) translationStatus.textContent = "Saved";
+          return true;
         }
         if (!activeSentenceId) return;
         const anchor = captureReadingAnchor();
@@ -1489,17 +1673,32 @@ def _selection_script() -> str:
             body: body.toString(),
           });
           if (!response.ok) {
+            if (automatic || keepOpen) throw new Error("Save failed");
             window.location.assign(response.url || returnTo);
-            return;
+            return false;
           }
           const sentence = document.getElementById(`sentence-${activeSentenceId}`);
           markSentenceTranslated(sentence, value);
           activeSentenceTranslation = value;
-          window.getSelection()?.removeAllRanges();
-          hideToolbar();
-          restoreReadingAnchor(anchor);
-        } catch {
+          lastSavedTranslation = value;
+          translationEditorDirty = false;
+          translationDelete.hidden = false;
+          translationOpen.textContent = "Update translation";
+          analysisOpen.textContent = "Check translation";
+          translationStatus.textContent = automatic ? "Auto saved" : "Saved";
+          if (!keepOpen) {
+            window.getSelection()?.removeAllRanges();
+            hideToolbar();
+            restoreReadingAnchor(anchor);
+          }
+          return true;
+        } catch (error) {
+          if (automatic || keepOpen) {
+            translationStatus.textContent = `Save failed: ${error}`;
+            return false;
+          }
           window.location.assign(returnTo);
+          return false;
         } finally {
           readerToolbarBusy = false;
         }
@@ -1515,11 +1714,19 @@ def _selection_script() -> str:
         }
       }
 
-      async function saveStructureOnly() {
+      async function saveStructureOnly(options = {}) {
+        clearStructureAutoSaveTimer();
+        const automatic = Boolean(options.automatic);
+        const keepOpen = Boolean(options.keepOpen);
         const value = structureText.value.trim();
-        if (!value) {
-          structureStatus.textContent = "Enter a structure attempt first.";
-          return;
+        if (!structureAttemptHasContent(value)) {
+          if (!automatic) structureStatus.textContent = "Fill in your structure judgement first.";
+          return true;
+        }
+        if (value === lastSavedStructure) {
+          structureEditorDirty = false;
+          if (!automatic) structureStatus.textContent = "Saved";
+          return true;
         }
         if (!activeSentenceId) return;
         const anchor = captureReadingAnchor();
@@ -1533,17 +1740,30 @@ def _selection_script() -> str:
             body: body.toString(),
           });
           if (!response.ok) {
+            if (automatic || keepOpen) throw new Error("Save failed");
             window.location.assign(response.url || returnTo);
-            return;
+            return false;
           }
           const sentence = document.getElementById(`sentence-${activeSentenceId}`);
           markSentenceStructured(sentence, value);
           activeSentenceStructure = value;
-          window.getSelection()?.removeAllRanges();
-          hideToolbar();
-          restoreReadingAnchor(anchor);
-        } catch {
+          lastSavedStructure = value;
+          structureEditorDirty = false;
+          structureOpen.textContent = "Update structure";
+          structureStatus.textContent = automatic ? "Auto saved" : "Saved";
+          if (!keepOpen) {
+            window.getSelection()?.removeAllRanges();
+            hideToolbar();
+            restoreReadingAnchor(anchor);
+          }
+          return true;
+        } catch (error) {
+          if (automatic || keepOpen) {
+            structureStatus.textContent = `Save failed: ${error}`;
+            return false;
+          }
           window.location.assign(returnTo);
+          return false;
         } finally {
           readerToolbarBusy = false;
         }
@@ -1685,6 +1905,11 @@ def _selection_script() -> str:
 
       function closePanel() {
         panel.hidden = true;
+        if (panelTranslationDirty) enqueuePanelTranslationSave({ automatic: true });
+        if (panelStructureDirty) enqueuePanelStructureSave({ automatic: true });
+        clearPanelAutoSaveTimers();
+        panelTranslationDirty = false;
+        panelStructureDirty = false;
         if (panelTab) panelTab.hidden = false;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
@@ -1798,11 +2023,16 @@ def _selection_script() -> str:
       }
 
       function setSentenceStudyFields(payload) {
+        clearPanelAutoSaveTimers();
         if (sentencePanelTranslation) {
           sentencePanelTranslation.value = payload.user_translation || "";
+          lastSavedPanelTranslation = (payload.user_translation || "").trim();
+          panelTranslationDirty = false;
         }
         if (sentencePanelStructure) {
-          sentencePanelStructure.value = payload.user_structure || "";
+          sentencePanelStructure.value = payload.user_structure || STRUCTURE_TEMPLATE;
+          lastSavedPanelStructure = (payload.user_structure || "").trim();
+          panelStructureDirty = false;
         }
         if (sentencePanelNote) {
           sentencePanelNote.value = payload.user_note || "";
@@ -2145,7 +2375,7 @@ def _selection_script() -> str:
         const structure = Object.prototype.hasOwnProperty.call(options, "userStructure")
           ? options.userStructure
           : (sentencePanelStructure?.value || document.getElementById(`sentence-${sentenceId}`)?.dataset.structure || "");
-        if (structure && structure.trim()) params.set("user_structure", structure.trim());
+        if (structureAttemptHasContent(structure)) params.set("user_structure", structure.trim());
         if (options.preferPro) params.set("prefer_pro", "1");
         if (options.forceRefresh) params.set("force_refresh", "1");
         try {
@@ -2166,15 +2396,78 @@ def _selection_script() -> str:
         }
       }
 
-      async function savePanelTranslation() {
+      function clearPanelAutoSaveTimers() {
+        if (panelTranslationAutoSaveTimer !== null) {
+          window.clearTimeout(panelTranslationAutoSaveTimer);
+          panelTranslationAutoSaveTimer = null;
+        }
+        if (panelStructureAutoSaveTimer !== null) {
+          window.clearTimeout(panelStructureAutoSaveTimer);
+          panelStructureAutoSaveTimer = null;
+        }
+      }
+
+      function enqueuePanelTranslationSave(options = {}) {
+        panelTranslationSaveChain = panelTranslationSaveChain
+          .catch(() => {})
+          .then(() => savePanelTranslation(options));
+        return panelTranslationSaveChain;
+      }
+
+      function enqueuePanelStructureSave(options = {}) {
+        panelStructureSaveChain = panelStructureSaveChain
+          .catch(() => {})
+          .then(() => savePanelStructure(options));
+        return panelStructureSaveChain;
+      }
+
+      function schedulePanelTranslationAutoSave(delay = AUTOSAVE_DELAY_MS) {
+        if (panelTranslationAutoSaveTimer !== null) {
+          window.clearTimeout(panelTranslationAutoSaveTimer);
+          panelTranslationAutoSaveTimer = null;
+        }
+        if (!activeAnalysisSentenceId || !sentencePanelTranslation) return;
+        const value = (sentencePanelTranslation.value || "").trim();
+        if (!value || value === lastSavedPanelTranslation) return;
+        if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Auto saving...";
+        panelTranslationAutoSaveTimer = window.setTimeout(() => {
+          panelTranslationAutoSaveTimer = null;
+          enqueuePanelTranslationSave({ automatic: true });
+        }, delay);
+      }
+
+      function schedulePanelStructureAutoSave(delay = AUTOSAVE_DELAY_MS) {
+        if (panelStructureAutoSaveTimer !== null) {
+          window.clearTimeout(panelStructureAutoSaveTimer);
+          panelStructureAutoSaveTimer = null;
+        }
+        if (!activeAnalysisSentenceId || !sentencePanelStructure) return;
+        const value = (sentencePanelStructure.value || "").trim();
+        if (!structureAttemptHasContent(value) || value === lastSavedPanelStructure) return;
+        if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "Auto saving...";
+        panelStructureAutoSaveTimer = window.setTimeout(() => {
+          panelStructureAutoSaveTimer = null;
+          enqueuePanelStructureSave({ automatic: true });
+        }, delay);
+      }
+
+      async function savePanelTranslation(options = {}) {
+        const automatic = Boolean(options.automatic);
         const sentenceId = activeAnalysisSentenceId;
         const value = (sentencePanelTranslation?.value || "").trim();
-        if (!sentenceId) return;
+        if (!sentenceId) return true;
         if (!value) {
-          if (sentencePanelTranslationStatus) {
+          if (!automatic && sentencePanelTranslationStatus) {
             sentencePanelTranslationStatus.textContent = "Enter a translation first.";
           }
-          return;
+          return true;
+        }
+        if (value === lastSavedPanelTranslation) {
+          panelTranslationDirty = false;
+          if (!automatic && sentencePanelTranslationStatus) {
+            sentencePanelTranslationStatus.textContent = "Saved";
+          }
+          return true;
         }
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saving...";
         const body = new URLSearchParams({ user_translation: value, return_to: returnTo });
@@ -2187,26 +2480,40 @@ def _selection_script() -> str:
           if (!response.ok) throw new Error("Save failed");
           markSentenceTranslated(document.getElementById(`sentence-${sentenceId}`), value);
           activeSentenceTranslation = value;
+          lastSavedPanelTranslation = value;
+          panelTranslationDirty = false;
           if (activeAnalysisPayload) {
             activeAnalysisPayload.user_translation = value;
             activeAnalysisPayload.is_stale = true;
           }
           if (panelStatus) panelStatus.textContent = "Analysis is stale. Reanalyze when ready.";
-          if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Saved";
+          if (sentencePanelTranslationStatus) {
+            sentencePanelTranslationStatus.textContent = automatic ? "Auto saved" : "Saved";
+          }
+          return true;
         } catch (error) {
           if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = `Save failed: ${error}`;
+          return false;
         }
       }
 
-      async function savePanelStructure() {
+      async function savePanelStructure(options = {}) {
+        const automatic = Boolean(options.automatic);
         const sentenceId = activeAnalysisSentenceId;
         const value = (sentencePanelStructure?.value || "").trim();
-        if (!sentenceId) return;
-        if (!value) {
-          if (sentencePanelStructureStatus) {
-            sentencePanelStructureStatus.textContent = "Enter a structure attempt first.";
+        if (!sentenceId) return true;
+        if (!structureAttemptHasContent(value)) {
+          if (!automatic && sentencePanelStructureStatus) {
+            sentencePanelStructureStatus.textContent = "Fill in your structure judgement first.";
           }
-          return;
+          return true;
+        }
+        if (value === lastSavedPanelStructure) {
+          panelStructureDirty = false;
+          if (!automatic && sentencePanelStructureStatus) {
+            sentencePanelStructureStatus.textContent = "Saved";
+          }
+          return true;
         }
         if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "Saving...";
         const body = new URLSearchParams({ user_structure: value, return_to: returnTo });
@@ -2219,14 +2526,20 @@ def _selection_script() -> str:
           if (!response.ok) throw new Error("Save failed");
           markSentenceStructured(document.getElementById(`sentence-${sentenceId}`), value);
           activeSentenceStructure = value;
+          lastSavedPanelStructure = value;
+          panelStructureDirty = false;
           if (activeAnalysisPayload) {
             activeAnalysisPayload.user_structure = value;
             activeAnalysisPayload.is_stale = true;
           }
           if (panelStatus) panelStatus.textContent = "Analysis is stale. Reanalyze when ready.";
-          if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = "Saved";
+          if (sentencePanelStructureStatus) {
+            sentencePanelStructureStatus.textContent = automatic ? "Auto saved" : "Saved";
+          }
+          return true;
         } catch (error) {
           if (sentencePanelStructureStatus) sentencePanelStructureStatus.textContent = `Save failed: ${error}`;
+          return false;
         }
       }
 
@@ -2515,24 +2828,42 @@ def _selection_script() -> str:
         if (activeSentenceId) deleteSentenceCardsInPlace([activeSentenceId]);
       });
       translationOpen.addEventListener("click", openTranslationEditor);
-      translationCancel.addEventListener("click", hideTranslationEditor);
-      translationSave.addEventListener("click", saveTranslationOnly);
+      translationCancel.addEventListener("click", () => {
+        closeTranslationEditor();
+      });
+      translationSave.addEventListener("click", () => {
+        enqueueTranslationSave({ keepOpen: true });
+      });
+      translationText.addEventListener("input", () => {
+        translationEditorDirty = true;
+        scheduleTranslationAutoSave();
+      });
       translationDelete.addEventListener("click", deleteTranslationInPlace);
       translationAnalyze.addEventListener("click", () => {
+        clearTranslationAutoSaveTimer();
         const sentenceId = activeSentenceId;
         const value = translationText.value.trim();
         hideToolbar();
         if (sentenceId) requestAnalysis(sentenceId, value || null);
       });
       structureOpen.addEventListener("click", openStructureEditor);
-      structureCancel.addEventListener("click", hideStructureEditor);
-      structureSave.addEventListener("click", saveStructureOnly);
+      structureCancel.addEventListener("click", () => {
+        closeStructureEditor();
+      });
+      structureSave.addEventListener("click", () => {
+        enqueueStructureSave({ keepOpen: true });
+      });
+      structureText.addEventListener("input", () => {
+        structureEditorDirty = true;
+        scheduleStructureAutoSave();
+      });
       structureAnalyze.addEventListener("click", () => {
+        clearStructureAutoSaveTimer();
         const sentenceId = activeSentenceId;
         const value = structureText.value.trim();
         const translation = activeSentenceTranslation || null;
-        if (!value) {
-          structureStatus.textContent = "Enter a structure attempt first.";
+        if (!structureAttemptHasContent(value)) {
+          structureStatus.textContent = "Fill in your structure judgement first.";
           return;
         }
         hideToolbar();
@@ -2576,10 +2907,26 @@ def _selection_script() -> str:
         panelPrevious.addEventListener("click", restorePreviousAnalysis);
       }
       if (sentencePanelTranslationSave) {
-        sentencePanelTranslationSave.addEventListener("click", savePanelTranslation);
+        sentencePanelTranslationSave.addEventListener("click", () => {
+          enqueuePanelTranslationSave();
+        });
+      }
+      if (sentencePanelTranslation) {
+        sentencePanelTranslation.addEventListener("input", () => {
+          panelTranslationDirty = true;
+          schedulePanelTranslationAutoSave();
+        });
       }
       if (sentencePanelStructureSave) {
-        sentencePanelStructureSave.addEventListener("click", savePanelStructure);
+        sentencePanelStructureSave.addEventListener("click", () => {
+          enqueuePanelStructureSave();
+        });
+      }
+      if (sentencePanelStructure) {
+        sentencePanelStructure.addEventListener("input", () => {
+          panelStructureDirty = true;
+          schedulePanelStructureAutoSave();
+        });
       }
       if (sentencePanelNoteSave) {
         sentencePanelNoteSave.addEventListener("click", savePanelNote);
@@ -2800,12 +3147,12 @@ def _selection_script() -> str:
       document.addEventListener("keydown", handleReaderShortcut);
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
       window.addEventListener("scroll", () => {
-        hideToolbar();
+        if (!translationEditorOpen && !structureEditorOpen) hideToolbar();
         scheduleProgressSave();
       }, { passive: true });
       if (window.visualViewport) {
         window.visualViewport.addEventListener("resize", () => {
-          if (!translationEditorOpen) return;
+          if (!translationEditorOpen && !structureEditorOpen) return;
           const keyboardInset = Math.max(
             10,
             window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop + 10,
@@ -2813,6 +3160,7 @@ def _selection_script() -> str:
           toolbar.style.bottom = `${keyboardInset}px`;
         });
       }
+      window.addEventListener("pagehide", flushPendingToolbarAutoSaveOnPageHide);
       window.addEventListener("pagehide", saveReaderProgress);
       const restoredProgress = restoreReaderProgress();
       if (initialWordCardId) {
