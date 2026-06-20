@@ -51,6 +51,14 @@ analyzed_structure
 - `Initial translation analyzed`
 - `Initial structure analyzed`
 
+当只读快照显示时，Reader 还会在快照框内生成紧凑的 `修改` / `删除` /
+`新增` 摘要，帮助定位当前输入相对本次分析依据的变化。结构输入使用本地行级
+LCS diff，并尽量把位置归到 `主干` / `从句` / `修饰成分 N` /
+`指代逻辑 N`；翻译输入使用本地 token/短语级 LCS diff，只在 preview 中显示
+实际变化片段（例如 `拓展 → 消耗`），而不是整句对照。每条摘要只显示位置与短
+preview；点击该条再展开完整旧/新文本。这个 diff 只在浏览器端渲染，不写库、
+不消耗 LLM token，也不参与 `content_hash`。
+
 `is_stale` 仍然只表示分析可能需要刷新：prompt version 改变或当前输入的
 `content_hash` 改变都会使它为 true。它不能用于决定是否显示快照框，因为仅
 prompt 升级时输入并没有变化。

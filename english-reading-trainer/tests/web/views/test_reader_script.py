@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from app.web.views.reader_script import _selection_script
 
@@ -81,15 +86,21 @@ def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
     script = _selection_script()
 
     assert "let toolbarHideTimer = null;" in script
+    assert "let toolbarRepositionFrame = null;" in script
     assert "function clearScheduledToolbarHide()" in script
     assert "function scheduleToolbarHide(delay)" in script
+    assert "function scheduleToolbarReposition()" in script
+    assert "function setToolbarStatus(statusElement, message)" in script
     assert "scheduleToolbarHide(650);" in script
+    assert 'const toolbarResizeObserver = new ResizeObserver(() => scheduleToolbarReposition());' in script
+    assert "toolbarResizeObserver.observe(toolbar);" in script
     assert "window.setTimeout(() => {\n            hideToolbar();" not in script
 
     hide_toolbar = script[script.index("function hideToolbar()"):]
     hide_toolbar = hide_toolbar[:hide_toolbar.index("function setVisible")]
     assert "clearScheduledToolbarHide();" in hide_toolbar
     assert hide_toolbar.index("clearScheduledToolbarHide();") < hide_toolbar.index("hideAllPanels();")
+    assert "window.cancelAnimationFrame(toolbarRepositionFrame);" in hide_toolbar
 
     position_toolbar = script[script.index("function positionToolbar(anchor)"):]
     position_toolbar = position_toolbar[:position_toolbar.index("function showToolbar")]
@@ -97,6 +108,10 @@ def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
     assert position_toolbar.index("clearScheduledToolbarHide();") < position_toolbar.index(
         "toolbar.hidden = false;"
     )
+    assert "if (toolbar.hidden || (!translationEditorOpen && !structureEditorOpen)) return;" in position_toolbar
+    assert "positionToolbar(sentence.getBoundingClientRect());" in position_toolbar
+    assert "statusElement.textContent = message;" in position_toolbar
+    assert "scheduleToolbarReposition();" in position_toolbar
 
 
 def test_analysis_selection_toolbar_reenables_buttons_when_shown() -> None:
@@ -170,9 +185,15 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert 'document.getElementById("sentence-panel-translation")' in script
     assert 'document.getElementById("sentence-panel-analyzed-translation-section")' in script
     assert 'document.getElementById("sentence-panel-analyzed-translation")' in script
+    assert 'document.getElementById("sentence-panel-translation-diff")' in script
+    assert 'document.getElementById("sentence-panel-translation-diff-count")' in script
+    assert 'document.getElementById("sentence-panel-translation-diff-list")' in script
     assert 'document.getElementById("analysis-structure-attempt-section")' in script
     assert 'document.getElementById("sentence-panel-analyzed-structure-section")' in script
     assert 'document.getElementById("sentence-panel-analyzed-structure")' in script
+    assert 'document.getElementById("sentence-panel-structure-diff")' in script
+    assert 'document.getElementById("sentence-panel-structure-diff-count")' in script
+    assert 'document.getElementById("sentence-panel-structure-diff-list")' in script
     assert 'document.getElementById("sentence-panel-structure")' in script
     assert 'document.getElementById("analysis-structure-feedback-section")' in script
     assert 'document.getElementById("analysis-structure-feedback")' in script
@@ -193,8 +214,36 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "analysis.blocking_point || \"\"" in render_payload
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
-    assert "function setAnalysisInputSnapshot(section, target, snapshotValue, currentValue)" in script
+    assert "const INPUT_DIFF_PREVIEW_MAX = 34;" in script
+    assert "function truncateDiffText(text, max = INPUT_DIFF_PREVIEW_MAX)" in script
+    assert "function describeStructureLine(text, state)" in script
+    assert 'return `${state.section} ${numbered[1]}`;' in script
+    assert 'location: inputKind === "structure"' in script
+    assert ': "译文",' in script
+    assert "function translationTokenType(char)" in script
+    assert "function tokenizeTranslation(value)" in script
+    assert "function compactTranslationText(tokens)" in script
+    assert "const TRANSLATION_MERGE_GAP = 1;" in script
+    assert "function isNoiseTranslationChange(changedText)" in script
+    assert "function groupTranslationRegions(operations)" in script
+    assert "function analyzeTranslationDiff(snapshotValue, currentValue)" in script
+    assert "function diffTranslationPhrases(snapshotValue, currentValue)" in script
+    assert "function renderTranslationHighlight(target, snapshotValue, currentValue)" in script
+    assert "function renderStructureHighlight(target, snapshotValue, currentValue)" in script
+    assert 'mark.className = `diff-mark diff-mark-${region.kind}`;' in script
+    assert 'if (inputKind === "translation")' in script
+    assert 'else if (inputKind === "structure")' in script
+    assert "renderTranslationHighlight(target, snapshot, current);" in script
+    assert "renderStructureHighlight(target, snapshot, current);" in script
+    assert "diffTranslationPhrases(snapshotValue, currentValue)" in script
+    assert "function diffInputLines(snapshotValue, currentValue, inputKind)" in script
+    assert 'appendInputDiffItem(list, "modified", "修改", removedLine, addedLine);' in script
+    assert "function renderInputDiff(details, list, countTarget, snapshotValue, currentValue, inputKind)" in script
+    assert "countTarget.textContent = list.childElementCount" in script
+    assert "details.hidden = !list.childElementCount;" in script
+    assert "function setAnalysisInputSnapshot(" in script
     assert "normalizeText(snapshot) !== normalizeText(current)" in script
+    assert "renderInputDiff(diffDetails, diffList, diffCount, snapshot, current, inputKind);" in script
     assert "payload.analyzed_translation || \"\"" in script
     assert "payload.analyzed_structure || \"\"" in script
     assert "payload.analysis?.takeaway_suggestion || \"\"" in script
@@ -214,6 +263,185 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "updateSentenceNote(sentenceId, value);" in save_note
     assert "sentencePanelTranslation?.value || null" in retry
     assert "userStructure: sentencePanelStructure?.value || \"\"" in retry
+
+
+def _extract_js_function(script: str, declaration: str) -> str:
+    """Return one JS function (balanced braces) starting at *declaration*."""
+    start = script.index(declaration)
+    depth = 0
+    index = script.index("{", start)
+    while index < len(script):
+        char = script[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return script[start : index + 1]
+        index += 1
+    raise AssertionError(f"unterminated function: {declaration}")
+
+
+def _run_translation_diff(old: str, new: str) -> dict:
+    """Execute the real translation-diff JS in node and return its result."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available for JS behavioural test")
+
+    script = _selection_script()
+    declarations = [
+        "function translationTokenType(char)",
+        "function tokenizeTranslation(value)",
+        "function compactTranslationText(tokens)",
+        "function diffUnits(oldUnits, newUnits)",
+        "function visibleTranslationText(text)",
+        "function isNoiseTranslationChange(changedText)",
+        "function groupTranslationRegions(operations)",
+        "function regionTranslationTexts(operations, region)",
+        "function analyzeTranslationDiff(snapshotValue, currentValue)",
+        "function diffTranslationPhrases(snapshotValue, currentValue)",
+        "function oldTranslationText(operations)",
+        "function renderTranslationHighlight(target, snapshotValue, currentValue)",
+    ]
+    body = "\n".join(_extract_js_function(script, decl) for decl in declarations)
+    preamble = (
+        'const normalizeText = (value) => value.replace(/\\s+/g, " ").trim();\n'
+        "const INPUT_DIFF_PREVIEW_MAX = 34;\n"
+        "const TRANSLATION_MERGE_GAP = 1;\n"
+        'const TRANSLATION_FUNCTION_CHARS = "的了是着地得之乎者吗呢吧啊呀儿";\n'
+    )
+    harness = (
+        "class FakeNode {\n"
+        "  constructor(){this.children=[];this.className='';this._text='';"
+        "this.classList={add:(c)=>{this.className=(this.className+' '+c).trim();}};}\n"
+        "  set textContent(v){this._text=v;}\n"
+        "  get textContent(){return this._text;}\n"
+        "  append(...n){this.children.push(...n);}\n"
+        "  replaceChildren(){this.children=[];}\n"
+        "}\n"
+        "const document={createElement:()=>new FakeNode(),"
+        "createTextNode:(t)=>({kind:'#text',value:t})};\n"
+        f"const OLD={json.dumps(old)};\n"
+        f"const NEW={json.dumps(new)};\n"
+        "const phrases=diffTranslationPhrases(OLD,NEW).map(p=>({"
+        "kind:p.kind,before:p.before?p.before.text:null,after:p.after?p.after.text:null}));\n"
+        "const target=new FakeNode();\n"
+        "renderTranslationHighlight(target,OLD,NEW);\n"
+        "const highlight=target.children.map(c=>c.kind==='#text'"
+        "?{text:c.value}:{mark:c.className,text:c.textContent});\n"
+        "process.stdout.write(JSON.stringify({phrases,highlight}));\n"
+    )
+    completed = subprocess.run(  # noqa: S603 - local node, fixed args
+        [node, "--input-type=module", "-e", preamble + body + harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_translation_diff_is_phrase_level_and_drops_noise() -> None:
+    result = _run_translation_diff(
+        "算力被拓展到让它满足证明的需求。",
+        "算力被消耗到让区块满足证明需求.",
+    )
+
+    # Phrase-level: two tight content edits, separated (gap "到让" > merge gap).
+    assert result["phrases"] == [
+        {"kind": "modified", "before": "拓展", "after": "消耗"},
+        {"kind": "modified", "before": "它", "after": "区块"},
+    ]
+    # Noise (虚词 "的" deletion, "。"→"." punctuation) is not listed at all.
+
+    # Inline highlight marks exactly the changed spans inside the analyzed text.
+    marked = [seg["text"] for seg in result["highlight"] if "mark" in seg]
+    assert marked == ["拓展", "它"]
+    rebuilt = "".join(seg["text"] for seg in result["highlight"])
+    assert rebuilt == "算力被拓展到让它满足证明的需求。"
+
+
+def test_translation_diff_marks_insertion_point_and_keeps_only_punct_change() -> None:
+    added = _run_translation_diff("他完成了任务", "他没有完成任务")
+    assert added["phrases"] == [{"kind": "added", "before": None, "after": "没有"}]
+    insert = [seg for seg in added["highlight"] if seg.get("mark", "").find("insert") >= 0]
+    assert insert and insert[0]["text"] == "‸"
+
+    # When the ONLY change is punctuation, it must still be surfaced (fallback).
+    punct = _run_translation_diff("只改标点。", "只改标点!")
+    assert punct["phrases"] == [{"kind": "modified", "before": "。", "after": "!"}]
+
+
+def _run_structure_diff(old: str, new: str) -> dict:
+    """Execute the real structure-highlight JS in node and return its result."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available for JS behavioural test")
+
+    script = _selection_script()
+    # normalizeText is a const arrow, extract it as a single line
+    ns_idx = script.index("const normalizeText")
+    ns_end = script.index("\n", ns_idx)
+    normalize_line = script[ns_idx : ns_end + 1]
+    declarations = [
+        "function describeStructureLine(text, state)",
+        "function parseInputLines(value, inputKind)",
+        "function diffUnits(oldUnits, newUnits)",
+        "function diffInputLines(snapshotValue, currentValue, inputKind)",
+        "function renderStructureHighlight(target, snapshotValue, currentValue)",
+    ]
+    body = normalize_line + "\n" + "\n".join(
+        _extract_js_function(script, decl) for decl in declarations
+    )
+
+    harness = (
+        "class FakeNode {\n"
+        "  constructor(){this.children=[];this.className='';this._text='';"
+        "this.classList={add:(c)=>{this.className=(this.className+' '+c).trim();}};}\n"
+        "  set textContent(v){this._text=v;}\n"
+        "  get textContent(){return this._text;}\n"
+        "  append(...n){this.children.push(...n);}\n"
+        "  replaceChildren(){this.children=[];}\n"
+        "}\n"
+        "const document={createElement:()=>new FakeNode(),"
+        "createTextNode:(t)=>({kind:'#text',value:t})};\n"
+        f"const OLD={json.dumps(old)};\n"
+        f"const NEW={json.dumps(new)};\n"
+        "const target=new FakeNode();\n"
+        "renderStructureHighlight(target,OLD,NEW);\n"
+        "const segments=target.children.map(c=>c.kind==='#text'"
+        "?{text:c.value}:{mark:c.className,text:c.textContent||c._text});\n"
+        "process.stdout.write(JSON.stringify({segments}));\n"
+    )
+    completed = subprocess.run(  # noqa: S603 - local node, fixed args
+        [node, "--input-type=module", "-e", body + harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_structure_highlight_marks_changed_lines_inline() -> None:
+    old = "主干：\n1. 算法处理数据\n修饰成分：\n1. 快速地"
+    new = "主干：\n1. 算法高效处理数据\n修饰成分：\n1. 非常快速地"
+    result = _run_structure_diff(old, new)
+    segments = result["segments"]
+
+    # Unchanged section header and modified content lines should be marked.
+    marked = [s for s in segments if "mark" in s]
+    assert len(marked) == 2  # noqa: PLR2004 - two changed lines
+
+    # The marked items should contain the OLD text of the changed lines.
+    marked_texts = [m["text"] for m in marked]
+    assert "1. 算法处理数据" in marked_texts
+    assert "1. 快速地" in marked_texts
+
+    # Unchanged lines remain as plain text nodes.
+    plain_texts = [s["text"] for s in segments if "mark" not in s]
+    assert any("主干：" in t for t in plain_texts)
+    assert any("修饰成分：" in t for t in plain_texts)
 
 
 def test_word_analysis_panel_shows_role_in_sentence() -> None:
@@ -297,7 +525,8 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     translation_analyze = translation_analyze[: translation_analyze.index('analysisOpen.addEventListener("click"')]
 
     assert "if (translationEditorOpen || structureEditorOpen) return;" in helper
-    assert "if (translationEditorOpen || structureEditorOpen) return;" in update_toolbar
+    assert "if (translationEditorOpen || structureEditorOpen)" in update_toolbar
+    assert "maybeSwitchOpenEditorToSelectedSentence();" in update_toolbar
     assert "hideToolbar();" in helper
     assert "if (readerToolbarBusy) return;" in guarded_helper
     assert "if (seqAtRequest !== toolbarInteractionSeq) return;" in guarded_helper
@@ -308,8 +537,38 @@ def test_analysis_rendering_does_not_close_active_translation_editor() -> None:
     assert "hideToolbar();" in translation_analyze
 
 
+def test_open_toolbar_editor_switches_only_on_whole_sentence_selection() -> None:
+    script = _selection_script()
+    selection_helper = script[script.index("function selectedWholeSentenceFromCurrentSelection"):]
+    selection_helper = selection_helper[: selection_helper.index("function switchOpenEditorToSentence")]
+    switch_helper = script[script.index("function switchOpenEditorToSentence"):]
+    switch_helper = switch_helper[: switch_helper.index("function selectedWordCardIds")]
+    update_toolbar = script[script.index("function updateToolbar()"):]
+    update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
+
+    assert "selectionInsideToolbar(range)" in selection_helper
+    assert "selectionInsideAnalysisPanel(range)" in selection_helper
+    assert "spans.length !== 1" in selection_helper
+    assert 'normalizeText(sentence.textContent || "")' in selection_helper
+    assert "translationEditorOpen && translationEditorDirty" in switch_helper
+    assert "sentenceId: activeSentenceId" in switch_helper
+    assert "value: translationText.value.trim()" in switch_helper
+    assert "lastSavedValue: lastSavedTranslation" in switch_helper
+    assert "activeSentenceId = sentence.dataset.sentenceId;" in switch_helper
+    assert "translationText.value = activeSentenceTranslation;" in switch_helper
+    assert "structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;" in switch_helper
+    assert "setEditingTarget(sentence);" in switch_helper
+    assert "maybeSwitchOpenEditorToSelectedSentence();" in update_toolbar
+
+
 def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     script = _selection_script()
+    enqueue_translation = script[script.index("function enqueueTranslationSave"):]
+    enqueue_translation = enqueue_translation[: enqueue_translation.index("function enqueueStructureSave")]
+    schedule_translation = script[script.index("function scheduleTranslationAutoSave"):]
+    schedule_translation = schedule_translation[: schedule_translation.index("function scheduleStructureAutoSave")]
+    save_options = script[script.index("function captureToolbarSaveOptions"):]
+    save_options = save_options[: save_options.index("function enqueueTranslationSave")]
     open_structure = script[script.index("function openStructureEditor"):]
     open_structure = open_structure[: open_structure.index("async function saveTranslationOnly")]
     save_translation = script[script.index("async function saveTranslationOnly"):]
@@ -329,6 +588,14 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "function scheduleTranslationAutoSave" in script
     assert "function scheduleStructureAutoSave" in script
     assert "function flushPendingToolbarAutoSaveOnPageHide" in script
+    assert "sentenceId: options.sentenceId || activeSentenceId" in save_options
+    assert "value: hasOption(options, \"value\")" in save_options
+    assert "lastSavedValue: hasOption(options, \"lastSavedValue\")" in save_options
+    assert "const saveOptions = captureToolbarSaveOptions(options, translationText, lastSavedTranslation);" in enqueue_translation
+    assert "const sentenceId = activeSentenceId;" in schedule_translation
+    assert "const value = translationText.value.trim();" in schedule_translation
+    assert "const lastSavedValue = lastSavedTranslation;" in schedule_translation
+    assert "enqueueTranslationSave({ automatic: true, keepOpen: true, sentenceId, value, lastSavedValue });" in schedule_translation
     assert "structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;" in open_structure
     assert "translationEditorDirty = true;" in listeners
     assert "structureEditorDirty = true;" in listeners
@@ -340,8 +607,14 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "if (!keepOpen)" in save_structure
     assert "hideToolbar();" in save_translation
     assert "hideToolbar();" in save_structure
-    assert "translationStatus.textContent = automatic ? \"Auto saved\" : \"Saved\";" in save_translation
-    assert "structureStatus.textContent = automatic ? \"Auto saved\" : \"Saved\";" in save_structure
+    assert "const isCurrentEditor = () => sentenceId === activeSentenceId && translationEditorOpen;" in save_translation
+    assert "fetch(`/mark/sentence/${sentenceId}/translation`" in save_translation
+    assert "const sentence = document.getElementById(`sentence-${sentenceId}`);" in save_translation
+    assert "if (isCurrentEditor())" in save_translation
+    assert 'setToolbarStatus(translationStatus, "Auto saving...");' in script
+    assert "setToolbarStatus(translationStatus, automatic ? \"Auto saved\" : \"Saved\");" in save_translation
+    assert 'setToolbarStatus(structureStatus, "Auto saving...");' in script
+    assert "setToolbarStatus(structureStatus, automatic ? \"Auto saved\" : \"Saved\");" in save_structure
     assert "if (!translationEditorOpen && !structureEditorOpen) hideToolbar();" in scroll_listener
     assert 'window.addEventListener("pagehide", flushPendingToolbarAutoSaveOnPageHide);' in script
 
@@ -361,7 +634,7 @@ def test_bare_structure_template_is_not_saved_or_analyzed() -> None:
         'const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];'
         in script
     )
-    assert "if (!structureAttemptHasContent(value) || value === lastSavedStructure) return;" in schedule_structure
+    assert "if (!structureAttemptHasContent(value) || value === lastSavedValue) return;" in schedule_structure
     assert "if (!structureAttemptHasContent(value)) {" in save_structure
     assert "Fill in your structure judgement first." in save_structure
     assert "if (!structureAttemptHasContent(value)) {" in structure_analyze

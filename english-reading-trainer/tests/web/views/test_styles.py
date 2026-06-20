@@ -43,6 +43,9 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "--reader-max-width: 840px" in css
     assert "max-width: var(--reader-max-width)" in css
     assert "#toolbar-analysis-word-status" in css
+    assert ".toolbar-status {\n      flex: 1 0 100%;" in css
+    assert "min-height: 28px;" in css
+    assert "line-height: 18px;" in css
     assert "[data-sentence-id].translated" in css
     assert "text-decoration-style: dotted" in css
     assert ".speak-button" in css
@@ -55,6 +58,7 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "max-height: min(52vh, 360px)" in css
     assert ".similar-mistakes" in css
     assert ".similar-mistake-comparison" in css
+    assert ".analysis-input-diff" in css
 
 
 def test_css_contains_sepia_theme_variables_and_surface_bindings() -> None:
@@ -104,6 +108,31 @@ def test_css_visual_refresh_uses_teal_accent_without_redefining_old_blue() -> No
     assert "--accent: #2563eb" not in css
     assert "--accent-strong: #1d4ed8" not in css
     assert "text-decoration-color: #2563eb" in css
+
+
+def test_css_analysis_input_diff_uses_existing_theme_tokens() -> None:
+    css = _css()
+
+    assert ".diff-added" in css
+    assert ".diff-removed" in css
+    assert ".diff-modified" in css
+    assert ".analysis-input-diff-preview" in css
+    assert "display: block;" in css
+    assert "flex: 1 1 100%;" in css
+    assert "min-width: 0;" in css
+    assert "overflow-wrap: anywhere;" in css
+    assert "grid-template-columns: auto 1fr" not in css
+    assert "background: var(--accent);" in css
+    assert "background: var(--danger);" in css
+    assert "var(--teal)" not in css
+
+
+def test_css_snapshot_inline_diff_marks_are_styled() -> None:
+    css = _css()
+
+    assert ".analysis-snapshot-text mark.diff-mark" in css
+    assert ".analysis-snapshot-text mark.diff-mark-removed" in css
+    assert ".analysis-snapshot-text mark.diff-mark-insert" in css
 
 
 def test_css_visual_refresh_scopes_display_serif_to_titles() -> None:

@@ -203,11 +203,18 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert 'id="sentence-panel-translation"' in html
     assert 'id="sentence-panel-analyzed-translation-section"' in html
     assert 'id="sentence-panel-analyzed-translation"' in html
+    assert 'id="sentence-panel-translation-diff"' in html
+    assert 'id="sentence-panel-translation-diff-count"' in html
+    assert 'id="sentence-panel-translation-diff-list"' in html
     assert "Initial translation analyzed" in html
+    assert "Changes since this analysis" in html
     assert "Your translation" in html
     assert 'id="sentence-panel-structure"' in html
     assert 'id="sentence-panel-analyzed-structure-section"' in html
     assert 'id="sentence-panel-analyzed-structure"' in html
+    assert 'id="sentence-panel-structure-diff"' in html
+    assert 'id="sentence-panel-structure-diff-count"' in html
+    assert 'id="sentence-panel-structure-diff-list"' in html
     assert "Initial structure analyzed" in html
     assert 'id="analysis-structure-attempt-section"' in html
     assert 'id="analysis-structure-feedback-section"' in html

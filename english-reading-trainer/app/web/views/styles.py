@@ -416,9 +416,13 @@ def _css() -> str:
       color: #991b1b;
     }
     .toolbar-status {
+      flex: 1 0 100%;
+      box-sizing: border-box;
+      min-height: 28px;
       padding: 5px 4px;
       color: #e5e7eb;
       font-size: 14px;
+      line-height: 18px;
       white-space: nowrap;
     }
     #toolbar-analysis-word-status {
@@ -802,6 +806,116 @@ def _css() -> str:
       font: inherit;
       font-size: 14px;
       line-height: 1.45;
+    }
+    .analysis-snapshot-text mark.diff-mark {
+      border-radius: 3px;
+      padding: 1px 3px;
+      background: rgba(197, 143, 45, .40);
+      color: var(--text);
+    }
+    .analysis-snapshot-text mark.diff-mark-removed {
+      background: rgba(203, 76, 60, .32);
+    }
+    .analysis-snapshot-text mark.diff-mark-insert {
+      padding: 0 2px;
+      background: transparent;
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+    .analysis-input-diff {
+      margin-top: 8px;
+      border-top: 1px solid var(--line);
+      padding-top: 7px;
+    }
+    .analysis-input-diff summary {
+      cursor: pointer;
+      color: var(--accent-strong);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .analysis-input-diff > summary .analysis-input-diff-label {
+      margin-left: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .analysis-input-diff-count {
+      color: var(--accent-strong);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .analysis-input-diff-list {
+      display: grid;
+      gap: 5px;
+      margin: 7px 0 0;
+      padding-left: 0;
+      list-style: none;
+    }
+    .analysis-input-diff-item {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .analysis-input-diff-detail {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 5px 7px;
+      background: rgba(255, 254, 250, .42);
+    }
+    .analysis-input-diff-detail summary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 7px;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .analysis-input-diff-kind {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 1px 6px;
+      color: var(--surface);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .analysis-input-diff-location {
+      flex: 0 0 auto;
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+    .analysis-input-diff-preview {
+      display: block;
+      flex: 1 1 100%;
+      min-width: 0;
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+    .analysis-input-diff-full {
+      margin-top: 5px;
+      border-top: 1px solid var(--line);
+      padding-top: 5px;
+    }
+    .analysis-input-diff-full-row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 6px;
+      margin: 3px 0 0;
+      color: var(--text-dim);
+      overflow-wrap: anywhere;
+    }
+    .analysis-input-diff-full-row strong {
+      color: var(--muted);
+    }
+    .diff-added .analysis-input-diff-kind {
+      background: var(--accent);
+    }
+    .diff-removed .analysis-input-diff-kind {
+      background: var(--danger);
+    }
+    .diff-modified .analysis-input-diff-kind {
+      background: var(--accent);
     }
     #sentence-panel-note-accept {
       margin-top: 6px;

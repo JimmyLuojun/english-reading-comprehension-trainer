@@ -426,6 +426,13 @@ def _analysis_panel() -> str:
             </p>
             <p class="analysis-snapshot-warning">This analysis was based on an earlier translation.</p>
             <pre id="sentence-panel-analyzed-translation" class="analysis-snapshot-text"></pre>
+            <details id="sentence-panel-translation-diff" class="analysis-input-diff" open>
+              <summary>
+                修改提示 <span id="sentence-panel-translation-diff-count" class="analysis-input-diff-count"></span>
+                <span class="analysis-input-diff-label">Changes since this analysis</span>
+              </summary>
+              <ol id="sentence-panel-translation-diff-list" class="analysis-input-diff-list"></ol>
+            </details>
           </div>
           <textarea id="sentence-panel-translation" rows="4" placeholder="Edit your Chinese understanding"></textarea>
           <div class="word-notes-actions">
@@ -442,6 +449,13 @@ def _analysis_panel() -> str:
             </p>
             <p class="analysis-snapshot-warning">This analysis was based on an earlier structure attempt.</p>
             <pre id="sentence-panel-analyzed-structure" class="analysis-snapshot-text"></pre>
+            <details id="sentence-panel-structure-diff" class="analysis-input-diff" open>
+              <summary>
+                修改提示 <span id="sentence-panel-structure-diff-count" class="analysis-input-diff-count"></span>
+                <span class="analysis-input-diff-label">Changes since this analysis</span>
+              </summary>
+              <ol id="sentence-panel-structure-diff-list" class="analysis-input-diff-list"></ol>
+            </details>
           </div>
           <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代逻辑："></textarea>
           <div class="word-notes-actions">

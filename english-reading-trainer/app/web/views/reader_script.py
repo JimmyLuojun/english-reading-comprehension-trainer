@@ -87,12 +87,18 @@ def _fragment_refs_and_state() -> str:
       const backToWhole = document.getElementById("analysis-back-to-whole");
       const sentencePanelAnalyzedTranslationSection = document.getElementById("sentence-panel-analyzed-translation-section");
       const sentencePanelAnalyzedTranslation = document.getElementById("sentence-panel-analyzed-translation");
+      const sentencePanelTranslationDiff = document.getElementById("sentence-panel-translation-diff");
+      const sentencePanelTranslationDiffCount = document.getElementById("sentence-panel-translation-diff-count");
+      const sentencePanelTranslationDiffList = document.getElementById("sentence-panel-translation-diff-list");
       const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
       const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
       const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
       const structureAttemptSection = document.getElementById("analysis-structure-attempt-section");
       const sentencePanelAnalyzedStructureSection = document.getElementById("sentence-panel-analyzed-structure-section");
       const sentencePanelAnalyzedStructure = document.getElementById("sentence-panel-analyzed-structure");
+      const sentencePanelStructureDiff = document.getElementById("sentence-panel-structure-diff");
+      const sentencePanelStructureDiffCount = document.getElementById("sentence-panel-structure-diff-count");
+      const sentencePanelStructureDiffList = document.getElementById("sentence-panel-structure-diff-list");
       const sentencePanelStructure = document.getElementById("sentence-panel-structure");
       const sentencePanelStructureSave = document.getElementById("sentence-panel-structure-save");
       const sentencePanelStructureStatus = document.getElementById("sentence-panel-structure-status");
@@ -130,6 +136,14 @@ def _fragment_refs_and_state() -> str:
       const AUTOSAVE_DELAY_MS = 700;
       const STRUCTURE_TEMPLATE = "主干：\n从句：\n修饰成分：\n指代逻辑：";
       const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];
+      const INPUT_DIFF_PREVIEW_MAX = 34;
+      // Two token-level changes separated by a same-run this short (visible
+      // chars) belong to one logical edit, so they merge into a single phrase.
+      // Wider gaps stay separate, keeping hints tight instead of fragmented.
+      const TRANSLATION_MERGE_GAP = 1;
+      // Isolated changes made only of these 虚词 (or pure punctuation) are
+      // noise for "quickly locate what changed" and are dropped from hints.
+      const TRANSLATION_FUNCTION_CHARS = "的了是着地得之乎者吗呢吧啊呀儿";
 
       // The structure editors prefill STRUCTURE_TEMPLATE as real text so the
       // learner can fill in only the parts they are unsure of. Treat a value
@@ -214,6 +228,7 @@ def _fragment_refs_and_state() -> str:
       let analysisWordActionInProgress = false;
       let readerToolbarBusy = false;
       let toolbarInteractionSeq = 0;
+      let toolbarRepositionFrame = null;
       let activeSelectionAnalysisContextText = "";
       let copyStatusTimer = null;
       let translationSaveChain = Promise.resolve();
@@ -375,41 +390,64 @@ def _fragment_toolbar_selection() -> str:
         }
       }
 
+      function hasOption(options, key) {
+        return Object.prototype.hasOwnProperty.call(options, key);
+      }
+
+      function captureToolbarSaveOptions(options, textElement, lastSavedValue) {
+        return {
+          ...options,
+          sentenceId: options.sentenceId || activeSentenceId,
+          value: hasOption(options, "value")
+            ? String(options.value || "").trim()
+            : textElement.value.trim(),
+          lastSavedValue: hasOption(options, "lastSavedValue")
+            ? String(options.lastSavedValue || "").trim()
+            : String(lastSavedValue || "").trim(),
+        };
+      }
+
       function enqueueTranslationSave(options = {}) {
+        const saveOptions = captureToolbarSaveOptions(options, translationText, lastSavedTranslation);
         translationSaveChain = translationSaveChain
           .catch(() => {})
-          .then(() => saveTranslationOnly(options));
+          .then(() => saveTranslationOnly(saveOptions));
         return translationSaveChain;
       }
 
       function enqueueStructureSave(options = {}) {
+        const saveOptions = captureToolbarSaveOptions(options, structureText, lastSavedStructure);
         structureSaveChain = structureSaveChain
           .catch(() => {})
-          .then(() => saveStructureOnly(options));
+          .then(() => saveStructureOnly(saveOptions));
         return structureSaveChain;
       }
 
       function scheduleTranslationAutoSave(delay = AUTOSAVE_DELAY_MS) {
         clearTranslationAutoSaveTimer();
         if (!translationEditorOpen || !activeSentenceId) return;
+        const sentenceId = activeSentenceId;
         const value = translationText.value.trim();
-        if (!value || value === lastSavedTranslation) return;
-        translationStatus.textContent = "Auto saving...";
+        const lastSavedValue = lastSavedTranslation;
+        if (!value || value === lastSavedValue) return;
+        setToolbarStatus(translationStatus, "Auto saving...");
         translationAutoSaveTimer = window.setTimeout(() => {
           translationAutoSaveTimer = null;
-          enqueueTranslationSave({ automatic: true, keepOpen: true });
+          enqueueTranslationSave({ automatic: true, keepOpen: true, sentenceId, value, lastSavedValue });
         }, delay);
       }
 
       function scheduleStructureAutoSave(delay = AUTOSAVE_DELAY_MS) {
         clearStructureAutoSaveTimer();
         if (!structureEditorOpen || !activeSentenceId) return;
+        const sentenceId = activeSentenceId;
         const value = structureText.value.trim();
-        if (!structureAttemptHasContent(value) || value === lastSavedStructure) return;
-        structureStatus.textContent = "Auto saving...";
+        const lastSavedValue = lastSavedStructure;
+        if (!structureAttemptHasContent(value) || value === lastSavedValue) return;
+        setToolbarStatus(structureStatus, "Auto saving...");
         structureAutoSaveTimer = window.setTimeout(() => {
           structureAutoSaveTimer = null;
-          enqueueStructureSave({ automatic: true, keepOpen: true });
+          enqueueStructureSave({ automatic: true, keepOpen: true, sentenceId, value, lastSavedValue });
         }, delay);
       }
 
@@ -509,7 +547,7 @@ def _fragment_toolbar_selection() -> str:
         clearTranslationAutoSaveTimer();
         translationEditor.hidden = true;
         translationEditorOpen = false;
-        translationStatus.textContent = "";
+        setToolbarStatus(translationStatus, "");
         if (translationEditor.contains(document.activeElement)) {
           blurToolbarFocus();
         }
@@ -519,7 +557,7 @@ def _fragment_toolbar_selection() -> str:
         clearStructureAutoSaveTimer();
         structureEditor.hidden = true;
         structureEditorOpen = false;
-        structureStatus.textContent = "";
+        setToolbarStatus(structureStatus, "");
         if (structureEditor.contains(document.activeElement)) {
           blurToolbarFocus();
         }
@@ -555,6 +593,10 @@ def _fragment_toolbar_selection() -> str:
 
       function hideToolbar() {
         clearScheduledToolbarHide();
+        if (toolbarRepositionFrame) {
+          window.cancelAnimationFrame(toolbarRepositionFrame);
+          toolbarRepositionFrame = null;
+        }
         hideAllPanels();
         toolbar.hidden = true;
         activeSentenceId = null;
@@ -603,6 +645,91 @@ def _fragment_toolbar_selection() -> str:
             return false;
           }
         });
+      }
+
+      function selectedWholeSentenceFromCurrentSelection() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+        const range = selection.getRangeAt(0);
+        if (selectionInsideToolbar(range) || selectionInsideAnalysisPanel(range)) return null;
+        const selectedText = selection.toString().trim();
+        const normalizedSelection = normalizeText(selectedText);
+        if (!normalizedSelection) return null;
+        const spans = selectedSentenceSpans(range);
+        if (spans.length !== 1) return null;
+        const sentence = spans[0];
+        return normalizedSelection === normalizeText(sentence.textContent || "") ? sentence : null;
+      }
+
+      function switchOpenEditorToSentence(sentence) {
+        if (!sentence?.dataset.sentenceId || sentence.dataset.sentenceId === activeSentenceId) {
+          if (sentence) positionToolbar(sentence.getBoundingClientRect());
+          return;
+        }
+        if (translationEditorOpen && translationEditorDirty) {
+          clearTranslationAutoSaveTimer();
+          enqueueTranslationSave({
+            automatic: true,
+            keepOpen: true,
+            sentenceId: activeSentenceId,
+            value: translationText.value.trim(),
+            lastSavedValue: lastSavedTranslation,
+          });
+        }
+        if (structureEditorOpen && structureEditorDirty) {
+          clearStructureAutoSaveTimer();
+          enqueueStructureSave({
+            automatic: true,
+            keepOpen: true,
+            sentenceId: activeSentenceId,
+            value: structureText.value.trim(),
+            lastSavedValue: lastSavedStructure,
+          });
+        }
+
+        activeSentenceId = sentence.dataset.sentenceId;
+        activeSentenceTranslation = sentence.dataset.translation || "";
+        activeSentenceStructure = sentence.dataset.structure || "";
+        activeWordCardId = null;
+        activeWordCardIds = [];
+
+        sentenceForm.action = `/mark/sentence/${activeSentenceId}`;
+        translationForm.action = `/mark/sentence/${activeSentenceId}/translation`;
+        sentenceSubmit.hidden = sentence.dataset.marked === "1";
+        sentenceDelete.hidden = sentence.dataset.marked !== "1";
+        translationOpen.hidden = false;
+        structureOpen.hidden = false;
+        translationDelete.hidden = !activeSentenceTranslation;
+        analysisOpen.hidden = false;
+        translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
+        structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
+        analysisOpen.textContent = analysisButtonLabel(sentence);
+        configureCrossSentenceActions([]);
+        setVisible(sentenceForm, true);
+        setVisible(wordForm, false);
+        setVisible(wordDetail, false);
+        setVisible(crossSentence, false);
+
+        if (translationEditorOpen) {
+          translationText.value = activeSentenceTranslation;
+          lastSavedTranslation = activeSentenceTranslation.trim();
+          translationEditorDirty = false;
+          setToolbarStatus(translationStatus, "");
+        }
+        if (structureEditorOpen) {
+          structureText.value = activeSentenceStructure || STRUCTURE_TEMPLATE;
+          lastSavedStructure = activeSentenceStructure.trim();
+          structureEditorDirty = false;
+          setToolbarStatus(structureStatus, "");
+        }
+        setEditingTarget(sentence);
+        positionToolbar(sentence.getBoundingClientRect());
+      }
+
+      function maybeSwitchOpenEditorToSelectedSentence() {
+        const sentence = selectedWholeSentenceFromCurrentSelection();
+        if (!sentence) return;
+        switchOpenEditorToSentence(sentence);
       }
 
       function selectedWordCardIds(range) {
@@ -814,6 +941,24 @@ def _fragment_toolbar_selection() -> str:
           toolbar.style.top = `${window.scrollY + clampedTop}px`;
           toolbar.style.left = `${left}px`;
         });
+      }
+
+      function scheduleToolbarReposition() {
+        if (toolbar.hidden || (!translationEditorOpen && !structureEditorOpen)) return;
+        if (!activeSentenceId) return;
+        const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+        if (!sentence) return;
+        if (toolbarRepositionFrame) window.cancelAnimationFrame(toolbarRepositionFrame);
+        toolbarRepositionFrame = window.requestAnimationFrame(() => {
+          toolbarRepositionFrame = null;
+          positionToolbar(sentence.getBoundingClientRect());
+        });
+      }
+
+      function setToolbarStatus(statusElement, message) {
+        if (!statusElement) return;
+        statusElement.textContent = message;
+        scheduleToolbarReposition();
       }
 
       function showToolbar(range) {
@@ -1334,7 +1479,10 @@ def _fragment_toolbar_selection() -> str:
           suppressNextUpdate = false;
           return;
         }
-        if (translationEditorOpen || structureEditorOpen) return;
+        if (translationEditorOpen || structureEditorOpen) {
+          maybeSwitchOpenEditorToSelectedSentence();
+          return;
+        }
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
           if (analysisWordActionInProgress) return;
@@ -1658,7 +1806,7 @@ def _fragment_reader_progress_and_actions() -> str:
         translationEditorDirty = false;
         translationEditor.hidden = false;
         translationEditorOpen = true;
-        translationStatus.textContent = "";
+        setToolbarStatus(translationStatus, "");
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
@@ -1683,7 +1831,7 @@ def _fragment_reader_progress_and_actions() -> str:
         structureEditorDirty = false;
         structureEditor.hidden = false;
         structureEditorOpen = true;
-        structureStatus.textContent = "";
+        setToolbarStatus(structureStatus, "");
         setVisible(wordForm, false);
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
@@ -1698,25 +1846,32 @@ def _fragment_reader_progress_and_actions() -> str:
         clearTranslationAutoSaveTimer();
         const automatic = Boolean(options.automatic);
         const keepOpen = Boolean(options.keepOpen);
-        const value = translationText.value.trim();
+        const sentenceId = options.sentenceId || activeSentenceId;
+        const value = hasOption(options, "value")
+          ? String(options.value || "").trim()
+          : translationText.value.trim();
+        const lastSavedValue = hasOption(options, "lastSavedValue")
+          ? String(options.lastSavedValue || "").trim()
+          : lastSavedTranslation;
+        const isCurrentEditor = () => sentenceId === activeSentenceId && translationEditorOpen;
         if (!value) {
           if (!automatic) {
-            translationStatus.textContent = "Enter a translation first, or use AI analysis without saving.";
+            setToolbarStatus(translationStatus, "Enter a translation first, or use AI analysis without saving.");
           }
           return true;
         }
-        if (value === lastSavedTranslation) {
-          translationEditorDirty = false;
-          if (!automatic) translationStatus.textContent = "Saved";
+        if (value === lastSavedValue) {
+          if (isCurrentEditor()) translationEditorDirty = false;
+          if (!automatic) setToolbarStatus(translationStatus, "Saved");
           return true;
         }
-        if (!activeSentenceId) return;
+        if (!sentenceId) return;
         const anchor = captureReadingAnchor();
-        translationStatus.textContent = "Saving...";
+        if (isCurrentEditor()) setToolbarStatus(translationStatus, "Saving...");
         const body = new URLSearchParams({ user_translation: value, return_to: returnTo });
         readerToolbarBusy = true;
         try {
-          const response = await fetch(`/mark/sentence/${activeSentenceId}/translation`, {
+          const response = await fetch(`/mark/sentence/${sentenceId}/translation`, {
             method: "POST",
             headers: {"Content-Type": "application/x-www-form-urlencoded"},
             body: body.toString(),
@@ -1726,15 +1881,17 @@ def _fragment_reader_progress_and_actions() -> str:
             window.location.assign(response.url || returnTo);
             return false;
           }
-          const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+          const sentence = document.getElementById(`sentence-${sentenceId}`);
           markSentenceTranslated(sentence, value);
-          activeSentenceTranslation = value;
-          lastSavedTranslation = value;
-          translationEditorDirty = false;
-          translationDelete.hidden = false;
-          translationOpen.textContent = "Update translation";
-          analysisOpen.textContent = "Check translation";
-          translationStatus.textContent = automatic ? "Auto saved" : "Saved";
+          if (isCurrentEditor()) {
+            activeSentenceTranslation = value;
+            lastSavedTranslation = value;
+            translationEditorDirty = false;
+            translationDelete.hidden = false;
+            translationOpen.textContent = "Update translation";
+            analysisOpen.textContent = "Check translation";
+            setToolbarStatus(translationStatus, automatic ? "Auto saved" : "Saved");
+          }
           if (!keepOpen) {
             window.getSelection()?.removeAllRanges();
             hideToolbar();
@@ -1743,7 +1900,7 @@ def _fragment_reader_progress_and_actions() -> str:
           return true;
         } catch (error) {
           if (automatic || keepOpen) {
-            translationStatus.textContent = `Save failed: ${error}`;
+            if (isCurrentEditor()) setToolbarStatus(translationStatus, `Save failed: ${error}`);
             return false;
           }
           window.location.assign(returnTo);
@@ -1767,23 +1924,30 @@ def _fragment_reader_progress_and_actions() -> str:
         clearStructureAutoSaveTimer();
         const automatic = Boolean(options.automatic);
         const keepOpen = Boolean(options.keepOpen);
-        const value = structureText.value.trim();
+        const sentenceId = options.sentenceId || activeSentenceId;
+        const value = hasOption(options, "value")
+          ? String(options.value || "").trim()
+          : structureText.value.trim();
+        const lastSavedValue = hasOption(options, "lastSavedValue")
+          ? String(options.lastSavedValue || "").trim()
+          : lastSavedStructure;
+        const isCurrentEditor = () => sentenceId === activeSentenceId && structureEditorOpen;
         if (!structureAttemptHasContent(value)) {
-          if (!automatic) structureStatus.textContent = "Fill in your structure judgement first.";
+          if (!automatic) setToolbarStatus(structureStatus, "Fill in your structure judgement first.");
           return true;
         }
-        if (value === lastSavedStructure) {
-          structureEditorDirty = false;
-          if (!automatic) structureStatus.textContent = "Saved";
+        if (value === lastSavedValue) {
+          if (isCurrentEditor()) structureEditorDirty = false;
+          if (!automatic) setToolbarStatus(structureStatus, "Saved");
           return true;
         }
-        if (!activeSentenceId) return;
+        if (!sentenceId) return;
         const anchor = captureReadingAnchor();
-        structureStatus.textContent = "Saving...";
+        if (isCurrentEditor()) setToolbarStatus(structureStatus, "Saving...");
         const body = new URLSearchParams({ user_structure: value, return_to: returnTo });
         readerToolbarBusy = true;
         try {
-          const response = await fetch(`/mark/sentence/${activeSentenceId}/structure`, {
+          const response = await fetch(`/mark/sentence/${sentenceId}/structure`, {
             method: "POST",
             headers: {"Content-Type": "application/x-www-form-urlencoded"},
             body: body.toString(),
@@ -1793,13 +1957,15 @@ def _fragment_reader_progress_and_actions() -> str:
             window.location.assign(response.url || returnTo);
             return false;
           }
-          const sentence = document.getElementById(`sentence-${activeSentenceId}`);
+          const sentence = document.getElementById(`sentence-${sentenceId}`);
           markSentenceStructured(sentence, value);
-          activeSentenceStructure = value;
-          lastSavedStructure = value;
-          structureEditorDirty = false;
-          structureOpen.textContent = "Update structure";
-          structureStatus.textContent = automatic ? "Auto saved" : "Saved";
+          if (isCurrentEditor()) {
+            activeSentenceStructure = value;
+            lastSavedStructure = value;
+            structureEditorDirty = false;
+            structureOpen.textContent = "Update structure";
+            setToolbarStatus(structureStatus, automatic ? "Auto saved" : "Saved");
+          }
           if (!keepOpen) {
             window.getSelection()?.removeAllRanges();
             hideToolbar();
@@ -1808,7 +1974,7 @@ def _fragment_reader_progress_and_actions() -> str:
           return true;
         } catch (error) {
           if (automatic || keepOpen) {
-            structureStatus.textContent = `Save failed: ${error}`;
+            if (isCurrentEditor()) setToolbarStatus(structureStatus, `Save failed: ${error}`);
             return false;
           }
           window.location.assign(returnTo);
@@ -2089,13 +2255,427 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelRetryPro) panelRetryPro.hidden = !retryable;
       }
 
-      function setAnalysisInputSnapshot(section, target, snapshotValue, currentValue) {
+      function truncateDiffText(text, max = INPUT_DIFF_PREVIEW_MAX) {
+        const chars = Array.from(String(text || "").trim());
+        if (chars.length <= max) return chars.join("");
+        return `${chars.slice(0, max).join("")}...`;
+      }
+
+      function describeStructureLine(text, state) {
+        const trimmed = String(text || "").trim();
+        const sectionLabels = ["主干：", "从句：", "修饰成分：", "指代逻辑："];
+        const matchedLabel = sectionLabels.find((label) => trimmed.startsWith(label));
+        if (matchedLabel) {
+          state.section = matchedLabel.slice(0, -1);
+          state.counts[state.section] = 0;
+          return state.section;
+        }
+        const numbered = trimmed.match(/^(\d+)[.、]/);
+        if (numbered && state.section) {
+          return `${state.section} ${numbered[1]}`;
+        }
+        if (state.section) {
+          state.counts[state.section] = (state.counts[state.section] || 0) + 1;
+          return state.counts[state.section] > 1
+            ? `${state.section} ${state.counts[state.section]}`
+            : state.section;
+        }
+        return "结构";
+      }
+
+      function parseInputLines(value, inputKind) {
+        const structureState = { section: "", counts: {} };
+        return String(value || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((text) => ({
+            text,
+            key: normalizeText(text),
+            location: inputKind === "structure"
+              ? describeStructureLine(text, structureState)
+              : "译文",
+          }));
+      }
+
+      function diffUnits(oldUnits, newUnits) {
+        const dp = Array.from({ length: oldUnits.length + 1 }, () =>
+          Array(newUnits.length + 1).fill(0),
+        );
+        for (let i = oldUnits.length - 1; i >= 0; i -= 1) {
+          for (let j = newUnits.length - 1; j >= 0; j -= 1) {
+            if (oldUnits[i].key === newUnits[j].key) {
+              dp[i][j] = dp[i + 1][j + 1] + 1;
+            } else {
+              dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+          }
+        }
+
+        const operations = [];
+        let i = 0;
+        let j = 0;
+        while (i < oldUnits.length && j < newUnits.length) {
+          if (oldUnits[i].key === newUnits[j].key) {
+            operations.push({ kind: "same", unit: oldUnits[i] });
+            i += 1;
+            j += 1;
+          } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            operations.push({ kind: "removed", unit: oldUnits[i] });
+            i += 1;
+          } else {
+            operations.push({ kind: "added", unit: newUnits[j] });
+            j += 1;
+          }
+        }
+        while (i < oldUnits.length) {
+          operations.push({ kind: "removed", unit: oldUnits[i] });
+          i += 1;
+        }
+        while (j < newUnits.length) {
+          operations.push({ kind: "added", unit: newUnits[j] });
+          j += 1;
+        }
+        return operations;
+      }
+
+      function diffInputLines(snapshotValue, currentValue, inputKind) {
+        const oldLines = parseInputLines(snapshotValue, inputKind);
+        const newLines = parseInputLines(currentValue, inputKind);
+        return diffUnits(oldLines, newLines)
+          .map((operation) => ({ kind: operation.kind, line: operation.unit }));
+      }
+
+      function translationTokenType(char) {
+        if (/\s/.test(char)) return "space";
+        if (/[\p{Script=Han}]/u.test(char)) return "han";
+        if (/[A-Za-z0-9]/.test(char)) return "latin";
+        return "punct";
+      }
+
+      function tokenizeTranslation(value) {
+        const tokens = [];
+        let buffer = "";
+        let bufferType = "";
+        for (const char of Array.from(String(value || ""))) {
+          const charType = translationTokenType(char);
+          const shouldFlush =
+            buffer &&
+            (charType !== bufferType || charType === "han" || charType === "punct");
+          if (shouldFlush) {
+            tokens.push({ text: buffer, key: normalizeText(buffer), location: "译文" });
+            buffer = "";
+          }
+          buffer += char;
+          bufferType = charType;
+        }
+        if (buffer) {
+          tokens.push({ text: buffer, key: normalizeText(buffer), location: "译文" });
+        }
+        return tokens;
+      }
+
+      function compactTranslationText(tokens) {
+        return tokens.map((token) => token.text).join("").replace(/\s+/g, " ").trim();
+      }
+
+      function visibleTranslationText(text) {
+        return String(text || "").replace(/\s+/g, "");
+      }
+
+      function isNoiseTranslationChange(changedText) {
+        const visible = visibleTranslationText(changedText);
+        if (!visible) return true;
+        if (!/[\p{Script=Han}A-Za-z0-9]/u.test(visible)) return true;
+        return Array.from(visible).every((char) =>
+          TRANSLATION_FUNCTION_CHARS.includes(char),
+        );
+      }
+
+      function groupTranslationRegions(operations) {
+        const runs = [];
+        let index = 0;
+        while (index < operations.length) {
+          if (operations[index].kind === "same") {
+            index += 1;
+            continue;
+          }
+          const start = index;
+          while (index < operations.length && operations[index].kind !== "same") {
+            index += 1;
+          }
+          runs.push({ start, end: index });
+        }
+
+        const merged = [];
+        for (const run of runs) {
+          const previous = merged[merged.length - 1];
+          if (previous) {
+            const gapText = operations
+              .slice(previous.end, run.start)
+              .map((operation) => operation.unit.text)
+              .join("");
+            if (visibleTranslationText(gapText).length <= TRANSLATION_MERGE_GAP) {
+              previous.end = run.end;
+              continue;
+            }
+          }
+          merged.push({ start: run.start, end: run.end });
+        }
+        return merged;
+      }
+
+      function regionTranslationTexts(operations, region) {
+        const slice = operations.slice(region.start, region.end);
+        const before = compactTranslationText(
+          slice.filter((operation) => operation.kind !== "added").map((operation) => operation.unit),
+        );
+        const after = compactTranslationText(
+          slice.filter((operation) => operation.kind !== "removed").map((operation) => operation.unit),
+        );
+        const changed = slice
+          .filter((operation) => operation.kind !== "same")
+          .map((operation) => operation.unit.text)
+          .join("");
+        return { before, after, changed };
+      }
+
+      function analyzeTranslationDiff(snapshotValue, currentValue) {
+        const operations = diffUnits(
+          tokenizeTranslation(snapshotValue),
+          tokenizeTranslation(currentValue),
+        );
+        const detailed = groupTranslationRegions(operations).map((region) => {
+          const texts = regionTranslationTexts(operations, region);
+          return {
+            ...region,
+            ...texts,
+            kind: texts.before && texts.after
+              ? "modified"
+              : texts.before
+                ? "removed"
+                : "added",
+          };
+        });
+        const kept = detailed.filter((region) => !isNoiseTranslationChange(region.changed));
+        return { operations, regions: kept.length ? kept : detailed };
+      }
+
+      function diffTranslationPhrases(snapshotValue, currentValue) {
+        return analyzeTranslationDiff(snapshotValue, currentValue).regions.map((region) => ({
+          kind: region.kind,
+          before: region.before ? { text: region.before, location: "译文" } : null,
+          after: region.after ? { text: region.after, location: "译文" } : null,
+        }));
+      }
+
+      function oldTranslationText(operations) {
+        return operations
+          .filter((operation) => operation.kind !== "added")
+          .map((operation) => operation.unit.text)
+          .join("");
+      }
+
+      function renderTranslationHighlight(target, snapshotValue, currentValue) {
+        if (!target) return;
+        const { operations, regions } = analyzeTranslationDiff(snapshotValue, currentValue);
+        target.replaceChildren();
+        let pointer = 0;
+        for (const region of regions) {
+          const plain = oldTranslationText(operations.slice(pointer, region.start));
+          if (plain) target.append(document.createTextNode(plain));
+          const oldSpan = oldTranslationText(operations.slice(region.start, region.end));
+          const mark = document.createElement("mark");
+          mark.className = `diff-mark diff-mark-${region.kind}`;
+          if (oldSpan) {
+            mark.textContent = oldSpan;
+          } else {
+            mark.classList.add("diff-mark-insert");
+            mark.textContent = "‸";
+          }
+          target.append(mark);
+          pointer = region.end;
+        }
+        const tail = oldTranslationText(operations.slice(pointer));
+        if (tail) target.append(document.createTextNode(tail));
+      }
+
+      function renderStructureHighlight(target, snapshotValue, currentValue) {
+        if (!target) return;
+        const operations = diffInputLines(snapshotValue, currentValue, "structure");
+        target.replaceChildren();
+        let index = 0;
+        while (index < operations.length) {
+          const op = operations[index];
+          if (op.kind === "same") {
+            target.append(document.createTextNode(op.line.text + "\n"));
+            index += 1;
+            continue;
+          }
+          const removed = [];
+          const added = [];
+          while (index < operations.length && operations[index].kind !== "same") {
+            if (operations[index].kind === "removed") removed.push(operations[index].line);
+            else added.push(operations[index].line);
+            index += 1;
+          }
+          const count = Math.max(removed.length, added.length);
+          for (let di = 0; di < count; di += 1) {
+            const removedLine = removed[di] || null;
+            const addedLine = added[di] || null;
+            if (removedLine) {
+              const kind = addedLine ? "modified" : "removed";
+              const mark = document.createElement("mark");
+              mark.className = `diff-mark diff-mark-${kind}`;
+              mark.textContent = removedLine.text;
+              target.append(mark);
+              target.append(document.createTextNode("\n"));
+            } else {
+              const mark = document.createElement("mark");
+              mark.className = "diff-mark diff-mark-insert";
+              mark.textContent = "‸";
+              target.append(mark);
+              target.append(document.createTextNode("\n"));
+            }
+          }
+        }
+      }
+
+      function formatDiffPreview(beforeLine, afterLine) {
+        const before = beforeLine ? truncateDiffText(beforeLine.text) : "";
+        const after = afterLine ? truncateDiffText(afterLine.text) : "";
+        if (before && after) return `${before} → ${after}`;
+        return before || after;
+      }
+
+      function appendFullDiffText(container, label, line) {
+        if (!line) return;
+        const row = document.createElement("p");
+        row.className = "analysis-input-diff-full-row";
+        const labelElement = document.createElement("strong");
+        labelElement.textContent = label;
+        const textElement = document.createElement("span");
+        textElement.textContent = line.text;
+        row.append(labelElement, textElement);
+        container.append(row);
+      }
+
+      function appendInputDiffItem(list, kind, label, beforeLine, afterLine) {
+        const item = document.createElement("li");
+        item.className = `analysis-input-diff-item diff-${kind}`;
+        const details = document.createElement("details");
+        details.className = "analysis-input-diff-detail";
+        const summary = document.createElement("summary");
+        summary.className = "analysis-input-diff-main";
+        const badge = document.createElement("span");
+        badge.className = "analysis-input-diff-kind";
+        badge.textContent = label;
+        const location = document.createElement("span");
+        location.className = "analysis-input-diff-location";
+        location.textContent = afterLine?.location || beforeLine?.location || "";
+        const preview = document.createElement("span");
+        preview.className = "analysis-input-diff-preview";
+        preview.textContent = formatDiffPreview(beforeLine, afterLine);
+        summary.append(badge, location, preview);
+        const full = document.createElement("div");
+        full.className = "analysis-input-diff-full";
+        appendFullDiffText(full, "原来", beforeLine);
+        appendFullDiffText(full, "现在", afterLine);
+        details.append(summary, full);
+        item.append(details);
+        list.append(item);
+      }
+
+      function renderInputDiff(details, list, countTarget, snapshotValue, currentValue, inputKind) {
+        if (!details || !list) return;
+        list.replaceChildren();
+        if (inputKind === "translation") {
+          for (const phrase of diffTranslationPhrases(snapshotValue, currentValue)) {
+            if (phrase.kind === "modified") {
+              appendInputDiffItem(list, "modified", "修改", phrase.before, phrase.after);
+            } else if (phrase.kind === "removed") {
+              appendInputDiffItem(list, "removed", "删除", phrase.before, null);
+            } else {
+              appendInputDiffItem(list, "added", "新增", null, phrase.after);
+            }
+          }
+          if (countTarget) {
+            countTarget.textContent = list.childElementCount
+              ? `${list.childElementCount} 处`
+              : "";
+          }
+          details.hidden = !list.childElementCount;
+          return;
+        }
+
+        const operations = diffInputLines(snapshotValue, currentValue, inputKind);
+        let index = 0;
+        while (index < operations.length) {
+          if (operations[index].kind === "same") {
+            index += 1;
+            continue;
+          }
+
+          const removed = [];
+          const added = [];
+          while (index < operations.length && operations[index].kind !== "same") {
+            const operation = operations[index];
+            if (operation.kind === "removed") removed.push(operation.line);
+            if (operation.kind === "added") added.push(operation.line);
+            index += 1;
+          }
+
+          const count = Math.max(removed.length, added.length);
+          for (let diffIndex = 0; diffIndex < count; diffIndex += 1) {
+            const removedLine = removed[diffIndex] || null;
+            const addedLine = added[diffIndex] || null;
+            if (removedLine && addedLine) {
+              appendInputDiffItem(list, "modified", "修改", removedLine, addedLine);
+            } else if (removedLine) {
+              appendInputDiffItem(list, "removed", "删除", removedLine, null);
+            } else if (addedLine) {
+              appendInputDiffItem(list, "added", "新增", null, addedLine);
+            }
+          }
+        }
+        if (countTarget) {
+          countTarget.textContent = list.childElementCount
+            ? `${list.childElementCount} 处`
+            : "";
+        }
+        details.hidden = !list.childElementCount;
+      }
+
+      function setAnalysisInputSnapshot(
+        section,
+        target,
+        diffDetails,
+        diffCount,
+        diffList,
+        snapshotValue,
+        currentValue,
+        inputKind,
+      ) {
         if (!section || !target) return;
         const snapshot = String(snapshotValue || "").trim();
         const current = String(currentValue || "").trim();
         const shouldShow = snapshot && normalizeText(snapshot) !== normalizeText(current);
         section.hidden = !shouldShow;
-        target.textContent = shouldShow ? snapshot : "";
+        if (shouldShow) {
+          if (inputKind === "translation") {
+            renderTranslationHighlight(target, snapshot, current);
+          } else if (inputKind === "structure") {
+            renderStructureHighlight(target, snapshot, current);
+          } else {
+            target.textContent = snapshot;
+          }
+          renderInputDiff(diffDetails, diffList, diffCount, snapshot, current, inputKind);
+        } else {
+          target.textContent = "";
+          if (diffList) diffList.replaceChildren();
+          if (diffDetails) diffDetails.hidden = true;
+          if (diffCount) diffCount.textContent = "";
+        }
       }
 
       function setSentenceStudyFields(payload) {
@@ -2103,8 +2683,12 @@ def _fragment_analysis_panel_rendering() -> str:
         setAnalysisInputSnapshot(
           sentencePanelAnalyzedTranslationSection,
           sentencePanelAnalyzedTranslation,
+          sentencePanelTranslationDiff,
+          sentencePanelTranslationDiffCount,
+          sentencePanelTranslationDiffList,
           payload.analyzed_translation || "",
           payload.user_translation || "",
+          "translation",
         );
         if (sentencePanelTranslation) {
           sentencePanelTranslation.value = payload.user_translation || "";
@@ -2114,8 +2698,12 @@ def _fragment_analysis_panel_rendering() -> str:
         setAnalysisInputSnapshot(
           sentencePanelAnalyzedStructureSection,
           sentencePanelAnalyzedStructure,
+          sentencePanelStructureDiff,
+          sentencePanelStructureDiffCount,
+          sentencePanelStructureDiffList,
           payload.analyzed_structure || "",
           payload.user_structure || "",
+          "structure",
         );
         if (sentencePanelStructure) {
           sentencePanelStructure.value = payload.user_structure || STRUCTURE_TEMPLATE;
@@ -3026,7 +3614,7 @@ def _fragment_bootstrap() -> str:
         const translation = activeSentenceTranslation || null;
         const hasAnyTranslation = Boolean(translation);
         if (!structureAttemptHasContent(value)) {
-          structureStatus.textContent = "Fill in your structure judgement first.";
+          setToolbarStatus(structureStatus, "Fill in your structure judgement first.");
           return;
         }
         hideToolbar();
@@ -3327,6 +3915,10 @@ def _fragment_bootstrap() -> str:
       });
       document.addEventListener("keydown", handleReaderShortcut);
       document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
+      if ("ResizeObserver" in window) {
+        const toolbarResizeObserver = new ResizeObserver(() => scheduleToolbarReposition());
+        toolbarResizeObserver.observe(toolbar);
+      }
       window.addEventListener("scroll", () => {
         if (!translationEditorOpen && !structureEditorOpen) hideToolbar();
         scheduleProgressSave();
