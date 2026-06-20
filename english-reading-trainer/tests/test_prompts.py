@@ -23,8 +23,8 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v5.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v5.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v6.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v6.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
@@ -38,6 +38,8 @@ SENTENCE_ANALYSIS_PREDICT_V4 = PROMPTS_DIR / "sentence_analysis_predict.v4.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V4 = PROMPTS_DIR / "sentence_analysis_diagnose.v4.md"
 SENTENCE_ANALYSIS_PREDICT_V5 = PROMPTS_DIR / "sentence_analysis_predict.v5.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V5 = PROMPTS_DIR / "sentence_analysis_diagnose.v5.md"
+SENTENCE_ANALYSIS_PREDICT_V6 = PROMPTS_DIR / "sentence_analysis_predict.v6.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V6 = PROMPTS_DIR / "sentence_analysis_diagnose.v6.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
@@ -165,8 +167,8 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v5"),
-        ("sentence_analysis_diagnose", "v5"),
+        ("sentence_analysis_predict", "v6"),
+        ("sentence_analysis_diagnose", "v6"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
@@ -243,7 +245,7 @@ class TestJSONSchemaFieldsInPrompts:
         "predicted_error_types", "diagnosis_basis",
         "diagnosed_error_types", "diagnosis_evidence",
         "takeaway_suggestion", "structure_feedback", "error_code",
-        "corrected_structure", "why_it_matters_for_translation",
+        "correct_highlights", "corrected_structure", "why_it_matters_for_translation",
         "next_check", "confidence",
     ]
     WORD_FIELDS = [
@@ -310,6 +312,14 @@ class TestJSONSchemaFieldsInPrompts:
             assert "structure_feedback" in text
             assert "error_code" in text
             assert "Do not use L01-L06, D02, D03, I01, or I02" in text
+
+    def test_current_sentence_prompt_v6_contains_correct_path_reinforcement(self) -> None:
+        for path in [SENTENCE_ANALYSIS_PREDICT_V6, SENTENCE_ANALYSIS_DIAGNOSE_V6]:
+            text = path.read_text(encoding="utf-8")
+            assert "version: v6" in text
+            assert "correct_highlights" in text
+            assert "这次你做对了" in text
+            assert "reusable self-check question" in text
 
 
 # ---------------------------------------------------------------------------

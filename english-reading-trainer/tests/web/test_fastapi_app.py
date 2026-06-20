@@ -195,7 +195,7 @@ def _attach_sentence_analysis(
     db: DatabaseConnection,
     sentence_id: int,
     *,
-    prompt_version: str = "v5",
+    prompt_version: str = "v6",
 ) -> int:
     with db.get_connection() as conn:
         sentence = conn.execute(
@@ -267,7 +267,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 16
+        assert count == 18
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -1063,6 +1063,33 @@ class TestReadingAndMarking:
                 (sentence_ids[0],),
             ).fetchone()
         assert row["user_note"] == "hash into 是整体搭配"
+        assert row["user_translation"] is None
+        assert row["archived_at"] is not None
+
+    def test_update_sentence_note_endpoint_accepts_empty_note(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sentence_ids = _seed_book(db, tmp_path)
+        client.patch(
+            f"/mark/sentence/{sentence_ids[0]}",
+            data={"user_note": "hash into 是整体搭配"},
+        )
+
+        response = client.patch(
+            f"/mark/sentence/{sentence_ids[0]}",
+            data={"user_note": ""},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_note, user_translation, archived_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_note"] == ""
         assert row["user_translation"] is None
         assert row["archived_at"] is not None
 

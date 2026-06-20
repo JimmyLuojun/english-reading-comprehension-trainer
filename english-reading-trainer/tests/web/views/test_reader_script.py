@@ -183,6 +183,9 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert 'document.getElementById("sentence-panel-note")' in script
     assert "renderSentenceStructure(analysis);" in render_payload
     assert "renderStructureFeedback(analysis.structure_feedback || null);" in render_payload
+    assert '"Correct highlights"' in script
+    assert '"Reference structure"' in script
+    assert '"Corrected structure"' in script
     assert "analysis.blocking_point || \"\"" in render_payload
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
@@ -430,6 +433,44 @@ def test_sentence_panel_structure_and_translation_autosave() -> None:
     assert "if (panelStructureDirty) enqueuePanelStructureSave({ automatic: true });" in script
     assert "panelStructureDirty = true;" in script
     assert "panelTranslationDirty = true;" in script
+
+
+def test_sentence_panel_takeaway_autosaves_and_flushes_empty_values() -> None:
+    script = _selection_script()
+    study_fields = script[script.index("function setSentenceStudyFields(payload)"):]
+    study_fields = study_fields[: study_fields.index("function clearPanelAutoSaveTimers")]
+    schedule_note = script[script.index("function schedulePanelNoteAutoSave"):]
+    schedule_note = schedule_note[: schedule_note.index("async function savePanelTranslation")]
+    save_note = script[script.index("async function savePanelNote"):]
+    save_note = save_note[: save_note.index("function renderVsSimpler")]
+    accept_suggestion = script[script.index("function acceptTakeawaySuggestion"):]
+    accept_suggestion = accept_suggestion[: accept_suggestion.index("function sentenceTextForId")]
+    listeners = script[script.index("if (sentencePanelNoteSave)"):]
+    listeners = listeners[: listeners.index("if (sentencePanelNoteAccept)")]
+
+    assert "let panelNoteAutoSaveTimer = null;" in script
+    assert "let panelNoteSaveChain = Promise.resolve();" in script
+    assert "let lastSavedPanelNote = \"\";" in script
+    assert "let panelNoteDirty = false;" in script
+    assert 'lastSavedPanelNote = (payload.user_note || "").trim();' in study_fields
+    assert "function enqueuePanelNoteSave" in script
+    assert "function schedulePanelNoteAutoSave" in script
+    assert "if (value === lastSavedPanelNote) return;" in schedule_note
+    assert 'enqueuePanelNoteSave({ automatic: true, sentenceId, value });' in schedule_note
+    assert "const saveOptions = {" in script
+    assert "sentenceId: options.sentenceId || activeAnalysisSentenceId" in script
+    assert "value: hasValue ? String(options.value || \"\").trim()" in script
+    assert 'method: "PATCH"' in save_note
+    assert "new URLSearchParams({ user_note: value })" in save_note
+    assert "lastSavedPanelNote = value;" in save_note
+    assert 'automatic ? "Auto saved" : "Saved"' in save_note
+    assert "if (panelNoteDirty) enqueuePanelNoteSave({ automatic: true });" in script
+    assert "sendPendingPanelNoteSave(activeAnalysisSentenceId, value);" in script
+    assert "keepalive: true" in script
+    assert "panelNoteDirty = true;" in accept_suggestion
+    assert "schedulePanelNoteAutoSave();" in accept_suggestion
+    assert "panelNoteDirty = true;" in listeners
+    assert "schedulePanelNoteAutoSave();" in listeners
 
 
 def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> None:

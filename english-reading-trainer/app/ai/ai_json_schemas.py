@@ -8,6 +8,7 @@ enumeration from db_models.VALID_ERROR_CODES.
 SENTENCE_ANALYSIS_SCHEMA    — v1 sentence prompt fields
 SENTENCE_ANALYSIS_SCHEMA_V2 — v2 prompt, adds blocking point and takeaway suggestion
 SENTENCE_ANALYSIS_SCHEMA_V3 — v5 prompt, adds optional structure feedback
+SENTENCE_ANALYSIS_SCHEMA_V4 — v6 prompt, adds positive correct-path highlights
 WORD_ANALYSIS_SCHEMA        — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
@@ -218,6 +219,31 @@ SENTENCE_ANALYSIS_SCHEMA_V3: dict = {
                 "corrected_structure": {"type": "string", "minLength": 1},
                 "why_it_matters_for_translation": {"type": "string", "minLength": 1},
                 "next_check": {"type": "string", "minLength": 1},
+            },
+        },
+    },
+}
+
+SENTENCE_ANALYSIS_SCHEMA_V4: dict = {
+    **SENTENCE_ANALYSIS_SCHEMA_V3,
+    "properties": {
+        **SENTENCE_ANALYSIS_SCHEMA_V3["properties"],
+        "structure_feedback": {
+            **SENTENCE_ANALYSIS_SCHEMA_V3["properties"]["structure_feedback"],
+            "required": [
+                "is_correct",
+                "missed_or_wrong",
+                "correct_highlights",
+                "corrected_structure",
+                "why_it_matters_for_translation",
+                "next_check",
+            ],
+            "properties": {
+                **SENTENCE_ANALYSIS_SCHEMA_V3["properties"]["structure_feedback"]["properties"],
+                "correct_highlights": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
             },
         },
     },

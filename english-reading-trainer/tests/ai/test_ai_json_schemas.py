@@ -12,6 +12,7 @@ from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
+    SENTENCE_ANALYSIS_SCHEMA_V4,
     STRUCTURE_SKILL_CODES,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
@@ -86,6 +87,18 @@ VALID_STRUCTURE_FEEDBACK = {
 VALID_SENTENCE_V3 = {
     **VALID_SENTENCE_V2,
     "structure_feedback": VALID_STRUCTURE_FEEDBACK,
+}
+
+VALID_STRUCTURE_FEEDBACK_V4 = {
+    **VALID_STRUCTURE_FEEDBACK,
+    "correct_highlights": [
+        "You correctly identified the main clause.",
+    ],
+}
+
+VALID_SENTENCE_V4 = {
+    **VALID_SENTENCE_V2,
+    "structure_feedback": VALID_STRUCTURE_FEEDBACK_V4,
 }
 
 VALID_WORD = {
@@ -474,6 +487,58 @@ class TestSentenceSchemaV3InvalidInstances:
             _validate(
                 {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
                 SENTENCE_ANALYSIS_SCHEMA_V3,
+            )
+
+
+# ---------------------------------------------------------------------------
+# SENTENCE_ANALYSIS_SCHEMA_V4
+# ---------------------------------------------------------------------------
+
+class TestSentenceSchemaV4Structure:
+    def test_v4_schema_is_dict(self) -> None:
+        assert isinstance(SENTENCE_ANALYSIS_SCHEMA_V4, dict)
+
+    def test_v4_structure_feedback_keeps_correct_highlights_optional_top_level(
+        self,
+    ) -> None:
+        assert "structure_feedback" in SENTENCE_ANALYSIS_SCHEMA_V4["properties"]
+        assert "structure_feedback" not in SENTENCE_ANALYSIS_SCHEMA_V4["required"]
+        required = (
+            SENTENCE_ANALYSIS_SCHEMA_V4["properties"]["structure_feedback"]["required"]
+        )
+        assert "correct_highlights" in required
+
+
+class TestSentenceSchemaV4ValidInstances:
+    def test_v4_accepts_sentence_without_structure_feedback(self) -> None:
+        _validate(VALID_SENTENCE_V2, SENTENCE_ANALYSIS_SCHEMA_V4)
+
+    def test_v4_accepts_sentence_with_correct_highlights(self) -> None:
+        _validate(VALID_SENTENCE_V4, SENTENCE_ANALYSIS_SCHEMA_V4)
+
+    def test_v4_accepts_correct_structure_feedback_with_highlights(self) -> None:
+        data = {
+            **VALID_SENTENCE_V2,
+            "structure_feedback": {
+                **VALID_STRUCTURE_FEEDBACK_V4,
+                "is_correct": True,
+                "missed_or_wrong": [],
+            },
+        }
+        _validate(data, SENTENCE_ANALYSIS_SCHEMA_V4)
+
+
+class TestSentenceSchemaV4InvalidInstances:
+    def test_v4_rejects_missing_correct_highlights(self) -> None:
+        bad_feedback = {
+            key: value
+            for key, value in VALID_STRUCTURE_FEEDBACK_V4.items()
+            if key != "correct_highlights"
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(
+                {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
+                SENTENCE_ANALYSIS_SCHEMA_V4,
             )
 
 

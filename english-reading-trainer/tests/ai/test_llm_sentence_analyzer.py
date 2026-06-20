@@ -86,6 +86,7 @@ _VALID_STRUCTURE_FEEDBACK = {
             "reason": "The modifier follows report and describes it.",
         }
     ],
+    "correct_highlights": [],
     "corrected_structure": "The report was dismissed; the relative clause modifies report.",
     "why_it_matters_for_translation": "Wrong attachment changes the Chinese subject-object relation.",
     "next_check": "Attach post-noun modifiers before translating the main action.",
@@ -158,7 +159,14 @@ class TestRender:
         assert _render(template, {}) == template
 
 
-def test_both_sentence_prompt_v5_files_load() -> None:
+def test_both_sentence_prompt_v6_files_load() -> None:
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v6")
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v6")
+    assert "correct_highlights" in _load_prompt("sentence_analysis_predict", "v6")
+    assert "correct_highlights" in _load_prompt("sentence_analysis_diagnose", "v6")
+
+
+def test_both_sentence_prompt_v5_files_remain_loadable() -> None:
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v5")
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v5")
 

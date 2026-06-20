@@ -220,12 +220,16 @@ def _fragment_refs_and_state() -> str:
       let structureEditorDirty = false;
       let panelTranslationAutoSaveTimer = null;
       let panelStructureAutoSaveTimer = null;
+      let panelNoteAutoSaveTimer = null;
       let panelTranslationSaveChain = Promise.resolve();
       let panelStructureSaveChain = Promise.resolve();
+      let panelNoteSaveChain = Promise.resolve();
       let lastSavedPanelTranslation = "";
       let lastSavedPanelStructure = "";
+      let lastSavedPanelNote = "";
       let panelTranslationDirty = false;
       let panelStructureDirty = false;
+      let panelNoteDirty = false;
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
@@ -418,9 +422,21 @@ def _fragment_toolbar_selection() -> str:
         }).catch(() => {});
       }
 
+      function sendPendingPanelNoteSave(sentenceId, value) {
+        const text = String(value || "").trim();
+        const body = new URLSearchParams({ user_note: text }).toString();
+        fetch(`/mark/sentence/${sentenceId}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
+
       function flushPendingToolbarAutoSaveOnPageHide() {
         clearTranslationAutoSaveTimer();
         clearStructureAutoSaveTimer();
+        clearPanelAutoSaveTimers();
         if (translationEditorOpen && translationEditorDirty && activeSentenceId) {
           const value = translationText.value.trim();
           if (value && value !== lastSavedTranslation) {
@@ -459,6 +475,12 @@ def _fragment_toolbar_selection() -> str:
               "user_translation",
               value,
             );
+          }
+        }
+        if (panelNoteDirty && activeAnalysisSentenceId && sentencePanelNote) {
+          const value = (sentencePanelNote.value || "").trim();
+          if (value !== lastSavedPanelNote) {
+            sendPendingPanelNoteSave(activeAnalysisSentenceId, value);
           }
         }
       }
@@ -851,9 +873,11 @@ def _fragment_toolbar_selection() -> str:
         const suggestion = (sentencePanelNoteSuggestion?.textContent || "").trim();
         if (!suggestion || !sentencePanelNote) return;
         sentencePanelNote.value = suggestion;
+        panelNoteDirty = true;
+        schedulePanelNoteAutoSave();
         sentencePanelNote.focus();
         if (sentencePanelNoteStatus) {
-          sentencePanelNoteStatus.textContent = "Suggestion inserted. Edit or save it.";
+          sentencePanelNoteStatus.textContent = "Suggestion inserted. Auto saving...";
         }
       }
 
@@ -929,7 +953,12 @@ def _fragment_toolbar_selection() -> str:
             return `${code}${item.learner_claim || ""} -> ${item.correction || ""} ${item.reason || ""}`.trim();
           },
         );
-        appendCopyLine(lines, "Corrected structure", analysis.structure_feedback?.corrected_structure);
+        appendCopyLine(lines, "Correct highlights", analysis.structure_feedback?.correct_highlights);
+        appendCopyLine(
+          lines,
+          analysis.structure_feedback?.is_correct ? "Reference structure" : "Corrected structure",
+          analysis.structure_feedback?.corrected_structure,
+        );
         appendCopyLine(
           lines,
           "Why it matters for translation",
@@ -1939,9 +1968,11 @@ def _fragment_analysis_panel_rendering() -> str:
         panel.hidden = true;
         if (panelTranslationDirty) enqueuePanelTranslationSave({ automatic: true });
         if (panelStructureDirty) enqueuePanelStructureSave({ automatic: true });
+        if (panelNoteDirty) enqueuePanelNoteSave({ automatic: true });
         clearPanelAutoSaveTimers();
         panelTranslationDirty = false;
         panelStructureDirty = false;
+        panelNoteDirty = false;
         if (panelTab) panelTab.hidden = false;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
@@ -2068,6 +2099,8 @@ def _fragment_analysis_panel_rendering() -> str:
         }
         if (sentencePanelNote) {
           sentencePanelNote.value = payload.user_note || "";
+          lastSavedPanelNote = (payload.user_note || "").trim();
+          panelNoteDirty = false;
         }
         if (sentencePanelNoteSuggestion) {
           sentencePanelNoteSuggestion.textContent = payload.analysis?.takeaway_suggestion || "";
@@ -2177,8 +2210,15 @@ def _fragment_analysis_panel_rendering() -> str:
           structureFeedback.append(block);
         }
 
+        const correctHighlights = (feedback.correct_highlights || []).filter(Boolean);
+        if (correctHighlights.length) {
+          structureFeedback.append(comparisonLine("Correct highlights", correctHighlights.join("; ")));
+        }
         structureFeedback.append(
-          comparisonLine("Corrected structure", feedback.corrected_structure || ""),
+          comparisonLine(
+            feedback.is_correct ? "Reference structure" : "Corrected structure",
+            feedback.corrected_structure || "",
+          ),
           comparisonLine(
             "Translation impact",
             feedback.why_it_matters_for_translation || "",
@@ -2449,6 +2489,10 @@ def _fragment_analysis_requests_and_evidence() -> str:
           window.clearTimeout(panelStructureAutoSaveTimer);
           panelStructureAutoSaveTimer = null;
         }
+        if (panelNoteAutoSaveTimer !== null) {
+          window.clearTimeout(panelNoteAutoSaveTimer);
+          panelNoteAutoSaveTimer = null;
+        }
       }
 
       function enqueuePanelTranslationSave(options = {}) {
@@ -2463,6 +2507,19 @@ def _fragment_analysis_requests_and_evidence() -> str:
           .catch(() => {})
           .then(() => savePanelStructure(options));
         return panelStructureSaveChain;
+      }
+
+      function enqueuePanelNoteSave(options = {}) {
+        const hasValue = Object.prototype.hasOwnProperty.call(options, "value");
+        const saveOptions = {
+          automatic: Boolean(options.automatic),
+          sentenceId: options.sentenceId || activeAnalysisSentenceId,
+          value: hasValue ? String(options.value || "").trim() : (sentencePanelNote?.value || "").trim(),
+        };
+        panelNoteSaveChain = panelNoteSaveChain
+          .catch(() => {})
+          .then(() => savePanelNote(saveOptions));
+        return panelNoteSaveChain;
       }
 
       function schedulePanelTranslationAutoSave(delay = AUTOSAVE_DELAY_MS) {
@@ -2492,6 +2549,22 @@ def _fragment_analysis_requests_and_evidence() -> str:
         panelStructureAutoSaveTimer = window.setTimeout(() => {
           panelStructureAutoSaveTimer = null;
           enqueuePanelStructureSave({ automatic: true });
+        }, delay);
+      }
+
+      function schedulePanelNoteAutoSave(delay = AUTOSAVE_DELAY_MS) {
+        if (panelNoteAutoSaveTimer !== null) {
+          window.clearTimeout(panelNoteAutoSaveTimer);
+          panelNoteAutoSaveTimer = null;
+        }
+        if (!activeAnalysisSentenceId || !sentencePanelNote) return;
+        const sentenceId = activeAnalysisSentenceId;
+        const value = (sentencePanelNote.value || "").trim();
+        if (value === lastSavedPanelNote) return;
+        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Auto saving...";
+        panelNoteAutoSaveTimer = window.setTimeout(() => {
+          panelNoteAutoSaveTimer = null;
+          enqueuePanelNoteSave({ automatic: true, sentenceId, value });
         }, delay);
       }
 
@@ -2587,11 +2660,19 @@ def _fragment_analysis_requests_and_evidence() -> str:
         }
       }
 
-      async function savePanelNote() {
-        const sentenceId = activeAnalysisSentenceId;
-        const value = (sentencePanelNote?.value || "").trim();
-        if (!sentenceId) return;
-        if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saving...";
+      async function savePanelNote(options = {}) {
+        const automatic = Boolean(options.automatic);
+        const sentenceId = options.sentenceId || activeAnalysisSentenceId;
+        const hasValue = Object.prototype.hasOwnProperty.call(options, "value");
+        const value = hasValue ? String(options.value || "").trim() : (sentencePanelNote?.value || "").trim();
+        const isCurrentSentence = String(sentenceId || "") === String(activeAnalysisSentenceId || "");
+        if (!sentenceId) return false;
+        if (isCurrentSentence && value === lastSavedPanelNote) {
+          panelNoteDirty = false;
+          if (!automatic && sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saved";
+          return true;
+        }
+        if (isCurrentSentence && sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saving...";
         const body = new URLSearchParams({ user_note: value });
         try {
           const response = await fetch(`/mark/sentence/${sentenceId}`, {
@@ -2601,9 +2682,19 @@ def _fragment_analysis_requests_and_evidence() -> str:
           });
           if (!response.ok) throw new Error("Save failed");
           updateSentenceNote(sentenceId, value);
-          if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = "Saved";
+          if (isCurrentSentence) {
+            lastSavedPanelNote = value;
+            panelNoteDirty = false;
+            if (sentencePanelNoteStatus) {
+              sentencePanelNoteStatus.textContent = automatic ? "Auto saved" : "Saved";
+            }
+          }
+          return true;
         } catch (error) {
-          if (sentencePanelNoteStatus) sentencePanelNoteStatus.textContent = `Save failed: ${error}`;
+          if (isCurrentSentence && sentencePanelNoteStatus) {
+            sentencePanelNoteStatus.textContent = `Save failed: ${error}`;
+          }
+          return false;
         }
       }
 
@@ -2985,7 +3076,15 @@ def _fragment_bootstrap() -> str:
         });
       }
       if (sentencePanelNoteSave) {
-        sentencePanelNoteSave.addEventListener("click", savePanelNote);
+        sentencePanelNoteSave.addEventListener("click", () => {
+          enqueuePanelNoteSave();
+        });
+      }
+      if (sentencePanelNote) {
+        sentencePanelNote.addEventListener("input", () => {
+          panelNoteDirty = true;
+          schedulePanelNoteAutoSave();
+        });
       }
       if (sentencePanelNoteAccept) {
         sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);

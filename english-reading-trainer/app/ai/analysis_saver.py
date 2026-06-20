@@ -13,6 +13,7 @@ from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
+    SENTENCE_ANALYSIS_SCHEMA_V4,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
@@ -315,6 +316,8 @@ def _word_analysis_schema(prompt_version: str) -> dict:
 def _sentence_analysis_schema(prompt_version: str) -> dict:
     if prompt_version == "v1":
         return SENTENCE_ANALYSIS_SCHEMA
+    if prompt_version == "v6":
+        return SENTENCE_ANALYSIS_SCHEMA_V4
     if prompt_version == "v5":
         return SENTENCE_ANALYSIS_SCHEMA_V3
     return SENTENCE_ANALYSIS_SCHEMA_V2
