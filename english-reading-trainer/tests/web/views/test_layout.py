@@ -10,6 +10,7 @@ from app.web.views.layout import (
     _metric,
     _page_header,
     _resume_nav_script,
+    _scroll_memory_script,
 )
 
 
@@ -81,6 +82,28 @@ def test_resume_nav_script_rewrites_books_nav() -> None:
     assert "?chapter=${chapter}&restore=1" in script
     assert "link.href = href" in script
     assert "Continue reading" not in script
+
+
+def test_scroll_memory_script_persists_and_restores_per_url() -> None:
+    script = _scroll_memory_script()
+
+    # Saves position keyed by path+query, on exit signals only.
+    assert 'const key = "scroll:" + location.pathname + location.search;' in script
+    assert "window.sessionStorage.setItem(key, String(window.scrollY))" in script
+    assert 'window.addEventListener("pagehide", save)' in script
+    assert 'document.addEventListener("visibilitychange"' in script
+    # Restores on load unless a hash anchor targets a specific element.
+    assert "if (location.hash) return;" in script
+    assert "window.requestAnimationFrame(() => window.scrollTo(0, y))" in script
+    # The reader owns its own progress restore, so skip it here.
+    assert 'if (location.pathname.indexOf("/read/") === 0) return;' in script
+
+
+def test_html_page_includes_scroll_memory_script() -> None:
+    response = _html_page("Title", "<p>Body</p>", active="review")
+
+    body = response.body.decode()
+    assert 'const key = "scroll:" + location.pathname + location.search;' in body
 
 
 def test_formatting_helpers() -> None:

@@ -63,6 +63,7 @@ def _html_page(
   </nav>
   <script>{_resume_nav_script()}</script>
   <main>{body}</main>
+  <script>{_scroll_memory_script()}</script>
   <script>{_def_edit_script()}</script>
 </body>
 </html>""",
@@ -111,6 +112,33 @@ def _resume_nav_script() -> str:
         href = `/read/${encodeURIComponent(bookId)}`;
       }
       link.href = href;
+    })();
+    """
+
+def _scroll_memory_script() -> str:
+    return """
+    (() => {
+      try {
+        if (location.pathname.indexOf("/read/") === 0) return;
+        const key = "scroll:" + location.pathname + location.search;
+        const save = () => {
+          try {
+            window.sessionStorage.setItem(key, String(window.scrollY));
+          } catch (error) {}
+        };
+        window.addEventListener("pagehide", save);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "hidden") save();
+        });
+        if (location.hash) return;
+        let y = 0;
+        try {
+          y = parseInt(window.sessionStorage.getItem(key) || "0", 10) || 0;
+        } catch (error) {
+          y = 0;
+        }
+        if (y > 0) window.requestAnimationFrame(() => window.scrollTo(0, y));
+      } catch (error) {}
     })();
     """
 
