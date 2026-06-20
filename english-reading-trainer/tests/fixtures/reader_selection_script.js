@@ -224,6 +224,7 @@
       let analysisWordActionInProgress = false;
       let readerToolbarBusy = false;
       let toolbarInteractionSeq = 0;
+      let analysisSeq = 0;
       let toolbarRepositionFrame = null;
       let activeSelectionAnalysisContextText = "";
       let copyStatusTimer = null;
@@ -651,6 +652,18 @@
         if (spans.length !== 1) return null;
         const sentence = spans[0];
         return normalizedSelection === normalizeText(sentence.textContent || "") ? sentence : null;
+      }
+
+      function selectionIntersectsElement(selection, element) {
+        if (!selection || selection.isCollapsed || !element) return false;
+        for (let index = 0; index < selection.rangeCount; index += 1) {
+          try {
+            if (selection.getRangeAt(index).intersectsNode(element)) return true;
+          } catch {
+            // Ignore detached nodes or browser edge cases; they should not block clicks.
+          }
+        }
+        return false;
       }
 
       function switchOpenEditorToSentence(sentence) {
@@ -3029,17 +3042,20 @@
       async function loadSavedAnalysis(sentenceId) {
         activeAnalysisSentenceId = sentenceId;
         clearAnalysisHistory();
+        const mySeq = (analysisSeq += 1);
         const seqAtRequest = toolbarInteractionSeq;
         setPanelLoading("Loading analysis...");
         try {
           const response = await fetch(`/analysis/sentence/${sentenceId}`);
           const payload = await response.json();
+          if (mySeq !== analysisSeq) return;
           if (!response.ok || !payload.ok) {
             renderAnalysisError(payload.error || "No saved analysis found.", Boolean(payload.retry));
             return;
           }
           renderAnalysisPayload(payload, { seqAtRequest });
         } catch (error) {
+          if (mySeq !== analysisSeq) return;
           renderAnalysisError(`Could not load analysis: ${error}`, true);
         }
       }
@@ -3047,6 +3063,7 @@
       async function requestAnalysis(sentenceId, translation, options = {}) {
         activeAnalysisSentenceId = sentenceId;
         clearAnalysisHistory();
+        const mySeq = (analysisSeq += 1);
         const seqAtRequest = toolbarInteractionSeq;
         setPanelLoading(options.preferPro ? "Analyzing sentence with Pro..." : "Analyzing sentence...");
         const params = new URLSearchParams();
@@ -3065,6 +3082,7 @@
             body: params.toString(),
           });
           const payload = await response.json();
+          if (mySeq !== analysisSeq) return;
           if (!response.ok || !payload.ok) {
             renderAnalysisError(payload.error || "Analysis failed.", Boolean(payload.retry));
             return;
@@ -3075,6 +3093,7 @@
             focusAfterRender: options.focusAfterRender,
           });
         } catch (error) {
+          if (mySeq !== analysisSeq) return;
           renderAnalysisError(`Analysis failed: ${error}`, true);
         }
       }
@@ -3866,16 +3885,16 @@
       }
       reader.addEventListener("click", (event) => {
         const selection = window.getSelection();
-        const hasSelection = selection && !selection.isCollapsed;
         const wordSpan = event.target.closest("[data-word-card]");
-        if (wordSpan && !hasSelection) {
+        if (wordSpan && !selectionIntersectsElement(selection, wordSpan)) {
           showWordDetail(wordSpan);
           return;
         }
         const sentence = event.target.closest("[data-sentence-id]");
         if (!sentence) return;
-        if (hasSelection) return;
+        if (selectionIntersectsElement(selection, sentence)) return;
         if (sentence.dataset.analysisId) {
+          window.getSelection()?.removeAllRanges();
           hideToolbar();
           loadSavedAnalysis(sentence.dataset.sentenceId);
           return;

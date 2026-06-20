@@ -688,6 +688,9 @@ def test_toolbar_editing_target_highlight_is_temporary() -> None:
     assert "hideToolbar();" in listeners
     assert "hideToolbar();" in click_handler
     assert 'loadSavedAnalysis(sentence.dataset.sentenceId);' in click_handler
+    assert "hasSelection" not in click_handler
+    assert "selectionIntersectsElement(selection, sentence)" in click_handler
+    assert "window.getSelection()?.removeAllRanges();" in click_handler
     assert 'enqueueTranslationSave({ keepOpen: true });' in script
     assert 'enqueueStructureSave({ keepOpen: true });' in script
 
@@ -813,9 +816,17 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
     script = _selection_script()
 
     assert "function showMarkedSentenceToolbar(sentence)" in script
+    assert "function selectionIntersectsElement(selection, element)" in script
+    helper = script[script.index("function selectionIntersectsElement(selection, element)"):]
+    helper = helper[: helper.index("function switchOpenEditorToSentence")]
     click_handler = script[script.index('reader.addEventListener("click"'):]
     click_handler = click_handler[:click_handler.index('document.addEventListener("selectionchange"')]
+
+    assert "selection.getRangeAt(index).intersectsNode(element)" in helper
+    assert "if (wordSpan && !selectionIntersectsElement(selection, wordSpan))" in click_handler
+    assert "if (selectionIntersectsElement(selection, sentence)) return;" in click_handler
     assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in click_handler
+    assert "window.getSelection()?.removeAllRanges();" in click_handler
     assert 'if (sentence.dataset.marked === "1")' in click_handler
     assert "showMarkedSentenceToolbar(sentence);" in click_handler
 
