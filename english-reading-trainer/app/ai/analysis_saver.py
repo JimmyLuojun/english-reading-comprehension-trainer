@@ -22,7 +22,7 @@ from app.ai.ai_json_schemas import (
 )
 from app.ai.ai_response_cache import compute_content_hash, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
-from app.cards.word_card_service import record_word_card_source
+from app.cards.word_card_service import record_word_card_diagnosis, record_word_card_source
 from app.db_connection import DatabaseConnection
 from app.db_models import (
     MasteryState,
@@ -180,6 +180,7 @@ def save_word_analysis(
         card_id, card_created = _upsert_word_card(
             db, sentence_id, surface_form, data, cache_id
         )
+        record_word_card_diagnosis(db, card_id, data)
 
     return SaveResult(
         cache_id=cache_id,

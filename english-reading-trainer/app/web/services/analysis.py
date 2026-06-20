@@ -12,7 +12,7 @@ from app.cards.sentence_card_service import (
     save_sentence_structure,
     save_sentence_translation,
 )
-from app.cards.word_card_service import get_word_card
+from app.cards.word_card_service import get_word_card, record_word_card_diagnosis
 from app.db_connection import DatabaseConnection
 from app.web.queries import (
     _active_sentence_prompt_version,
@@ -158,6 +158,7 @@ def analyze_word_card_for_reader(
                 retry=True,
             )
         fastapi_app._update_word_card_analysis_id(db, card_id, result.cache_id)
+        record_word_card_diagnosis(db, card_id, result.data)
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
     except RuntimeError as exc:

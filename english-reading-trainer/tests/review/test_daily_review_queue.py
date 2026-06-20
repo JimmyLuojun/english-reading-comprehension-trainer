@@ -664,3 +664,43 @@ class TestReviewQueueItemAiMeaning:
             prompt="ephemeral",
         )
         assert item.ai_meaning == ""
+
+
+class TestReviewQueueItemNoteDiagnosis:
+    def test_word_card_note_status_and_correction_are_fetched(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "The tie game ended in a draw.")
+        with db.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note, note_status, note_correction)
+                   VALUES ('tie', 'tie', 'word', ?, '', '', ?, NULL,
+                           0, 'new', 2.5, 0, 0, ?, 1, '联系', 'incorrect', '平局 (stalemate)')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            )
+
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+
+        assert len(items) == 1
+        assert items[0].note_status == "incorrect"
+        assert items[0].note_correction == "平局 (stalemate)"
+
+    def test_word_card_note_fields_default_to_empty(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_word_card(db, surface_form="nascent")
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+        assert items[0].note_status == ""
+        assert items[0].note_correction == ""
+
+    def test_sentence_card_note_fields_are_empty(
+        self, db: DatabaseConnection
+    ) -> None:
+        _insert_sentence_card(db)
+        items = list_due_cards(db, as_of=NOW, card_type="sentence")
+        assert items[0].note_status == ""
+        assert items[0].note_correction == ""

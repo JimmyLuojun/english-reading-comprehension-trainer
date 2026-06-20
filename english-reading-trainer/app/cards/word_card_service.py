@@ -19,7 +19,12 @@ from app.db_models import (
     SM2_DEFAULT_EF,
     SM2_INITIAL_INTERVAL_DAYS,
     SM2_INITIAL_REPETITIONS,
+    VALID_ERROR_CODES,
 )
+
+# learner_note_check.status values that mark the learner's note as a misreading
+# worth surfacing during review (gap C).
+NOTE_MISREADING_STATUSES: frozenset[str] = frozenset({"incorrect", "partly_correct"})
 
 
 class WordCardNotFoundError(ValueError):
@@ -472,6 +477,66 @@ def update_word_card_note(
             (current_meaning.strip(), user_note.strip(), card_id),
         )
     return card_id
+
+
+def _word_error_codes(analysis_data: dict[str, Any]) -> tuple[str, ...]:
+    """Valid error-type codes diagnosed for a word, in declared order."""
+    return tuple(
+        code
+        for code in (analysis_data.get("predicted_error_types") or [])
+        if code in VALID_ERROR_CODES
+    )
+
+
+def record_word_card_diagnosis(
+    db: DatabaseConnection,
+    card_id: int,
+    analysis_data: dict[str, Any],
+) -> None:
+    """Sync a word card's error tags (gap B) and misconception (gap C).
+
+    From a validated word-analysis payload this writes:
+
+    - ``word_card_errors`` ← ``predicted_error_types`` (closed enumeration),
+      enabling error-pattern clustering via the similar-card finder.
+    - ``note_status`` / ``note_correction`` ← ``learner_note_check``, recording
+      whether the learner's own note (kept in ``user_note``) was a misreading
+      and the AI's corrected sense, so review can test discrimination.
+
+    Idempotent: the card's error tags are fully replaced and the note fields
+    reflect the latest analysis, so once a note is judged correct the prior
+    misreading flag clears.
+    """
+    error_codes = _word_error_codes(analysis_data)
+
+    note_check = analysis_data.get("learner_note_check") or {}
+    note_status = str(note_check.get("status") or "")
+    correction = ""
+    if note_status in NOTE_MISREADING_STATUSES:
+        correction = str(note_check.get("corrected_understanding") or "")
+
+    with db.get_connection() as conn:
+        conn.execute(
+            "DELETE FROM word_card_errors WHERE card_id = ?",
+            (card_id,),
+        )
+        for code in error_codes:
+            row = conn.execute(
+                "SELECT id FROM error_types WHERE code = ?",
+                (code,),
+            ).fetchone()
+            if row is None:
+                continue
+            conn.execute(
+                """INSERT OR IGNORE INTO word_card_errors
+                   (card_id, error_type_id)
+                   VALUES (?, ?)""",
+                (card_id, row["id"]),
+            )
+        conn.execute(
+            "UPDATE word_cards SET note_status = ?, note_correction = ? WHERE id = ?",
+            (note_status, correction, card_id),
+        )
 
 
 def _utcnow() -> str:

@@ -19,6 +19,7 @@ from app.cards.word_card_service import (
     get_word_card_by_lemma,
     list_word_card_sources,
     list_word_cards,
+    record_word_card_diagnosis,
     record_word_card_source,
     set_primary_word_card_source,
     update_word_card_note,
@@ -553,3 +554,152 @@ class TestUpdateWordCardNote:
 
         with pytest.raises(WordCardNotFoundError):
             update_word_card_note(db, card_id, current_meaning="x")
+
+
+# ---------------------------------------------------------------------------
+# record_word_card_diagnosis — gap B (error tags) + gap C (misconception)
+# ---------------------------------------------------------------------------
+
+def _error_codes_for_card(db: DatabaseConnection, card_id: int) -> set[str]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT et.code
+                 FROM word_card_errors wce
+                 JOIN error_types et ON et.id = wce.error_type_id
+                WHERE wce.card_id = ?""",
+            (card_id,),
+        ).fetchall()
+    return {r["code"] for r in rows}
+
+
+class TestRecordWordCardDiagnosis:
+    def test_tags_predicted_error_types(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "diag-a")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(
+            db, card_id, {"predicted_error_types": ["L01", "L04"]}
+        )
+        assert _error_codes_for_card(db, card_id) == {"L01", "L04"}
+
+    def test_ignores_unknown_error_codes(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "diag-b")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(
+            db, card_id, {"predicted_error_types": ["L01", "ZZ9", ""]}
+        )
+        assert _error_codes_for_card(db, card_id) == {"L01"}
+
+    def test_resync_replaces_old_tags(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "diag-c")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(db, card_id, {"predicted_error_types": ["L01"]})
+        # Re-analysis no longer finds the error → tags cleared (recursive growth).
+        record_word_card_diagnosis(db, card_id, {"predicted_error_types": []})
+        assert _error_codes_for_card(db, card_id) == set()
+
+    def test_persists_misreading_note(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "diag-d")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(
+            db,
+            card_id,
+            {
+                "predicted_error_types": ["L01"],
+                "learner_note_check": {
+                    "status": "incorrect",
+                    "corrected_understanding": "平局（僵持），非『联系』",
+                },
+            },
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["note_status"] == "incorrect"
+        assert row["note_correction"] == "平局（僵持），非『联系』"
+
+    def test_partly_correct_also_records_correction(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "diag-e")
+        card_id, _ = create_or_update_word_card(db, sid, "broken")
+        record_word_card_diagnosis(
+            db,
+            card_id,
+            {
+                "predicted_error_types": ["L01"],
+                "learner_note_check": {
+                    "status": "partly_correct",
+                    "corrected_understanding": "打破（化解），非『破坏』",
+                },
+            },
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["note_status"] == "partly_correct"
+        assert row["note_correction"] == "打破（化解），非『破坏』"
+
+    def test_correct_note_clears_prior_misreading(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "diag-f")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(
+            db,
+            card_id,
+            {
+                "learner_note_check": {
+                    "status": "incorrect",
+                    "corrected_understanding": "平局",
+                },
+            },
+        )
+        # Learner fixes their understanding and re-analyses.
+        record_word_card_diagnosis(
+            db,
+            card_id,
+            {
+                "learner_note_check": {
+                    "status": "correct",
+                    "corrected_understanding": "ignored when correct",
+                },
+            },
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["note_status"] == "correct"
+        assert row["note_correction"] == ""
+
+    def test_no_note_check_leaves_blank_fields(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "diag-g")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(db, card_id, {"predicted_error_types": ["L01"]})
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["note_status"] == ""
+        assert row["note_correction"] == ""
+
+    def test_empty_payload_is_safe(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "diag-h")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        record_word_card_diagnosis(db, card_id, {})
+        assert _error_codes_for_card(db, card_id) == set()
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (card_id,),
+            ).fetchone()
+        assert row["note_status"] == ""
+        assert row["note_correction"] == ""

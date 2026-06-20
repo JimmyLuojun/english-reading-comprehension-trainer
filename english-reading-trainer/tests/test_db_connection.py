@@ -122,6 +122,62 @@ class TestMigrationRunner:
         assert source["sentence_id"] == sentence_id
         assert source["is_primary"] == 1
 
+    def test_word_card_diagnosis_migration_defaults_existing_rows(
+        self, tmp_path: Path
+    ) -> None:
+        partial_dir = tmp_path / "partial_012"
+        partial_dir.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("0[01][0-9]_*.sql")):
+            if sql_file.name >= "012_":
+                continue
+            shutil.copy(sql_file, partial_dir / sql_file.name)
+        db = DatabaseConnection(tmp_path / "diag.db")
+        db.apply_migrations(partial_dir)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('B', 'txt', 'h_diag', '2026-01-01T00:00:00+00:00')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters (book_id, idx, title, sentence_start, sentence_end) "
+                "VALUES (?, 1, 'Ch', 0, 1)",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx, sentence_start, sentence_end) "
+                "VALUES (?, 1, 0, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                "INSERT INTO sentences "
+                "(book_id, chapter_id, paragraph_id, idx, text, text_hash, "
+                "char_offset_start, char_offset_end) "
+                "VALUES (?, ?, ?, 0, 'a tie.', 'h_tie', 0, 6)",
+                (book_id, chapter_id, paragraph_id),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    created_at, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count)
+                   VALUES ('tie', 'tie', 'word', ?,
+                           '2026-01-01T00:00:00+00:00', 'new', 2.5, 0, 0,
+                           '2026-01-01T00:00:00+00:00', 1)""",
+                (sentence_id,),
+            )
+
+        db.apply_migrations(MIGRATIONS_DIR)
+
+        cols = db.get_table_columns("word_cards")
+        assert "note_status" in cols
+        assert "note_correction" in cols
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards"
+            ).fetchone()
+        assert row["note_status"] == ""
+        assert row["note_correction"] == ""
+
     def test_ai_cache_input_snapshot_migration_preserves_existing_cache_rows(
         self,
         tmp_path: Path,
@@ -143,7 +199,10 @@ class TestMigrationRunner:
 
         applied = db.apply_migrations(MIGRATIONS_DIR)
 
-        assert applied == ["011_ai_cache_input_snapshot.sql"]
+        assert applied == [
+            "011_ai_cache_input_snapshot.sql",
+            "012_word_card_diagnosis.sql",
+        ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
         with db.get_connection() as conn:
@@ -229,6 +288,7 @@ class TestMigrationRunner:
             "009_inference_error_layer.sql",
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
+            "012_word_card_diagnosis.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -348,6 +408,11 @@ class TestColumns:
         for col in ["ef", "interval_days", "repetitions", "due_at",
                     "mastery_state", "lexical_type", "lemma", "surface_form",
                     "archived_at"]:
+            assert col in cols
+
+    def test_word_cards_has_diagnosis_fields(self, db: DatabaseConnection) -> None:
+        cols = db.get_table_columns("word_cards")
+        for col in ["note_status", "note_correction"]:
             assert col in cols
 
     def test_word_card_sources_columns(self, db: DatabaseConnection) -> None:
@@ -490,6 +555,7 @@ class TestConstraints:
             "009_inference_error_layer.sql",
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
+            "012_word_card_diagnosis.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -579,6 +645,7 @@ class TestConstraints:
         assert applied == [
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
+            "012_word_card_diagnosis.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

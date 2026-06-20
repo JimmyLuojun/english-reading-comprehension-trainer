@@ -47,6 +47,8 @@ class ReviewQueueItem:
     error_codes: tuple[str, ...] = ()
     last_quality: int | None = None
     last_outcome: ReviewOutcome | None = None
+    note_status: str = ""
+    note_correction: str = ""
 
     @property
     def is_new(self) -> bool:
@@ -174,6 +176,8 @@ def _sentence_due_sql() -> str:
             COALESCE(sc.user_translation, '') AS answer,
             COALESCE(sc.user_note, '') AS takeaway,
             '' AS ai_meaning,
+            '' AS note_status,
+            '' AS note_correction,
             COALESCE(b.title, '') AS source_book_title,
             '/read/' || s.book_id || '?chapter=' || c.idx ||
             '&sentence_id=' || s.id || '&panel=analysis#sentence-' || s.id AS source_href,
@@ -219,6 +223,8 @@ def _word_due_sql() -> str:
             END AS answer,
             '' AS takeaway,
             COALESCE(json_extract(ac.response_json, '$.meaning_in_context'), '') AS ai_meaning,
+            COALESCE(wc.note_status, '') AS note_status,
+            COALESCE(wc.note_correction, '') AS note_correction,
             COALESCE(b.title, '') AS source_book_title,
             CASE
                 WHEN s.id IS NULL OR c.idx IS NULL THEN ''
@@ -315,6 +321,8 @@ def _item_from_row(
         error_codes=error_codes.get((card_type, card_id), ()),
         last_quality=row["last_quality"],
         last_outcome=ReviewOutcome(last_outcome) if last_outcome else None,
+        note_status=str(row["note_status"] or ""),
+        note_correction=str(row["note_correction"] or ""),
     )
 
 

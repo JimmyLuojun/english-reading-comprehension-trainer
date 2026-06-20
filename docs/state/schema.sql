@@ -72,7 +72,7 @@ CREATE TABLE word_cards (
     due_at              TEXT    NOT NULL,
     occurrence_count    INTEGER NOT NULL DEFAULT 1,
     user_note           TEXT    NOT NULL DEFAULT '',
-    ai_analysis_id      INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL, archived_at TEXT,
+    ai_analysis_id      INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL, archived_at TEXT, note_status TEXT NOT NULL DEFAULT '', note_correction TEXT NOT NULL DEFAULT '',
     UNIQUE(lemma)         -- one card per lemma
 );
 CREATE INDEX idx_word_cards_due     ON word_cards(due_at);

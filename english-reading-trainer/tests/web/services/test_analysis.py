@@ -214,6 +214,7 @@ def test_analyze_word_card_for_reader_uses_pro_model_when_requested(monkeypatch)
     )
     monkeypatch.setattr(analysis, "get_pro_analysis_model", lambda: "deepseek-test-pro")
     monkeypatch.setattr(fastapi_app, "_update_word_card_analysis_id", lambda *args: None)
+    monkeypatch.setattr(analysis, "record_word_card_diagnosis", lambda *a, **k: None)
 
     def fake_analyze_word(*args, **kwargs):
         captured.update(kwargs)
@@ -258,6 +259,7 @@ def test_analyze_word_card_for_reader_passes_force_refresh(monkeypatch) -> None:
         lambda db, card_id: {"is_stale": False},
     )
     monkeypatch.setattr(fastapi_app, "_update_word_card_analysis_id", lambda *args: None)
+    monkeypatch.setattr(analysis, "record_word_card_diagnosis", lambda *a, **k: None)
 
     def fake_analyze_word(*args, **kwargs):
         captured.update(kwargs)
@@ -415,6 +417,7 @@ def test_analyze_word_card_for_reader_passes_analysis_context(monkeypatch) -> No
         lambda db, card_id: {"is_stale": False},
     )
     monkeypatch.setattr(fastapi_app, "_update_word_card_analysis_id", lambda *args: None)
+    monkeypatch.setattr(analysis, "record_word_card_diagnosis", lambda *a, **k: None)
 
     def fake_analyze_word(*args, **kwargs):
         captured.update(kwargs)
@@ -438,3 +441,107 @@ def test_analyze_word_card_for_reader_passes_analysis_context(monkeypatch) -> No
     assert captured["sentence_text"] == "The original sentence lacks the target."
     assert captured["context"] == "A pristine ledger is untouched."
     assert captured["learner_note"] == "未被触碰过的"
+
+
+def test_analyze_word_card_for_reader_records_diagnosis_on_valid(monkeypatch) -> None:
+    """Reader word analysis must persist error tags + misconception (gaps B/C)."""
+    import app.web.fastapi_app as fastapi_app
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 10,
+            "surface_form": "tie",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "It ended in a tie.", "user_translation": ""},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"is_stale": False},
+    )
+    monkeypatch.setattr(fastapi_app, "_update_word_card_analysis_id", lambda *args: None)
+
+    analysis_data = {
+        "predicted_error_types": ["L01"],
+        "learner_note_check": {"status": "incorrect", "corrected_understanding": "平局"},
+    }
+
+    def record(db, card_id, data):
+        captured["card_id"] = card_id
+        captured["data"] = data
+
+    monkeypatch.setattr(analysis, "record_word_card_diagnosis", record)
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_word",
+        lambda *a, **k: SimpleNamespace(
+            data=analysis_data,
+            cache_id=7,
+            from_cache=False,
+            is_stale=False,
+            is_valid=True,
+        ),
+    )
+
+    outcome = analysis.analyze_word_card_for_reader(object(), 1)
+
+    assert outcome.is_error is False
+    assert captured["card_id"] == 1
+    assert captured["data"] is analysis_data
+
+
+def test_analyze_word_card_for_reader_skips_diagnosis_on_invalid(monkeypatch) -> None:
+    """An invalid AI response must not write diagnosis onto the card."""
+    import app.web.fastapi_app as fastapi_app
+
+    called = {"value": False}
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 10,
+            "surface_form": "tie",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "It ended in a tie."},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"is_stale": False},
+    )
+
+    def record(*a, **k):
+        called["value"] = True
+
+    monkeypatch.setattr(analysis, "record_word_card_diagnosis", record)
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_word",
+        lambda *a, **k: SimpleNamespace(
+            data={},
+            cache_id=7,
+            from_cache=False,
+            is_stale=False,
+            is_valid=False,
+        ),
+    )
+
+    outcome = analysis.analyze_word_card_for_reader(object(), 1)
+
+    assert outcome.is_error is False
+    assert called["value"] is False

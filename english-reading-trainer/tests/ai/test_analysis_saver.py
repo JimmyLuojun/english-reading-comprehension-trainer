@@ -191,6 +191,27 @@ _VALID_WORD_JSON_V5 = json.dumps({
     "confidence": 0.9,
 })
 
+_VALID_WORD_JSON_V4_MISREAD = json.dumps({
+    "lemma": "fox",
+    "lexical_type": "word",
+    "pos": "noun",
+    "meaning_in_context": "a wild animal known for cunning",
+    "chinese_meaning": "以狡猾著称的狐狸",
+    "register": "neutral",
+    "why_this_word": "Fox is the precise animal name; animal would be too general. If you wrote animal, you would lose the cultural association with cleverness.",
+    "vs_simpler": [
+        {"simpler": "animal", "difference": "Animal is broader; fox names the species."}
+    ],
+    "learner_note_check": {
+        "status": "incorrect",
+        "feedback": "你把它理解成『家犬』，但语境里指狐狸。",
+        "corrected_understanding": "狐狸（机敏、狡黠），非『狗』",
+    },
+    "morphology": {"root": "", "family": ["foxy", "foxlike"]},
+    "predicted_error_types": ["L01", "L02"],
+    "confidence": 0.9,
+})
+
 _INVALID_JSON_STR = "{ this is not valid JSON }"
 
 _INVALID_SCHEMA_JSON = json.dumps({
@@ -243,6 +264,18 @@ def _sentence_error_codes(db: DatabaseConnection, card_id: int) -> set[str]:
                  FROM sentence_card_errors sce
                  JOIN error_types et ON et.id = sce.error_type_id
                 WHERE sce.card_id = ?""",
+            (card_id,),
+        ).fetchall()
+    return {row["code"] for row in rows}
+
+
+def _word_error_codes(db: DatabaseConnection, card_id: int) -> set[str]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT et.code
+                 FROM word_card_errors wce
+                 JOIN error_types et ON et.id = wce.error_type_id
+                WHERE wce.card_id = ?""",
             (card_id,),
         ).fetchall()
     return {row["code"] for row in rows}
@@ -562,6 +595,27 @@ class TestSaveWordAnalysisHappyPath:
     def test_error_empty_on_success(self, db: DatabaseConnection, sid: int):
         r = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
         assert r.error == ""
+
+    def test_predicted_error_codes_synced_to_word_card_errors(
+        self, db: DatabaseConnection, sid: int
+    ):
+        r = save_word_analysis(db, sid, "fox", _VALID_WORD_JSON)
+        assert _word_error_codes(db, r.card_id) == {"L01"}
+
+    def test_misreading_note_persisted_to_card(
+        self, db: DatabaseConnection, sid: int
+    ):
+        r = save_word_analysis(
+            db, sid, "fox", _VALID_WORD_JSON_V4_MISREAD, prompt_version="v4"
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT note_status, note_correction FROM word_cards WHERE id = ?",
+                (r.card_id,),
+            ).fetchone()
+        assert row["note_status"] == "incorrect"
+        assert row["note_correction"] == "狐狸（机敏、狡黠），非『狗』"
+        assert _word_error_codes(db, r.card_id) == {"L01", "L02"}
 
 
 # ---------------------------------------------------------------------------
