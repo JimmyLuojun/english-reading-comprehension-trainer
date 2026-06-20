@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Callable
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from app.db_connection import DatabaseConnection
@@ -41,7 +42,8 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         request: Request,
     ) -> JSONResponse:
         form = await _read_form(request)
-        outcome = analyze_sentence_for_reader(
+        outcome = await run_in_threadpool(
+            analyze_sentence_for_reader,
             db_factory(),
             sentence_id,
             user_translation=form.get("user_translation"),
@@ -66,7 +68,8 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
     @web_app.post("/analysis/word/{card_id}")
     async def analyze_word_endpoint(card_id: int, request: Request) -> JSONResponse:
         form = await _read_form(request)
-        outcome = analyze_word_card_for_reader(
+        outcome = await run_in_threadpool(
+            analyze_word_card_for_reader,
             db_factory(),
             card_id,
             context_text=form.get("context_text", ""),
