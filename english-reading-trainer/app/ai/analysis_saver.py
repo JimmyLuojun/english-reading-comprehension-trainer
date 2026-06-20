@@ -96,7 +96,14 @@ def save_sentence_analysis(
 
     content_hash = compute_content_hash(sent_text, "", user_translation, user_structure)
     cache_id = save_to_cache(
-        db, content_hash, prompt_version, model, response_json, is_valid
+        db,
+        content_hash,
+        prompt_version,
+        model,
+        response_json,
+        is_valid,
+        input_translation=user_translation,
+        input_structure=user_structure,
     )
 
     card_id: int | None = None

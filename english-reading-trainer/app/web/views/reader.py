@@ -419,6 +419,14 @@ def _analysis_panel() -> str:
         </section>
         <section class="analysis-section sentence-study-section">
           <h3><span class="section-label-zh">我的翻译</span><span class="section-label-en">Your translation</span></h3>
+          <div id="sentence-panel-analyzed-translation-section" class="analysis-input-snapshot" hidden>
+            <p class="analysis-snapshot-label">
+              <span class="section-label-zh">本次分析依据的翻译</span>
+              <span class="section-label-en">Initial translation analyzed</span>
+            </p>
+            <p class="analysis-snapshot-warning">This analysis was based on an earlier translation.</p>
+            <pre id="sentence-panel-analyzed-translation" class="analysis-snapshot-text"></pre>
+          </div>
           <textarea id="sentence-panel-translation" rows="4" placeholder="Edit your Chinese understanding"></textarea>
           <div class="word-notes-actions">
             <button id="sentence-panel-translation-save" type="button">Save translation</button>
@@ -427,6 +435,14 @@ def _analysis_panel() -> str:
         </section>
         <section id="analysis-structure-attempt-section" class="analysis-section sentence-study-section">
           <h3><span class="section-label-zh">我的结构</span><span class="section-label-en">Your structure attempt</span></h3>
+          <div id="sentence-panel-analyzed-structure-section" class="analysis-input-snapshot" hidden>
+            <p class="analysis-snapshot-label">
+              <span class="section-label-zh">本次分析依据的结构</span>
+              <span class="section-label-en">Initial structure analyzed</span>
+            </p>
+            <p class="analysis-snapshot-warning">This analysis was based on an earlier structure attempt.</p>
+            <pre id="sentence-panel-analyzed-structure" class="analysis-snapshot-text"></pre>
+          </div>
           <textarea id="sentence-panel-structure" rows="6" placeholder="主干：&#10;从句：&#10;修饰成分：&#10;指代逻辑："></textarea>
           <div class="word-notes-actions">
             <button id="sentence-panel-structure-save" type="button">Save structure</button>

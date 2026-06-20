@@ -59,13 +59,17 @@ def _insert_cache(
     payload: dict[str, object],
     *,
     content_hash: str = "hash",
+    input_translation: str | None = None,
+    input_structure: str | None = None,
 ) -> int:
     with db.get_connection() as conn:
         return conn.execute(
             """INSERT INTO ai_cache
-               (content_hash, prompt_version, model, response_json, is_valid, created_at)
-               VALUES (?, 'v1', 'model', ?, 1, '2026-06-17T00:00:00+00:00')""",
-            (content_hash, json.dumps(payload)),
+               (content_hash, prompt_version, model, response_json, is_valid,
+                created_at, input_translation, input_structure)
+               VALUES (?, 'v1', 'model', ?, 1, '2026-06-17T00:00:00+00:00',
+                       ?, ?)""",
+            (content_hash, json.dumps(payload), input_translation, input_structure),
         ).lastrowid
 
 
@@ -170,6 +174,8 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
     assert sentence_payload["ok"] is True
     assert sentence_payload["analysis"] == {"ok": True}
     assert sentence_payload["user_note"] == ""
+    assert sentence_payload["analyzed_translation"] == ""
+    assert sentence_payload["analyzed_structure"] == ""
     assert _fetch_cache_metadata(db, cache_id) == {
         "prompt_version": "v1",
         "model": "model",
@@ -215,6 +221,32 @@ def test_sentence_analysis_payload_is_stale_when_translation_changes(
     assert sentence_payload["user_translation"] == "新译文。"
 
 
+def test_sentence_analysis_payload_includes_translation_snapshot_when_changed(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    card_id = create_sentence_card(db, sentence_id, user_translation="旧译文。")
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", "旧译文。"),
+        input_translation="旧译文。",
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    save_sentence_translation(db, sentence_id, "新译文。")
+
+    sentence_payload = _fetch_sentence_analysis_payload(db, sentence_id)
+
+    assert sentence_payload["analyzed_translation"] == "旧译文。"
+    assert sentence_payload["user_translation"] == "新译文。"
+
+
 def test_sentence_analysis_payload_is_stale_when_structure_changes(
     tmp_path: Path,
 ) -> None:
@@ -239,6 +271,32 @@ def test_sentence_analysis_payload_is_stale_when_structure_changes(
     assert sentence_payload["cache_id"] == cache_id
     assert sentence_payload["is_stale"] is True
     assert sentence_payload["user_structure"] == "主干：The cat sat"
+
+
+def test_sentence_analysis_payload_includes_structure_snapshot_when_changed(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    card_id = create_sentence_card(db, sentence_id)
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", None, "旧结构。"),
+        input_structure="旧结构。",
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    save_sentence_structure(db, sentence_id, "新结构。")
+
+    sentence_payload = _fetch_sentence_analysis_payload(db, sentence_id)
+
+    assert sentence_payload["analyzed_structure"] == "旧结构。"
+    assert sentence_payload["user_structure"] == "新结构。"
 
 
 def test_sentence_analysis_payload_includes_similar_translation_mistakes(

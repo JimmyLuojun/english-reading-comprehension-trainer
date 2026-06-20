@@ -133,6 +133,8 @@ def analyze_sentence(
         response_json,
         is_valid,
         replace_valid=force_refresh,
+        input_translation=cleaned_translation,
+        input_structure=cleaned_structure,
     )
 
     return SentenceAnalysisResult(

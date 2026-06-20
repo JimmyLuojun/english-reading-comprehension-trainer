@@ -777,6 +777,32 @@ def _css() -> str:
       font-size: 14px;
       line-height: 1.45;
     }
+    .analysis-input-snapshot {
+      margin: 6px 0 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      background: var(--surface-alt);
+    }
+    .analysis-snapshot-label {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin: 0 0 4px;
+    }
+    .analysis-snapshot-warning {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .analysis-snapshot-text {
+      margin: 0;
+      white-space: pre-wrap;
+      color: var(--text-dim);
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.45;
+    }
     #sentence-panel-note-accept {
       margin-top: 6px;
     }

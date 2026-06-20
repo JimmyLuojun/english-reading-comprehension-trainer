@@ -186,6 +186,68 @@ class TestSaveToCache:
             ).fetchone()
         assert row["is_valid"] == 0
 
+    def test_input_snapshot_stored_when_provided(self, db: DatabaseConnection) -> None:
+        h = compute_content_hash("snapshot sentence.", "", "旧译文。", "旧结构。")
+        cid = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            _SAMPLE_RESPONSE,
+            True,
+            input_translation="  旧译文。  ",
+            input_structure="  旧结构。  ",
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (cid,),
+            ).fetchone()
+
+        assert row["input_translation"] == "旧译文。"
+        assert row["input_structure"] == "旧结构。"
+
+    def test_duplicate_valid_row_does_not_replace_input_snapshot(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("stable snapshot.")
+        cid1 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            _SAMPLE_RESPONSE,
+            True,
+            input_translation="first",
+            input_structure="first structure",
+        )
+        cid2 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            _SAMPLE_RESPONSE,
+            True,
+            input_translation="second",
+            input_structure="second structure",
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (cid1,),
+            ).fetchone()
+
+        assert cid1 == cid2
+        assert row["input_translation"] == "first"
+        assert row["input_structure"] == "first structure"
+
     def test_duplicate_key_returns_existing_id(self, db: DatabaseConnection) -> None:
         h = compute_content_hash("duplicate sentence.")
         cid1 = save_to_cache(db, h, _PROMPT_V1, _MODEL, _SAMPLE_RESPONSE, True)
@@ -251,6 +313,45 @@ class TestSaveToCache:
         result = get_cached(db, h, _PROMPT_V1, _MODEL)
         assert result is not None
         assert result.data == json.loads(updated_response)
+
+    def test_replace_valid_updates_input_snapshot(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        h = compute_content_hash("force refreshed snapshot.")
+        cid1 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            _SAMPLE_RESPONSE,
+            True,
+            input_translation="first",
+            input_structure="first structure",
+        )
+        cid2 = save_to_cache(
+            db,
+            h,
+            _PROMPT_V1,
+            _MODEL,
+            _SAMPLE_RESPONSE,
+            True,
+            replace_valid=True,
+            input_translation="second",
+            input_structure="second structure",
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (cid1,),
+            ).fetchone()
+
+        assert cid1 == cid2
+        assert row["input_translation"] == "second"
+        assert row["input_structure"] == "second structure"
 
     def test_replace_valid_does_not_let_invalid_response_replace_valid_row(
         self,

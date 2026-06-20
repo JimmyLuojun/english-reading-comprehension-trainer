@@ -50,7 +50,8 @@ def _fetch_sentence_analysis_payload(
             """SELECT s.text, sc.id AS card_id, sc.user_translation, sc.user_note,
                       sc.user_structure,
                       ac.id AS cache_id, ac.content_hash, ac.prompt_version, ac.model,
-                      ac.response_json, ac.is_valid, ac.created_at
+                      ac.response_json, ac.is_valid, ac.created_at,
+                      ac.input_translation, ac.input_structure
                  FROM sentences s
                  JOIN sentence_cards sc
                    ON sc.sentence_id = s.id AND sc.archived_at IS NULL
@@ -83,8 +84,10 @@ def _fetch_sentence_analysis_payload(
         "card_id": row["card_id"],
         "cache_id": row["cache_id"],
         "user_translation": row["user_translation"] or "",
+        "analyzed_translation": row["input_translation"] or "",
         "user_note": row["user_note"] or "",
         "user_structure": row["user_structure"] or "",
+        "analyzed_structure": row["input_structure"] or "",
         "prompt_version": row["prompt_version"],
         "active_prompt_version": active_version,
         "model": row["model"],

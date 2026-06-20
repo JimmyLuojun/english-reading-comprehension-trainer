@@ -126,6 +126,8 @@ def save_to_cache(
     is_valid: bool,
     *,
     replace_valid: bool = False,
+    input_translation: str | None = None,
+    input_structure: str | None = None,
 ) -> int:
     """
     Insert a new cache entry. Returns the cache row id.
@@ -138,22 +140,29 @@ def save_to_cache(
     responses still never overwrite valid cached data.
     """
     now = datetime.now(timezone.utc).isoformat()
+    cleaned_translation = _clean_optional_text(input_translation)
+    cleaned_structure = _clean_optional_text(input_structure)
 
     with db.get_connection() as conn:
         conn.execute(
             """INSERT INTO ai_cache
                (content_hash, prompt_version, model,
-                response_json, is_valid, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)
+                response_json, is_valid, created_at,
+                input_translation, input_structure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(content_hash, prompt_version, model)
                DO UPDATE SET
                    response_json = excluded.response_json,
                    is_valid = excluded.is_valid,
-                   created_at = excluded.created_at
+                   created_at = excluded.created_at,
+                   input_translation = excluded.input_translation,
+                   input_structure = excluded.input_structure
                WHERE ai_cache.is_valid = 0
                   OR (? = 1 AND excluded.is_valid = 1)""",
             (content_hash, prompt_version, model,
-             response_json, 1 if is_valid else 0, now, 1 if replace_valid else 0),
+             response_json, 1 if is_valid else 0, now,
+             cleaned_translation, cleaned_structure,
+             1 if replace_valid else 0),
         )
         row = conn.execute(
             """SELECT id FROM ai_cache
@@ -162,3 +171,10 @@ def save_to_cache(
         ).fetchone()
 
     return row["id"]
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None

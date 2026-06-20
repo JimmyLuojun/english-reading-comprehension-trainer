@@ -1150,6 +1150,7 @@ class TestReadingAndMarking:
         assert response.status_code == 200
         payload = response.json()
         assert payload["user_translation"] == "猫坐在垫子上。"
+        assert payload["analyzed_translation"] == "猫坐在垫子上。"
         assert payload["analysis"]["diagnosis_basis"] == "user_translation"
         assert mock.call_args.kwargs["user_translation"] == "猫坐在垫子上。"
         with db.get_connection() as conn:

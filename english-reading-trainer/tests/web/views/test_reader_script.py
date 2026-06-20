@@ -168,7 +168,11 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     retry = retry[: retry.index("async function saveWordDetailEdits")]
 
     assert 'document.getElementById("sentence-panel-translation")' in script
+    assert 'document.getElementById("sentence-panel-analyzed-translation-section")' in script
+    assert 'document.getElementById("sentence-panel-analyzed-translation")' in script
     assert 'document.getElementById("analysis-structure-attempt-section")' in script
+    assert 'document.getElementById("sentence-panel-analyzed-structure-section")' in script
+    assert 'document.getElementById("sentence-panel-analyzed-structure")' in script
     assert 'document.getElementById("sentence-panel-structure")' in script
     assert 'document.getElementById("analysis-structure-feedback-section")' in script
     assert 'document.getElementById("analysis-structure-feedback")' in script
@@ -189,6 +193,10 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "analysis.blocking_point || \"\"" in render_payload
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
+    assert "function setAnalysisInputSnapshot(section, target, snapshotValue, currentValue)" in script
+    assert "normalizeText(snapshot) !== normalizeText(current)" in script
+    assert "payload.analyzed_translation || \"\"" in script
+    assert "payload.analyzed_structure || \"\"" in script
     assert "payload.analysis?.takeaway_suggestion || \"\"" in script
     assert "function acceptTakeawaySuggestion()" in script
     assert 'sentencePanelNoteAccept.addEventListener("click", acceptTakeawaySuggestion);' in script

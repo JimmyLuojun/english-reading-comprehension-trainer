@@ -24,6 +24,41 @@ cache_key    = (content_hash, prompt_version, model)
 `[已确认 2026-06-14]`
 
 ---
+
+### 5.3 句子分析输入快照
+
+`[新增 2026-06-20]`
+
+句子分析 cache 行保存本次分析实际使用的用户输入：
+
+```sql
+ai_cache.input_translation
+ai_cache.input_structure
+```
+
+这两个字段是 nullable。旧 cache 行和 word analysis 行保持 `NULL`。
+
+Reader payload 返回：
+
+```text
+analyzed_translation
+analyzed_structure
+```
+
+前端只在快照非空且与当前 `sentence_cards.user_translation` /
+`sentence_cards.user_structure` 文本不同的时候显示只读快照框：
+
+- `Initial translation analyzed`
+- `Initial structure analyzed`
+
+`is_stale` 仍然只表示分析可能需要刷新：prompt version 改变或当前输入的
+`content_hash` 改变都会使它为 true。它不能用于决定是否显示快照框，因为仅
+prompt 升级时输入并没有变化。
+
+保存和重分析语义保持单一：`Save translation` / `Save structure` 只保存当前
+可编辑框；`Reanalyze` 也只使用当前可编辑框。快照只用于复盘旧分析依据。
+
+---
 ---
 
 ## 9. AI 输出 JSON Schema

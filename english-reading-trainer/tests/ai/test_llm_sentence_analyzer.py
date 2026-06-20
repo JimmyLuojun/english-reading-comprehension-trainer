@@ -327,6 +327,16 @@ class TestAnalyzeSentenceLLMSuccess:
         assert "USER TRANSLATION" in prompt
         assert "USER STRUCTURE ATTEMPT" in prompt
 
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (result.cache_id,),
+            ).fetchone()
+        assert row["input_translation"] == "猫坐着。"
+        assert row["input_structure"] == "主干：The cat sat"
+
     @pytest.mark.parametrize("translation", [None, "猫坐着。"])
     def test_no_structure_response_valid_without_structure_feedback(
         self,

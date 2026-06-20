@@ -86,6 +86,7 @@
 - [DeepSeek V4 model routing ADR](decisions/2026-06-17-deepseek-v4-model-routing.md)：普通分析默认 Flash，句子分析和手动 Pro 重分析使用 Pro。
 - [Minimal recursive AI analysis ADR](decisions/2026-06-18-minimal-recursive-ai-analysis.md)：只用最少字段实现整句→拆解→回到整句→检查点，不新增第二套 Review。
 - [Inference error layer ADR](decisions/2026-06-18-inference-error-layer.md)：新增 `inference` 错误层（I01/I02），其余分类缺口（宏观结构、否定/比较范围）暂缓，待真实数据决定。
+- [Sentence analysis input snapshots ADR](decisions/2026-06-20-sentence-analysis-input-snapshots.md)：句子分析 cache 行保存本次分析依据的译文/结构快照，Reader 只在快照与当前输入不同且非空时显示只读复盘框。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。

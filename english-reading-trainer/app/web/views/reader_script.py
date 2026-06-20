@@ -85,10 +85,14 @@ def _fragment_refs_and_state() -> str:
       const anaphora = document.getElementById("analysis-anaphora");
       const diagnosis = document.getElementById("analysis-diagnosis");
       const backToWhole = document.getElementById("analysis-back-to-whole");
+      const sentencePanelAnalyzedTranslationSection = document.getElementById("sentence-panel-analyzed-translation-section");
+      const sentencePanelAnalyzedTranslation = document.getElementById("sentence-panel-analyzed-translation");
       const sentencePanelTranslation = document.getElementById("sentence-panel-translation");
       const sentencePanelTranslationSave = document.getElementById("sentence-panel-translation-save");
       const sentencePanelTranslationStatus = document.getElementById("sentence-panel-translation-status");
       const structureAttemptSection = document.getElementById("analysis-structure-attempt-section");
+      const sentencePanelAnalyzedStructureSection = document.getElementById("sentence-panel-analyzed-structure-section");
+      const sentencePanelAnalyzedStructure = document.getElementById("sentence-panel-analyzed-structure");
       const sentencePanelStructure = document.getElementById("sentence-panel-structure");
       const sentencePanelStructureSave = document.getElementById("sentence-panel-structure-save");
       const sentencePanelStructureStatus = document.getElementById("sentence-panel-structure-status");
@@ -2085,13 +2089,34 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelRetryPro) panelRetryPro.hidden = !retryable;
       }
 
+      function setAnalysisInputSnapshot(section, target, snapshotValue, currentValue) {
+        if (!section || !target) return;
+        const snapshot = String(snapshotValue || "").trim();
+        const current = String(currentValue || "").trim();
+        const shouldShow = snapshot && normalizeText(snapshot) !== normalizeText(current);
+        section.hidden = !shouldShow;
+        target.textContent = shouldShow ? snapshot : "";
+      }
+
       function setSentenceStudyFields(payload) {
         clearPanelAutoSaveTimers();
+        setAnalysisInputSnapshot(
+          sentencePanelAnalyzedTranslationSection,
+          sentencePanelAnalyzedTranslation,
+          payload.analyzed_translation || "",
+          payload.user_translation || "",
+        );
         if (sentencePanelTranslation) {
           sentencePanelTranslation.value = payload.user_translation || "";
           lastSavedPanelTranslation = (payload.user_translation || "").trim();
           panelTranslationDirty = false;
         }
+        setAnalysisInputSnapshot(
+          sentencePanelAnalyzedStructureSection,
+          sentencePanelAnalyzedStructure,
+          payload.analyzed_structure || "",
+          payload.user_structure || "",
+        );
         if (sentencePanelStructure) {
           sentencePanelStructure.value = payload.user_structure || STRUCTURE_TEMPLATE;
           lastSavedPanelStructure = (payload.user_structure || "").trim();

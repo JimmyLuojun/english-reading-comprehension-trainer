@@ -48,6 +48,7 @@ class TestMigrationRunner:
         assert "008_word_card_sources.sql" in applied
         assert "009_inference_error_layer.sql" in applied
         assert "010_sentence_user_structure.sql" in applied
+        assert "011_ai_cache_input_snapshot.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -65,6 +66,7 @@ class TestMigrationRunner:
         assert "008_word_card_sources.sql" in recorded
         assert "009_inference_error_layer.sql" in recorded
         assert "010_sentence_user_structure.sql" in recorded
+        assert "011_ai_cache_input_snapshot.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -119,6 +121,43 @@ class TestMigrationRunner:
         assert card["occurrence_count"] == 1
         assert source["sentence_id"] == sentence_id
         assert source["is_primary"] == 1
+
+    def test_ai_cache_input_snapshot_migration_preserves_existing_cache_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("0[0-1][0-9]_*.sql")):
+            if sql_file.name <= "010_sentence_user_structure.sql":
+                shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "snapshot_upgrade.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('h', 'v1', 'model', '{}', 1, '2026-01-01T00:00:00+00:00')"""
+            ).lastrowid
+
+        applied = db.apply_migrations(MIGRATIONS_DIR)
+
+        assert applied == ["011_ai_cache_input_snapshot.sql"]
+        assert "input_translation" in db.get_table_columns("ai_cache")
+        assert "input_structure" in db.get_table_columns("ai_cache")
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (cache_id,),
+            ).fetchone()
+            fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+
+        assert row["input_translation"] is None
+        assert row["input_structure"] is None
+        assert fk_errors == []
 
     def test_inference_layer_migration_preserves_error_type_foreign_keys(
         self,
@@ -189,6 +228,7 @@ class TestMigrationRunner:
         assert applied == [
             "009_inference_error_layer.sql",
             "010_sentence_user_structure.sql",
+            "011_ai_cache_input_snapshot.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -449,6 +489,7 @@ class TestConstraints:
             "008_word_card_sources.sql",
             "009_inference_error_layer.sql",
             "010_sentence_user_structure.sql",
+            "011_ai_cache_input_snapshot.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -535,7 +576,10 @@ class TestConstraints:
 
         applied = db.apply_migrations(MIGRATIONS_DIR)
 
-        assert applied == ["010_sentence_user_structure.sql"]
+        assert applied == [
+            "010_sentence_user_structure.sql",
+            "011_ai_cache_input_snapshot.sql",
+        ]
         with db.get_connection() as conn:
             row = conn.execute(
                 """SELECT user_translation, user_structure, structure_created_at

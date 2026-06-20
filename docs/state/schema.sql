@@ -126,7 +126,7 @@ CREATE TABLE ai_cache (
     model           TEXT    NOT NULL,
     response_json   TEXT    NOT NULL,
     is_valid        INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0,1)),
-    created_at      TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL, input_translation TEXT, input_structure TEXT,
     UNIQUE(content_hash, prompt_version, model)
 );
 CREATE TABLE learner_profile_snapshots (

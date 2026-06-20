@@ -201,8 +201,14 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     html = _analysis_panel()
 
     assert 'id="sentence-panel-translation"' in html
+    assert 'id="sentence-panel-analyzed-translation-section"' in html
+    assert 'id="sentence-panel-analyzed-translation"' in html
+    assert "Initial translation analyzed" in html
     assert "Your translation" in html
     assert 'id="sentence-panel-structure"' in html
+    assert 'id="sentence-panel-analyzed-structure-section"' in html
+    assert 'id="sentence-panel-analyzed-structure"' in html
+    assert "Initial structure analyzed" in html
     assert 'id="analysis-structure-attempt-section"' in html
     assert 'id="analysis-structure-feedback-section"' in html
     assert "Your structure attempt" in html
@@ -222,8 +228,16 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert html.index("Blocking point") < html.index("Structure")
     assert html.index("Structure") < html.index("Diagnosis")
     assert html.index("Diagnosis") < html.index("Back to whole sentence")
-    assert html.index("Back to whole sentence") < html.index("Your translation")
-    assert html.index("Your translation") < html.index("Your structure attempt")
+    assert html.index("Back to whole sentence") < html.index('id="sentence-panel-translation"')
+    assert html.index('id="sentence-panel-analyzed-translation-section"') < html.index(
+        'id="sentence-panel-translation"'
+    )
+    assert html.index('id="sentence-panel-translation"') < html.index(
+        'id="sentence-panel-structure"'
+    )
+    assert html.index('id="sentence-panel-analyzed-structure-section"') < html.index(
+        'id="sentence-panel-structure"'
+    )
     assert html.index("Your structure attempt") < html.index("Structure feedback")
     assert html.index("Your translation") < html.index("Takeaway")
 

@@ -329,6 +329,27 @@ class TestSaveSentenceAnalysisHappyPath:
             ).fetchone()
         assert row["model"] == "claude-opus-4-7"
 
+    def test_sentence_input_snapshot_stored_in_cache(
+        self,
+        db: DatabaseConnection,
+        sid: int,
+    ):
+        save_sentence_translation(db, sid, "旧译文。")
+        save_sentence_structure(db, sid, "主干：fox jumps")
+
+        r = save_sentence_analysis(db, sid, _VALID_SENTENCE_JSON)
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT input_translation, input_structure
+                   FROM ai_cache
+                   WHERE id = ?""",
+                (r.cache_id,),
+            ).fetchone()
+
+        assert row["input_translation"] == "旧译文。"
+        assert row["input_structure"] == "主干：fox jumps"
+
     def test_v2_json_with_recursive_fields_is_valid(
         self,
         db: DatabaseConnection,
