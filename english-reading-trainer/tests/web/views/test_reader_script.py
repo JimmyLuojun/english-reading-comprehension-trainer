@@ -237,7 +237,7 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "renderStructureHighlight(target, snapshot, current);" in script
     assert "diffTranslationPhrases(snapshotValue, currentValue)" in script
     assert "function diffInputLines(snapshotValue, currentValue, inputKind)" in script
-    assert 'appendInputDiffItem(list, "modified", "修改", removedLine, addedLine);' in script
+    assert 'appendInputDiffItem(list, "modified", "修改", removedLine, addedLine, preview);' in script
     assert "function renderInputDiff(details, list, countTarget, snapshotValue, currentValue, inputKind)" in script
     assert "countTarget.textContent = list.childElementCount" in script
     assert "details.hidden = !list.childElementCount;" in script
@@ -453,6 +453,67 @@ def _run_structure_diff(old: str, new: str) -> dict:
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
+
+
+def _run_structure_modified_preview(before: str, after: str) -> str:
+    """Run formatStructureModifiedPreview in node and return the result string."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available for JS behavioural test")
+
+    script = _selection_script()
+    declarations = [
+        "function truncateDiffText(text, max = INPUT_DIFF_PREVIEW_MAX)",
+        "function formatStructureModifiedPreview(beforeText, afterText)",
+    ]
+    body = "\n".join(_extract_js_function(script, decl) for decl in declarations)
+    preamble = (
+        "const INPUT_DIFF_PREVIEW_MAX = 34;\n"
+        "const STRUCTURE_DIFF_CONTEXT_CHARS = 16;\n"
+    )
+    harness = (
+        f"const BEFORE={json.dumps(before)};\n"
+        f"const AFTER={json.dumps(after)};\n"
+        "process.stdout.write(formatStructureModifiedPreview(BEFORE, AFTER));\n"
+    )
+    completed = subprocess.run(  # noqa: S603 - local node, fixed args
+        [node, "--input-type=module", "-e", preamble + body + harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout
+
+
+def test_structure_modified_preview_centers_on_end_of_line_change() -> None:
+    # The changed word is at the end; the first 34 chars of both lines are
+    # identical, so the old truncate-from-start preview was useless.
+    before = "1. for nodes to support the network 修饰 adds"
+    after = "1. for nodes to support the network 修饰 incentive"
+    result = _run_structure_modified_preview(before, after)
+
+    # Result must contain the actual differing words.
+    assert "adds" in result
+    assert "incentive" in result
+    # Must NOT start with the long shared prefix (would be useless).
+    assert not result.startswith("1. for nodes to support the ne")
+    # Context anchor (prefix tail) and direction arrow are present.
+    assert "修饰" in result
+    assert "→" in result
+
+
+def test_structure_modified_preview_no_ellipsis_when_change_is_near_start() -> None:
+    # The change starts near the beginning; full prefix is short so no leading "…".
+    before = "1. provides a way to distribute coins"
+    after = "1. This adds an incentive and provides a way"
+    result = _run_structure_modified_preview(before, after)
+
+    # No leading ellipsis because common prefix ("1. ") is shorter than CONTEXT.
+    assert not result.startswith("…")
+    assert "provides" in result
+    assert "This" in result
+    assert "→" in result
 
 
 def test_structure_highlight_marks_changed_lines_inline() -> None:

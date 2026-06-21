@@ -133,6 +133,7 @@
       const STRUCTURE_TEMPLATE = "主干：\n从句：\n修饰成分：\n指代逻辑：";
       const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];
       const INPUT_DIFF_PREVIEW_MAX = 34;
+      const STRUCTURE_DIFF_CONTEXT_CHARS = 16;
       // Two token-level changes separated by a same-run this short (visible
       // chars) belong to one logical edit, so they merge into a single phrase.
       // Wider gaps stay separate, keeping hints tight instead of fragmented.
@@ -2630,6 +2631,48 @@
         }
       }
 
+      function formatStructureModifiedPreview(beforeText, afterText) {
+        const before = Array.from(String(beforeText || "").trim());
+        const after = Array.from(String(afterText || "").trim());
+        let prefixLen = 0;
+        while (prefixLen < before.length && prefixLen < after.length && before[prefixLen] === after[prefixLen]) {
+          prefixLen += 1;
+        }
+        let suffixLen = 0;
+        while (
+          suffixLen < before.length - prefixLen &&
+          suffixLen < after.length - prefixLen &&
+          before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]
+        ) {
+          suffixLen += 1;
+        }
+        const beforeCore = before.slice(prefixLen, before.length - suffixLen || before.length);
+        const afterCore = after.slice(prefixLen, after.length - suffixLen || after.length);
+        if (beforeCore.length === 0 && afterCore.length === 0) {
+          return truncateDiffText(before.join(""));
+        }
+        const CORE_MAX = INPUT_DIFF_PREVIEW_MAX - STRUCTURE_DIFF_CONTEXT_CHARS;
+        const ctxStart = Math.max(0, prefixLen - STRUCTURE_DIFF_CONTEXT_CHARS);
+        const prefixTail = before.slice(ctxStart, prefixLen).join("");
+        const suffixHead = before.slice(
+          before.length - suffixLen,
+          before.length - suffixLen + STRUCTURE_DIFF_CONTEXT_CHARS,
+        ).join("");
+        const leadDot = ctxStart > 0 ? "…" : "";
+        const trailDot = suffixLen > STRUCTURE_DIFF_CONTEXT_CHARS ? "…" : "";
+        const beforeCoreStr = beforeCore.length > CORE_MAX
+          ? beforeCore.slice(0, CORE_MAX).join("") + "…"
+          : beforeCore.join("");
+        const afterCoreStr = afterCore.length > CORE_MAX
+          ? afterCore.slice(0, CORE_MAX).join("") + "…"
+          : afterCore.join("");
+        return (
+          `${leadDot}${prefixTail}${beforeCoreStr}${suffixHead}${trailDot}` +
+          ` → ` +
+          `${leadDot}${prefixTail}${afterCoreStr}${suffixHead}${trailDot}`
+        );
+      }
+
       function formatDiffPreview(beforeLine, afterLine) {
         const before = beforeLine ? truncateDiffText(beforeLine.text) : "";
         const after = afterLine ? truncateDiffText(afterLine.text) : "";
@@ -2649,7 +2692,7 @@
         container.append(row);
       }
 
-      function appendInputDiffItem(list, kind, label, beforeLine, afterLine) {
+      function appendInputDiffItem(list, kind, label, beforeLine, afterLine, previewOverride = null) {
         const item = document.createElement("li");
         item.className = `analysis-input-diff-item diff-${kind}`;
         const details = document.createElement("details");
@@ -2664,7 +2707,7 @@
         location.textContent = afterLine?.location || beforeLine?.location || "";
         const preview = document.createElement("span");
         preview.className = "analysis-input-diff-preview";
-        preview.textContent = formatDiffPreview(beforeLine, afterLine);
+        preview.textContent = previewOverride !== null ? previewOverride : formatDiffPreview(beforeLine, afterLine);
         summary.append(badge, location, preview);
         const full = document.createElement("div");
         full.className = "analysis-input-diff-full";
@@ -2721,7 +2764,8 @@
             const removedLine = removed[diffIndex] || null;
             const addedLine = added[diffIndex] || null;
             if (removedLine && addedLine) {
-              appendInputDiffItem(list, "modified", "修改", removedLine, addedLine);
+              const preview = formatStructureModifiedPreview(removedLine.text, addedLine.text);
+              appendInputDiffItem(list, "modified", "修改", removedLine, addedLine, preview);
             } else if (removedLine) {
               appendInputDiffItem(list, "removed", "删除", removedLine, null);
             } else if (addedLine) {
