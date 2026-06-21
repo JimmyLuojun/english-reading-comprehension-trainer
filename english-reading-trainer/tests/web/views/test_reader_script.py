@@ -215,10 +215,14 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
     assert "const INPUT_DIFF_PREVIEW_MAX = 34;" in script
+    assert "const STRUCTURE_MODIFIED_SIMILARITY_MIN = 0.5;" in script
     assert "function truncateDiffText(text, max = INPUT_DIFF_PREVIEW_MAX)" in script
     assert "function describeStructureLine(text, state)" in script
     assert 'return `${state.section} ${numbered[1]}`;' in script
     assert 'location: inputKind === "structure"' in script
+    assert "function normalizeStructureLineKey(text)" in script
+    assert "function pairStructureChangedLines(removed, added)" in script
+    assert "function buildStructureDiffEntries(snapshotValue, currentValue)" in script
     assert ': "译文",' in script
     assert "function translationTokenType(char)" in script
     assert "function tokenizeTranslation(value)" in script
@@ -237,7 +241,7 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "renderStructureHighlight(target, snapshot, current);" in script
     assert "diffTranslationPhrases(snapshotValue, currentValue)" in script
     assert "function diffInputLines(snapshotValue, currentValue, inputKind)" in script
-    assert 'appendInputDiffItem(list, "modified", "修改", removedLine, addedLine, preview);' in script
+    assert 'appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview);' in script
     assert "function renderInputDiff(details, list, countTarget, snapshotValue, currentValue, inputKind)" in script
     assert "countTarget.textContent = list.childElementCount" in script
     assert "details.hidden = !list.childElementCount;" in script
@@ -417,14 +421,22 @@ def _run_structure_diff(old: str, new: str) -> dict:
     normalize_line = script[ns_idx : ns_end + 1]
     declarations = [
         "function describeStructureLine(text, state)",
+        "function stripStructureLineNumber(text)",
+        "function normalizeStructureLineKey(text)",
         "function parseInputLines(value, inputKind)",
         "function diffUnits(oldUnits, newUnits)",
         "function diffInputLines(snapshotValue, currentValue, inputKind)",
+        "function tokenizeStructureLine(text)",
+        "function structureTokenLcsLength(beforeTokens, afterTokens)",
+        "function structureLineSimilarity(beforeLine, afterLine)",
+        "function pairStructureChangedLines(removed, added)",
+        "function buildStructureDiffEntries(snapshotValue, currentValue)",
         "function renderStructureHighlight(target, snapshotValue, currentValue)",
     ]
     body = normalize_line + "\n" + "\n".join(
         _extract_js_function(script, decl) for decl in declarations
     )
+    body = "const STRUCTURE_MODIFIED_SIMILARITY_MIN = 0.5;\n" + body
 
     harness = (
         "class FakeNode {\n"
@@ -441,9 +453,13 @@ def _run_structure_diff(old: str, new: str) -> dict:
         f"const NEW={json.dumps(new)};\n"
         "const target=new FakeNode();\n"
         "renderStructureHighlight(target,OLD,NEW);\n"
+        "const entries=buildStructureDiffEntries(OLD,NEW)"
+        ".filter(e=>e.kind!=='same').map(e=>({"
+        "kind:e.kind,before:e.before?e.before.text:null,after:e.after?e.after.text:null,"
+        "location:e.after?.location||e.before?.location||''}));\n"
         "const segments=target.children.map(c=>c.kind==='#text'"
         "?{text:c.value}:{mark:c.className,text:c.textContent||c._text});\n"
-        "process.stdout.write(JSON.stringify({segments}));\n"
+        "process.stdout.write(JSON.stringify({segments,entries}));\n"
     )
     completed = subprocess.run(  # noqa: S603 - local node, fixed args
         [node, "--input-type=module", "-e", body + harness],
@@ -535,6 +551,56 @@ def test_structure_highlight_marks_changed_lines_inline() -> None:
     plain_texts = [s["text"] for s in segments if "mark" not in s]
     assert any("主干：" in t for t in plain_texts)
     assert any("修饰成分：" in t for t in plain_texts)
+
+
+def test_structure_diff_pairs_deleted_middle_item_by_similarity_not_position() -> None:
+    old = "\n".join(
+        [
+            "主干： The steady addition is analogous",
+            "从句：",
+            "修饰成分：",
+            '1. "of new coins"介宾短语作后置定语修饰"amount";',
+            '2. "of amount of new coins"介宾短语作后置定语修饰"constant";',
+            '3. "of a constant of amount of new coins"是介宾短语作后置定语修饰"addition";',
+            '4. "to gold miners expending resources to add gold to circulation"是表语补足语修饰"analogous";',
+        ]
+    )
+    new = "\n".join(
+        [
+            "主干： The steady addition is analogous",
+            "从句：",
+            "修饰成分：",
+            '1. "of new coins"介宾短语作后置定语修饰"amount";',
+            '3. "of a constant amount of new coins"是介宾短语作后置定语修饰"addition";',
+            '4. "to gold miners expending resources to add gold to circulation"是表语补足语修饰"analogous";',
+        ]
+    )
+
+    result = _run_structure_diff(old, new)
+
+    assert result["entries"] == [
+        {
+            "kind": "removed",
+            "before": '2. "of amount of new coins"介宾短语作后置定语修饰"constant";',
+            "after": None,
+            "location": "修饰成分 2",
+        },
+        {
+            "kind": "modified",
+            "before": '3. "of a constant of amount of new coins"是介宾短语作后置定语修饰"addition";',
+            "after": '3. "of a constant amount of new coins"是介宾短语作后置定语修饰"addition";',
+            "location": "修饰成分 3",
+        },
+    ]
+
+
+def test_structure_diff_ignores_number_only_changes() -> None:
+    old = "\n".join(["修饰成分：", "1. A modifies B", "2. C modifies D"])
+    new = "\n".join(["修饰成分：", "1. A modifies B", "3. C modifies D"])
+
+    result = _run_structure_diff(old, new)
+
+    assert result["entries"] == []
 
 
 def test_word_analysis_panel_shows_role_in_sentence() -> None:

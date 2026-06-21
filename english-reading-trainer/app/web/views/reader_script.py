@@ -138,6 +138,7 @@ def _fragment_refs_and_state() -> str:
       const STRUCTURE_TEMPLATE_LABELS = ["主干：", "从句：", "修饰成分：", "指代逻辑："];
       const INPUT_DIFF_PREVIEW_MAX = 34;
       const STRUCTURE_DIFF_CONTEXT_CHARS = 16;
+      const STRUCTURE_MODIFIED_SIMILARITY_MIN = 0.5;
       // Two token-level changes separated by a same-run this short (visible
       // chars) belong to one logical edit, so they merge into a single phrase.
       // Wider gaps stay separate, keeping hints tight instead of fragmented.
@@ -2308,11 +2309,21 @@ def _fragment_analysis_panel_rendering() -> str:
           .filter(Boolean)
           .map((text) => ({
             text,
-            key: normalizeText(text),
+            key: inputKind === "structure"
+              ? normalizeStructureLineKey(text)
+              : normalizeText(text),
             location: inputKind === "structure"
               ? describeStructureLine(text, structureState)
               : "译文",
           }));
+      }
+
+      function stripStructureLineNumber(text) {
+        return String(text || "").trim().replace(/^\d+[.、]\s*/, "");
+      }
+
+      function normalizeStructureLineKey(text) {
+        return normalizeText(stripStructureLineNumber(text)).toLowerCase();
       }
 
       function diffUnits(oldUnits, newUnits) {
@@ -2361,6 +2372,121 @@ def _fragment_analysis_panel_rendering() -> str:
         const newLines = parseInputLines(currentValue, inputKind);
         return diffUnits(oldLines, newLines)
           .map((operation) => ({ kind: operation.kind, line: operation.unit }));
+      }
+
+      function tokenizeStructureLine(text) {
+        const tokens = [];
+        const normalized = normalizeStructureLineKey(text);
+        const pattern = /[\p{Script=Han}]|[A-Za-z0-9]+/gu;
+        let match = pattern.exec(normalized);
+        while (match) {
+          tokens.push(match[0]);
+          match = pattern.exec(normalized);
+        }
+        return tokens;
+      }
+
+      function structureTokenLcsLength(beforeTokens, afterTokens) {
+        const dp = Array.from({ length: beforeTokens.length + 1 }, () =>
+          Array(afterTokens.length + 1).fill(0),
+        );
+        for (let i = beforeTokens.length - 1; i >= 0; i -= 1) {
+          for (let j = afterTokens.length - 1; j >= 0; j -= 1) {
+            dp[i][j] = beforeTokens[i] === afterTokens[j]
+              ? dp[i + 1][j + 1] + 1
+              : Math.max(dp[i + 1][j], dp[i][j + 1]);
+          }
+        }
+        return dp[0][0];
+      }
+
+      function structureLineSimilarity(beforeLine, afterLine) {
+        const beforeTokens = tokenizeStructureLine(beforeLine?.text || "");
+        const afterTokens = tokenizeStructureLine(afterLine?.text || "");
+        if (!beforeTokens.length && !afterTokens.length) return 1;
+        if (!beforeTokens.length || !afterTokens.length) return 0;
+        const overlap = structureTokenLcsLength(beforeTokens, afterTokens);
+        return (2 * overlap) / (beforeTokens.length + afterTokens.length);
+      }
+
+      function pairStructureChangedLines(removed, added) {
+        if (!removed.length) {
+          return added.map((line) => ({ kind: "added", after: line }));
+        }
+        if (!added.length) {
+          return removed.map((line) => ({ kind: "removed", before: line }));
+        }
+        if (removed.length === 1 && added.length === 1) {
+          return [{ kind: "modified", before: removed[0], after: added[0] }];
+        }
+
+        const candidates = [];
+        removed.forEach((beforeLine, beforeIndex) => {
+          added.forEach((afterLine, afterIndex) => {
+            const score = structureLineSimilarity(beforeLine, afterLine);
+            if (score >= STRUCTURE_MODIFIED_SIMILARITY_MIN) {
+              candidates.push({ beforeIndex, afterIndex, score });
+            }
+          });
+        });
+        candidates.sort((a, b) =>
+          b.score - a.score ||
+          Math.abs(a.beforeIndex - a.afterIndex) - Math.abs(b.beforeIndex - b.afterIndex) ||
+          a.beforeIndex - b.beforeIndex ||
+          a.afterIndex - b.afterIndex,
+        );
+
+        const matchedRemoved = new Set();
+        const matchedAdded = new Set();
+        const pairByRemoved = new Map();
+        for (const candidate of candidates) {
+          if (matchedRemoved.has(candidate.beforeIndex) || matchedAdded.has(candidate.afterIndex)) {
+            continue;
+          }
+          matchedRemoved.add(candidate.beforeIndex);
+          matchedAdded.add(candidate.afterIndex);
+          pairByRemoved.set(candidate.beforeIndex, candidate.afterIndex);
+        }
+
+        const entries = [];
+        removed.forEach((beforeLine, beforeIndex) => {
+          const afterIndex = pairByRemoved.get(beforeIndex);
+          if (afterIndex === undefined) {
+            entries.push({ kind: "removed", before: beforeLine });
+            return;
+          }
+          entries.push({ kind: "modified", before: beforeLine, after: added[afterIndex] });
+        });
+        added.forEach((afterLine, afterIndex) => {
+          if (!matchedAdded.has(afterIndex)) {
+            entries.push({ kind: "added", after: afterLine });
+          }
+        });
+        return entries;
+      }
+
+      function buildStructureDiffEntries(snapshotValue, currentValue) {
+        const operations = diffInputLines(snapshotValue, currentValue, "structure");
+        const entries = [];
+        let index = 0;
+        while (index < operations.length) {
+          const op = operations[index];
+          if (op.kind === "same") {
+            entries.push({ kind: "same", before: op.line, after: op.line });
+            index += 1;
+            continue;
+          }
+
+          const removed = [];
+          const added = [];
+          while (index < operations.length && operations[index].kind !== "same") {
+            if (operations[index].kind === "removed") removed.push(operations[index].line);
+            if (operations[index].kind === "added") added.push(operations[index].line);
+            index += 1;
+          }
+          entries.push(...pairStructureChangedLines(removed, added));
+        }
+        return entries;
       }
 
       function translationTokenType(char) {
@@ -2604,42 +2730,22 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function renderStructureHighlight(target, snapshotValue, currentValue) {
         if (!target) return;
-        const operations = diffInputLines(snapshotValue, currentValue, "structure");
         target.replaceChildren();
-        let index = 0;
-        while (index < operations.length) {
-          const op = operations[index];
-          if (op.kind === "same") {
-            target.append(document.createTextNode(op.line.text + "\n"));
-            index += 1;
+        for (const entry of buildStructureDiffEntries(snapshotValue, currentValue)) {
+          if (entry.kind === "same") {
+            target.append(document.createTextNode(entry.before.text + "\n"));
             continue;
           }
-          const removed = [];
-          const added = [];
-          while (index < operations.length && operations[index].kind !== "same") {
-            if (operations[index].kind === "removed") removed.push(operations[index].line);
-            else added.push(operations[index].line);
-            index += 1;
+          const mark = document.createElement("mark");
+          if (entry.before) {
+            mark.className = `diff-mark diff-mark-${entry.kind}`;
+            mark.textContent = entry.before.text;
+          } else {
+            mark.className = "diff-mark diff-mark-insert";
+            mark.textContent = "‸";
           }
-          const count = Math.max(removed.length, added.length);
-          for (let di = 0; di < count; di += 1) {
-            const removedLine = removed[di] || null;
-            const addedLine = added[di] || null;
-            if (removedLine) {
-              const kind = addedLine ? "modified" : "removed";
-              const mark = document.createElement("mark");
-              mark.className = `diff-mark diff-mark-${kind}`;
-              mark.textContent = removedLine.text;
-              target.append(mark);
-              target.append(document.createTextNode("\n"));
-            } else {
-              const mark = document.createElement("mark");
-              mark.className = "diff-mark diff-mark-insert";
-              mark.textContent = "‸";
-              target.append(mark);
-              target.append(document.createTextNode("\n"));
-            }
-          }
+          target.append(mark);
+          target.append(document.createTextNode("\n"));
         }
       }
 
@@ -2754,35 +2860,15 @@ def _fragment_analysis_panel_rendering() -> str:
           return;
         }
 
-        const operations = diffInputLines(snapshotValue, currentValue, inputKind);
-        let index = 0;
-        while (index < operations.length) {
-          if (operations[index].kind === "same") {
-            index += 1;
-            continue;
-          }
-
-          const removed = [];
-          const added = [];
-          while (index < operations.length && operations[index].kind !== "same") {
-            const operation = operations[index];
-            if (operation.kind === "removed") removed.push(operation.line);
-            if (operation.kind === "added") added.push(operation.line);
-            index += 1;
-          }
-
-          const count = Math.max(removed.length, added.length);
-          for (let diffIndex = 0; diffIndex < count; diffIndex += 1) {
-            const removedLine = removed[diffIndex] || null;
-            const addedLine = added[diffIndex] || null;
-            if (removedLine && addedLine) {
-              const preview = formatStructureModifiedPreview(removedLine.text, addedLine.text);
-              appendInputDiffItem(list, "modified", "修改", removedLine, addedLine, preview);
-            } else if (removedLine) {
-              appendInputDiffItem(list, "removed", "删除", removedLine, null);
-            } else if (addedLine) {
-              appendInputDiffItem(list, "added", "新增", null, addedLine);
-            }
+        for (const entry of buildStructureDiffEntries(snapshotValue, currentValue)) {
+          if (entry.kind === "same") continue;
+          if (entry.kind === "modified") {
+            const preview = formatStructureModifiedPreview(entry.before.text, entry.after.text);
+            appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview);
+          } else if (entry.kind === "removed") {
+            appendInputDiffItem(list, "removed", "删除", entry.before, null);
+          } else if (entry.kind === "added") {
+            appendInputDiffItem(list, "added", "新增", null, entry.after);
           }
         }
         if (countTarget) {
