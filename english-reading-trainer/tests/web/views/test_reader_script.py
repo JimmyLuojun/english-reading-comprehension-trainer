@@ -1236,3 +1236,164 @@ def test_word_analysis_renders_payload_warning_before_stale_message() -> None:
 
     assert "panelStatus.textContent = payload.warning" in render_word
     assert 'payload.is_stale ? "Analysis is stale. Reanalyze when ready."' in render_word
+
+
+# ---------------------------------------------------------------------------
+# handleStructureNumberKeydown — smart numbered list in structure textarea
+# ---------------------------------------------------------------------------
+
+
+def _run_structure_number_keydown(
+    initial_value: str,
+    cursor_pos: int,
+    *,
+    shift_key: bool = False,
+    is_composing: bool = False,
+    key: str = "Enter",
+) -> dict:
+    """Execute handleStructureNumberKeydown in node and return the result."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available for JS behavioural test")
+
+    script = _selection_script()
+    fn_body = _extract_js_function(script, "function handleStructureNumberKeydown(event)")
+    harness = (
+        "class FakeTa {\n"
+        "  constructor(value, pos) {\n"
+        "    this.value = value;\n"
+        "    this.selectionStart = pos;\n"
+        "    this.selectionEnd = pos;\n"
+        "    this._events = [];\n"
+        "  }\n"
+        "  dispatchEvent(e) { this._events.push(e.type); }\n"
+        "}\n"
+        f"const fakeTa = new FakeTa({json.dumps(initial_value)}, {cursor_pos});\n"
+        "let prevented = false;\n"
+        "const fakeEvent = {\n"
+        f"  key: {json.dumps(key)},\n"
+        f"  isComposing: {str(is_composing).lower()},\n"
+        f"  shiftKey: {str(shift_key).lower()},\n"
+        "  target: fakeTa,\n"
+        "  preventDefault() { prevented = true; },\n"
+        "};\n"
+        "handleStructureNumberKeydown(fakeEvent);\n"
+        "process.stdout.write(JSON.stringify({\n"
+        "  value: fakeTa.value,\n"
+        "  pos: fakeTa.selectionStart,\n"
+        "  prevented,\n"
+        "  dispatched: fakeTa._events,\n"
+        "}));\n"
+    )
+    completed = subprocess.run(  # noqa: S603 - local node, fixed args
+        [node, "--input-type=module", "-e", fn_body + harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_structure_number_keydown_is_bound_to_both_textareas() -> None:
+    script = _selection_script()
+
+    assert "function handleStructureNumberKeydown(event)" in script
+    assert "structureText.addEventListener(\"keydown\", handleStructureNumberKeydown);" in script
+    assert "sentencePanelStructure.addEventListener(\"keydown\", handleStructureNumberKeydown);" in script
+
+
+def test_structure_number_keydown_dot_separator_advances_number() -> None:
+    # "1. abc" at end-of-line → new line "2. "
+    value = "1. abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "1. abc\n2. "
+    assert result["pos"] == len("1. abc\n2. ")
+    assert "input" in result["dispatched"]
+
+
+def test_structure_number_keydown_chinese_comma_separator() -> None:
+    # "1、abc" → "2、"
+    value = "1、abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "1、abc\n2、 "
+    assert result["pos"] == len("1、abc\n2、 ")
+
+
+def test_structure_number_keydown_paren_separator() -> None:
+    # "1) abc" → "2) "
+    value = "1) abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "1) abc\n2) "
+    assert result["pos"] == len("1) abc\n2) ")
+
+
+def test_structure_number_keydown_preserves_indent() -> None:
+    # "  1. abc" → new "  2. "
+    value = "  1. abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "  1. abc\n  2. "
+    assert result["pos"] == len("  1. abc\n  2. ")
+
+
+def test_structure_number_keydown_empty_line_exits_list() -> None:
+    # "1. abc\n2. " — cursor at end of empty numbered line → remove number
+    value = "1. abc\n2. "
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "1. abc\n"
+    assert result["pos"] == len("1. abc\n")
+
+
+def test_structure_number_keydown_multiline_continues_correct_number() -> None:
+    # Multi-line: cursor at end of line 3
+    value = "1. first\n2. second\n3. third"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "1. first\n2. second\n3. third\n4. "
+    assert result["pos"] == len("1. first\n2. second\n3. third\n4. ")
+
+
+def test_structure_number_keydown_shift_enter_does_not_intercept() -> None:
+    # Shift+Enter must fall through — no preventDefault, value unchanged
+    value = "1. abc"
+    result = _run_structure_number_keydown(value, len(value), shift_key=True)
+
+    assert result["prevented"] is False
+    assert result["value"] == value
+
+
+def test_structure_number_keydown_composition_does_not_intercept() -> None:
+    # IME composing — must not trigger
+    value = "1. abc"
+    result = _run_structure_number_keydown(value, len(value), is_composing=True)
+
+    assert result["prevented"] is False
+    assert result["value"] == value
+
+
+def test_structure_number_keydown_non_enter_key_does_not_intercept() -> None:
+    value = "1. abc"
+    result = _run_structure_number_keydown(value, len(value), key="Space")
+
+    assert result["prevented"] is False
+    assert result["value"] == value
+
+
+def test_structure_number_keydown_plain_line_does_not_intercept() -> None:
+    # Line without a number prefix — must not intercept Enter
+    value = "主干：abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is False
+    assert result["value"] == value

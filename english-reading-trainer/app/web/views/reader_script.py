@@ -1860,6 +1860,36 @@ def _fragment_reader_progress_and_actions() -> str:
         });
       }
 
+      function handleStructureNumberKeydown(event) {
+        if (event.key !== "Enter") return;
+        if (event.isComposing) return;
+        if (event.shiftKey) return;
+        const ta = event.target;
+        if (ta.selectionStart !== ta.selectionEnd) return;
+        const value = ta.value;
+        const pos = ta.selectionStart;
+        const lineStart = value.lastIndexOf("\n", pos - 1) + 1;
+        const lineEnd = value.indexOf("\n", pos);
+        const lineEndActual = lineEnd === -1 ? value.length : lineEnd;
+        const currentLine = value.slice(lineStart, lineEndActual);
+        const match = currentLine.match(/^(\s*)(\d+)([.、)])\s*(.*)$/);
+        if (!match) return;
+        event.preventDefault();
+        const [, indent, numStr, sep, content] = match;
+        if (!content.trim()) {
+          const newValue = value.slice(0, lineStart) + indent + value.slice(lineEndActual);
+          ta.value = newValue;
+          ta.selectionStart = ta.selectionEnd = lineStart + indent.length;
+        } else {
+          const nextNum = Number.parseInt(numStr, 10) + 1;
+          const insert = `\n${indent}${nextNum}${sep} `;
+          const newValue = value.slice(0, pos) + insert + value.slice(pos);
+          ta.value = newValue;
+          ta.selectionStart = ta.selectionEnd = pos + insert.length;
+        }
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
       async function saveTranslationOnly(options = {}) {
         clearTranslationAutoSaveTimer();
         const automatic = Boolean(options.automatic);
@@ -3941,6 +3971,7 @@ def _fragment_bootstrap() -> str:
         structureEditorDirty = true;
         scheduleStructureAutoSave();
       });
+      structureText.addEventListener("keydown", handleStructureNumberKeydown);
       structureAnalyze.addEventListener("click", () => {
         clearStructureAutoSaveTimer();
         const sentenceId = activeSentenceId;
@@ -4021,6 +4052,7 @@ def _fragment_bootstrap() -> str:
           panelStructureDirty = true;
           schedulePanelStructureAutoSave();
         });
+        sentencePanelStructure.addEventListener("keydown", handleStructureNumberKeydown);
       }
       if (sentencePanelNoteSave) {
         sentencePanelNoteSave.addEventListener("click", () => {
