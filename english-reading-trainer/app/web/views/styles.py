@@ -822,6 +822,15 @@ def _css() -> str:
       color: var(--accent-strong);
       font-weight: 700;
     }
+    .analysis-snapshot-text mark.diff-mark-moved-from {
+      background: rgba(70, 130, 180, .34);
+    }
+    .analysis-snapshot-text .diff-move-note {
+      margin: 0 2px;
+      color: #2f6f9e;
+      font-size: 11px;
+      font-weight: 700;
+    }
     .analysis-input-diff {
       margin-top: 8px;
       border-top: 1px solid var(--line);
@@ -916,6 +925,9 @@ def _css() -> str:
     }
     .diff-modified .analysis-input-diff-kind {
       background: var(--accent);
+    }
+    .diff-moved .analysis-input-diff-kind {
+      background: #2f6f9e;
     }
     #sentence-panel-note-accept {
       margin-top: 6px;

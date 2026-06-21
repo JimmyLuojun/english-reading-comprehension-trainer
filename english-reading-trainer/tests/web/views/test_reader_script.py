@@ -298,6 +298,10 @@ def _run_translation_diff(old: str, new: str) -> dict:
         "function isNoiseTranslationChange(changedText)",
         "function groupTranslationRegions(operations)",
         "function regionTranslationTexts(operations, region)",
+        "function newTranslationText(operations)",
+        "function moveContextPreview(text, side)",
+        "function describeMoveDestination(operations, region)",
+        "function pairTranslationMoves(operations, regions)",
         "function analyzeTranslationDiff(snapshotValue, currentValue)",
         "function diffTranslationPhrases(snapshotValue, currentValue)",
         "function oldTranslationText(operations)",
@@ -309,6 +313,7 @@ def _run_translation_diff(old: str, new: str) -> dict:
         "const INPUT_DIFF_PREVIEW_MAX = 34;\n"
         "const TRANSLATION_MERGE_GAP = 1;\n"
         'const TRANSLATION_FUNCTION_CHARS = "的了是着地得之乎者吗呢吧啊呀儿";\n'
+        "const MOVE_CONTEXT_CHARS = 8;\n"
     )
     harness = (
         "class FakeNode {\n"
@@ -370,6 +375,33 @@ def test_translation_diff_marks_insertion_point_and_keeps_only_punct_change() ->
     # When the ONLY change is punctuation, it must still be surfaced (fallback).
     punct = _run_translation_diff("只改标点。", "只改标点!")
     assert punct["phrases"] == [{"kind": "modified", "before": "。", "after": "!"}]
+
+
+def test_translation_diff_reports_a_relocated_phrase_as_one_move() -> None:
+    # "乙。" moves from the middle to the end while every other token stays put.
+    result = _run_translation_diff("甲。乙。丙。丁。", "甲。丙。丁。乙。")
+
+    # One "移动" entry, not a separate 删除 + 新增 (the core defect being fixed).
+    assert result["phrases"] == [
+        {"kind": "moved", "before": "乙。", "after": "移至「甲。丙。丁。」之后"},
+    ]
+
+    # The analyzed (old) text keeps the moved phrase highlighted in place …
+    moved_from = [seg for seg in result["highlight"] if "moved-from" in seg.get("mark", "")]
+    assert moved_from and moved_from[0]["text"] == "乙。"
+    # … annotated with where it went, and where it now arrives.
+    notes = [seg["text"] for seg in result["highlight"] if seg.get("mark") == "diff-move-note"]
+    assert any("移至" in note for note in notes)
+    assert any("移入" in note for note in notes)
+
+
+def test_translation_diff_move_with_an_edit_falls_back_to_remove_and_add() -> None:
+    # The relocated phrase is also edited ("乙。" -> "乙改。"), so the texts no
+    # longer match verbatim and it must degrade to a plain delete + insert.
+    result = _run_translation_diff("甲。乙。丙。丁。", "甲。丙。丁。乙改。")
+
+    assert {phrase["kind"] for phrase in result["phrases"]} == {"removed", "added"}
+    assert not any("diff-mark-moved" in seg.get("mark", "") for seg in result["highlight"])
 
 
 def _run_structure_diff(old: str, new: str) -> dict:

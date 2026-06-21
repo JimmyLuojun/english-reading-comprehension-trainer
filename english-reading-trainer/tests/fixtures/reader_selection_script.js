@@ -140,6 +140,9 @@
       // Isolated changes made only of these 虚词 (or pure punctuation) are
       // noise for "quickly locate what changed" and are dropped from hints.
       const TRANSLATION_FUNCTION_CHARS = "的了是着地得之乎者吗呢吧啊呀儿";
+      // When a removed phrase reappears verbatim elsewhere we call it a move and
+      // describe its destination with this many surrounding visible chars.
+      const MOVE_CONTEXT_CHARS = 8;
 
       // The structure editors prefill STRUCTURE_TEMPLATE as real text so the
       // learner can fill in only the parts they are unsure of. Treat a value
@@ -2441,6 +2444,67 @@
         return { before, after, changed };
       }
 
+      function newTranslationText(operations) {
+        return operations
+          .filter((operation) => operation.kind !== "removed")
+          .map((operation) => operation.unit.text)
+          .join("");
+      }
+
+      function moveContextPreview(text, side) {
+        const chars = Array.from(String(text || "").replace(/\s+/g, " ").trim());
+        if (!chars.length) return "";
+        if (chars.length <= MOVE_CONTEXT_CHARS) return chars.join("");
+        return side === "tail"
+          ? `…${chars.slice(-MOVE_CONTEXT_CHARS).join("")}`
+          : `${chars.slice(0, MOVE_CONTEXT_CHARS).join("")}…`;
+      }
+
+      function describeMoveDestination(operations, region) {
+        const before = moveContextPreview(
+          newTranslationText(operations.slice(0, region.start)),
+          "tail",
+        );
+        if (before) return `移至「${before}」之后`;
+        const after = moveContextPreview(
+          newTranslationText(operations.slice(region.end)),
+          "head",
+        );
+        if (after) return `移至「${after}」之前`;
+        return "移至开头";
+      }
+
+      // Pair a removed region with an added region whose visible text is
+      // identical (after normalization) and relabel both ends as a move, so a
+      // relocated phrase reads as one "移动" instead of a delete plus an insert.
+      // A move whose two ends merged into a single region (adjacent relocation)
+      // or whose text was also edited stays as the plain removed/added fallback.
+      function pairTranslationMoves(operations, regions) {
+        const added = regions.filter((region) => region.kind === "added");
+        const usedAdded = new Set();
+        let moveId = 0;
+        for (const removed of regions) {
+          if (removed.kind !== "removed") continue;
+          const key = normalizeText(removed.changed);
+          if (!key) continue;
+          const match = added.find(
+            (region) =>
+              !usedAdded.has(region) && normalizeText(region.changed) === key,
+          );
+          if (!match) continue;
+          usedAdded.add(match);
+          moveId += 1;
+          const destination = describeMoveDestination(operations, match);
+          removed.kind = "moved-from";
+          removed.moveId = moveId;
+          removed.moveDestination = destination;
+          match.kind = "moved-to";
+          match.moveId = moveId;
+          match.moveDestination = destination;
+        }
+        return regions;
+      }
+
       function analyzeTranslationDiff(snapshotValue, currentValue) {
         const operations = diffUnits(
           tokenizeTranslation(snapshotValue),
@@ -2459,15 +2523,30 @@
           };
         });
         const kept = detailed.filter((region) => !isNoiseTranslationChange(region.changed));
-        return { operations, regions: kept.length ? kept : detailed };
+        const regions = pairTranslationMoves(operations, kept.length ? kept : detailed);
+        return { operations, regions };
       }
 
       function diffTranslationPhrases(snapshotValue, currentValue) {
-        return analyzeTranslationDiff(snapshotValue, currentValue).regions.map((region) => ({
-          kind: region.kind,
-          before: region.before ? { text: region.before, location: "译文" } : null,
-          after: region.after ? { text: region.after, location: "译文" } : null,
-        }));
+        const phrases = [];
+        for (const region of analyzeTranslationDiff(snapshotValue, currentValue).regions) {
+          // The moved-to end is represented by its moved-from partner.
+          if (region.kind === "moved-to") continue;
+          if (region.kind === "moved-from") {
+            phrases.push({
+              kind: "moved",
+              before: { text: region.before, location: "译文" },
+              after: { text: region.moveDestination, location: "译文" },
+            });
+            continue;
+          }
+          phrases.push({
+            kind: region.kind,
+            before: region.before ? { text: region.before, location: "译文" } : null,
+            after: region.after ? { text: region.after, location: "译文" } : null,
+          });
+        }
+        return phrases;
       }
 
       function oldTranslationText(operations) {
@@ -2495,6 +2574,15 @@
             mark.textContent = "‸";
           }
           target.append(mark);
+          if (region.kind === "moved-from" || region.kind === "moved-to") {
+            const note = document.createElement("span");
+            note.className = "diff-move-note";
+            note.textContent =
+              region.kind === "moved-from"
+                ? `（${region.moveDestination}）`
+                : `（移入：${moveContextPreview(region.after, "head") || region.after}）`;
+            target.append(note);
+          }
           pointer = region.end;
         }
         const tail = oldTranslationText(operations.slice(pointer));
@@ -2594,6 +2682,8 @@
           for (const phrase of diffTranslationPhrases(snapshotValue, currentValue)) {
             if (phrase.kind === "modified") {
               appendInputDiffItem(list, "modified", "修改", phrase.before, phrase.after);
+            } else if (phrase.kind === "moved") {
+              appendInputDiffItem(list, "moved", "移动", phrase.before, phrase.after);
             } else if (phrase.kind === "removed") {
               appendInputDiffItem(list, "removed", "删除", phrase.before, null);
             } else {
