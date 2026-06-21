@@ -917,6 +917,18 @@ def _css() -> str:
     .analysis-input-diff-full-row strong {
       color: var(--muted);
     }
+    .analysis-input-diff-full-row mark.diff-mark {
+      border-radius: 3px;
+      padding: 0 2px;
+      background: rgba(197, 143, 45, .40);
+      color: var(--text);
+    }
+    .analysis-input-diff-full-row mark.diff-mark-removed {
+      background: rgba(203, 76, 60, .32);
+    }
+    .analysis-input-diff-full-row mark.diff-mark-added {
+      background: rgba(15, 143, 131, .24);
+    }
     .diff-added .analysis-input-diff-kind {
       background: var(--accent);
     }

@@ -117,6 +117,9 @@ def test_css_analysis_input_diff_uses_existing_theme_tokens() -> None:
     assert ".diff-removed" in css
     assert ".diff-modified" in css
     assert ".analysis-input-diff-preview" in css
+    assert ".analysis-input-diff-full-row mark.diff-mark" in css
+    assert ".analysis-input-diff-full-row mark.diff-mark-removed" in css
+    assert ".analysis-input-diff-full-row mark.diff-mark-added" in css
     assert "display: block;" in css
     assert "flex: 1 1 100%;" in css
     assert "min-width: 0;" in css

@@ -2786,19 +2786,109 @@
         return before || after;
       }
 
-      function appendFullDiffText(container, label, line) {
+      function structureDiffCharBounds(beforeText, afterText) {
+        const before = Array.from(String(beforeText || ""));
+        const after = Array.from(String(afterText || ""));
+        let prefixLen = 0;
+        while (prefixLen < before.length && prefixLen < after.length && before[prefixLen] === after[prefixLen]) {
+          prefixLen += 1;
+        }
+        let suffixLen = 0;
+        while (
+          suffixLen < before.length - prefixLen &&
+          suffixLen < after.length - prefixLen &&
+          before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]
+        ) {
+          suffixLen += 1;
+        }
+        return { before, after, prefixLen, suffixLen };
+      }
+
+      function isStructureQuoteChar(char) {
+        return ['"', "'", "“", "”", "‘", "’"].includes(char);
+      }
+
+      function expandStructureDiffRange(chars, start, end) {
+        let leftQuote = -1;
+        for (let i = start - 1; i >= 0; i -= 1) {
+          if (isStructureQuoteChar(chars[i])) {
+            leftQuote = i;
+            break;
+          }
+        }
+        let rightQuote = -1;
+        for (let i = end; i < chars.length; i += 1) {
+          if (isStructureQuoteChar(chars[i])) {
+            rightQuote = i;
+            break;
+          }
+        }
+        if (leftQuote >= 0 && rightQuote > leftQuote && start <= rightQuote && end >= leftQuote) {
+          return { start: leftQuote + 1, end: rightQuote };
+        }
+        return { start, end };
+      }
+
+      function structureInlineDiffParts(text, peerText, side) {
+        const bounds = side === "before"
+          ? structureDiffCharBounds(text, peerText)
+          : structureDiffCharBounds(peerText, text);
+        const chars = side === "before" ? bounds.before : bounds.after;
+        const rawStart = bounds.prefixLen;
+        const rawEnd = chars.length - bounds.suffixLen;
+        const range = expandStructureDiffRange(chars, rawStart, rawEnd);
+        if (range.start >= range.end) {
+          return [{ text: chars.join(""), changed: false }];
+        }
+        const parts = [];
+        const prefix = chars.slice(0, range.start).join("");
+        const changed = chars.slice(range.start, range.end).join("");
+        const suffix = chars.slice(range.end).join("");
+        if (prefix) parts.push({ text: prefix, changed: false });
+        if (changed) parts.push({ text: changed, changed: true });
+        if (suffix) parts.push({ text: suffix, changed: false });
+        return parts;
+      }
+
+      function appendStructureInlineDiffText(target, text, peerText, side) {
+        const markKind = side === "before" ? "removed" : "added";
+        for (const part of structureInlineDiffParts(text, peerText, side)) {
+          if (!part.changed) {
+            target.append(document.createTextNode(part.text));
+            continue;
+          }
+          const mark = document.createElement("mark");
+          mark.className = `diff-mark diff-mark-${markKind}`;
+          mark.textContent = part.text;
+          target.append(mark);
+        }
+      }
+
+      function appendFullDiffText(container, label, line, peerLine = null, diffSide = "") {
         if (!line) return;
         const row = document.createElement("p");
         row.className = "analysis-input-diff-full-row";
         const labelElement = document.createElement("strong");
         labelElement.textContent = label;
         const textElement = document.createElement("span");
-        textElement.textContent = line.text;
+        if (peerLine && diffSide) {
+          appendStructureInlineDiffText(textElement, line.text, peerLine.text, diffSide);
+        } else {
+          textElement.textContent = line.text;
+        }
         row.append(labelElement, textElement);
         container.append(row);
       }
 
-      function appendInputDiffItem(list, kind, label, beforeLine, afterLine, previewOverride = null) {
+      function appendInputDiffItem(
+        list,
+        kind,
+        label,
+        beforeLine,
+        afterLine,
+        previewOverride = null,
+        highlightModified = false,
+      ) {
         const item = document.createElement("li");
         item.className = `analysis-input-diff-item diff-${kind}`;
         const details = document.createElement("details");
@@ -2817,8 +2907,13 @@
         summary.append(badge, location, preview);
         const full = document.createElement("div");
         full.className = "analysis-input-diff-full";
-        appendFullDiffText(full, "原来", beforeLine);
-        appendFullDiffText(full, "现在", afterLine);
+        if (highlightModified && kind === "modified" && beforeLine && afterLine) {
+          appendFullDiffText(full, "原来", beforeLine, afterLine, "before");
+          appendFullDiffText(full, "现在", afterLine, beforeLine, "after");
+        } else {
+          appendFullDiffText(full, "原来", beforeLine);
+          appendFullDiffText(full, "现在", afterLine);
+        }
         details.append(summary, full);
         item.append(details);
         list.append(item);
@@ -2852,7 +2947,7 @@
           if (entry.kind === "same") continue;
           if (entry.kind === "modified") {
             const preview = formatStructureModifiedPreview(entry.before.text, entry.after.text);
-            appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview);
+            appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview, true);
           } else if (entry.kind === "removed") {
             appendInputDiffItem(list, "removed", "删除", entry.before, null);
           } else if (entry.kind === "added") {

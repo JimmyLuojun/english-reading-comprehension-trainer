@@ -223,6 +223,7 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "function normalizeStructureLineKey(text)" in script
     assert "function pairStructureChangedLines(removed, added)" in script
     assert "function buildStructureDiffEntries(snapshotValue, currentValue)" in script
+    assert "function structureInlineDiffParts(text, peerText, side)" in script
     assert ': "译文",' in script
     assert "function translationTokenType(char)" in script
     assert "function tokenizeTranslation(value)" in script
@@ -241,7 +242,7 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "renderStructureHighlight(target, snapshot, current);" in script
     assert "diffTranslationPhrases(snapshotValue, currentValue)" in script
     assert "function diffInputLines(snapshotValue, currentValue, inputKind)" in script
-    assert 'appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview);' in script
+    assert 'appendInputDiffItem(list, "modified", "修改", entry.before, entry.after, preview, true);' in script
     assert "function renderInputDiff(details, list, countTarget, snapshotValue, currentValue, inputKind)" in script
     assert "countTarget.textContent = list.childElementCount" in script
     assert "details.hidden = !list.childElementCount;" in script
@@ -502,6 +503,38 @@ def _run_structure_modified_preview(before: str, after: str) -> str:
     return completed.stdout
 
 
+def _run_structure_inline_diff(before: str, after: str) -> dict:
+    """Run the structure inline-diff helper in node and return before/after parts."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available for JS behavioural test")
+
+    script = _selection_script()
+    declarations = [
+        "function structureDiffCharBounds(beforeText, afterText)",
+        "function isStructureQuoteChar(char)",
+        "function expandStructureDiffRange(chars, start, end)",
+        "function structureInlineDiffParts(text, peerText, side)",
+    ]
+    body = "\n".join(_extract_js_function(script, decl) for decl in declarations)
+    harness = (
+        f"const BEFORE={json.dumps(before)};\n"
+        f"const AFTER={json.dumps(after)};\n"
+        "process.stdout.write(JSON.stringify({"
+        "before:structureInlineDiffParts(BEFORE,AFTER,'before'),"
+        "after:structureInlineDiffParts(AFTER,BEFORE,'after')"
+        "}));\n"
+    )
+    completed = subprocess.run(  # noqa: S603 - local node, fixed args
+        [node, "--input-type=module", "-e", body + harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
 def test_structure_modified_preview_centers_on_end_of_line_change() -> None:
     # The changed word is at the end; the first 34 chars of both lines are
     # identical, so the old truncate-from-start preview was useless.
@@ -530,6 +563,22 @@ def test_structure_modified_preview_no_ellipsis_when_change_is_near_start() -> N
     assert "provides" in result
     assert "This" in result
     assert "→" in result
+
+
+def test_structure_inline_diff_highlights_changed_quoted_object() -> None:
+    before = (
+        '2. "that is added to the incentive value of the block containing the transaction."'
+        "是定语从句作后置定语修饰“transaction”；"
+    )
+    after = (
+        '2. "that is added to the incentive value of the block containing the transaction."'
+        "是定语从句作后置定语修饰“transaction fee”；"
+    )
+
+    result = _run_structure_inline_diff(before, after)
+
+    assert [part["text"] for part in result["before"] if part["changed"]] == ["transaction"]
+    assert [part["text"] for part in result["after"] if part["changed"]] == ["transaction fee"]
 
 
 def test_structure_highlight_marks_changed_lines_inline() -> None:
