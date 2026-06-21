@@ -1863,21 +1863,34 @@
         const lineEndActual = lineEnd === -1 ? value.length : lineEnd;
         const currentLine = value.slice(lineStart, lineEndActual);
         const match = currentLine.match(/^(\s*)(\d+)([.、)])\s*(.*)$/);
-        if (!match) return;
-        event.preventDefault();
-        const [, indent, numStr, sep, content] = match;
-        if (!content.trim()) {
-          const newValue = value.slice(0, lineStart) + indent + value.slice(lineEndActual);
-          ta.value = newValue;
-          ta.selectionStart = ta.selectionEnd = lineStart + indent.length;
-        } else {
-          const nextNum = Number.parseInt(numStr, 10) + 1;
-          const insert = `\n${indent}${nextNum}${sep} `;
+        if (match) {
+          event.preventDefault();
+          const [, indent, numStr, sep, content] = match;
+          if (!content.trim()) {
+            const newValue = value.slice(0, lineStart) + indent + value.slice(lineEndActual);
+            ta.value = newValue;
+            ta.selectionStart = ta.selectionEnd = lineStart + indent.length;
+          } else {
+            const nextNum = Number.parseInt(numStr, 10) + 1;
+            const insert = `\n${indent}${nextNum}${sep} `;
+            const newValue = value.slice(0, pos) + insert + value.slice(pos);
+            ta.value = newValue;
+            ta.selectionStart = ta.selectionEnd = pos + insert.length;
+          }
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
+        }
+        const afterCursor = value.slice(pos, lineEndActual);
+        if (!afterCursor.trim() && currentLine.trimEnd().endsWith("：")) {
+          event.preventDefault();
+          const indentMatch = currentLine.match(/^(\s*)/);
+          const indent = indentMatch ? indentMatch[1] : "";
+          const insert = `\n${indent}1. `;
           const newValue = value.slice(0, pos) + insert + value.slice(pos);
           ta.value = newValue;
           ta.selectionStart = ta.selectionEnd = pos + insert.length;
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
       }
 
       async function saveTranslationOnly(options = {}) {

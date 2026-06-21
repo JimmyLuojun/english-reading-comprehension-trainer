@@ -1391,8 +1391,51 @@ def test_structure_number_keydown_non_enter_key_does_not_intercept() -> None:
 
 
 def test_structure_number_keydown_plain_line_does_not_intercept() -> None:
-    # Line without a number prefix — must not intercept Enter
+    # Line without a number prefix and not ending in ：— must not intercept Enter
     value = "主干：abc"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is False
+    assert result["value"] == value
+
+
+# Auto-start: pressing Enter at end of a section header line (ending with ：)
+# should insert "1. " on the next line.
+
+def test_structure_number_keydown_auto_start_after_section_header() -> None:
+    value = "从句："
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "从句：\n1. "
+    assert result["pos"] == len("从句：\n1. ")
+    assert "input" in result["dispatched"]
+
+
+def test_structure_number_keydown_auto_start_inside_template() -> None:
+    # Cursor at end of "从句：" inside the full template.
+    template = "主干：\n从句：\n修饰成分：\n指代逻辑："
+    pos = template.index("从句：") + len("从句：")
+    result = _run_structure_number_keydown(template, pos)
+
+    assert result["prevented"] is True
+    expected = "主干：\n从句：\n1. \n修饰成分：\n指代逻辑："
+    assert result["value"] == expected
+    assert result["pos"] == template.index("从句：") + len("从句：\n1. ")
+
+
+def test_structure_number_keydown_auto_start_not_triggered_mid_line() -> None:
+    # Cursor is NOT at the end of the header line — should not auto-start.
+    value = "从句："
+    result = _run_structure_number_keydown(value, 1)  # cursor after "从"
+
+    assert result["prevented"] is False
+    assert result["value"] == value
+
+
+def test_structure_number_keydown_auto_start_not_triggered_for_content_line() -> None:
+    # Line ends with ：but cursor has non-whitespace text after it — no auto-start.
+    value = "从句：abc"
     result = _run_structure_number_keydown(value, len(value))
 
     assert result["prevented"] is False
