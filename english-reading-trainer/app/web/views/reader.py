@@ -274,6 +274,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-sentence-delete" type="button" class="danger" hidden>Unmark sentence</button>
         <button id="toolbar-translation-open" type="button">Write translation</button>
         <button id="toolbar-structure-open" type="button">Write structure</button>
+        <button id="toolbar-external-prompt" type="button">Copy AI prompt</button>
         <button id="toolbar-translation-delete" type="button" class="danger" hidden>Delete translation</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
@@ -377,6 +378,16 @@ def _analysis_panel() -> str:
         <button id="analysis-panel-close" type="button">Close panel</button>
       </header>
       <div id="analysis-panel-status" class="analysis-status"></div>
+      <section id="analysis-external-section" class="analysis-section analysis-external-section" hidden>
+        <h3><span class="section-label-zh">外部 AI</span><span class="section-label-en">External AI</span></h3>
+        <label class="analysis-external-label" for="analysis-external-result">Paste external result</label>
+        <textarea id="analysis-external-result" rows="7" placeholder="Paste the full external AI reply here"></textarea>
+        <div class="word-notes-actions">
+          <button id="analysis-external-save" type="button">Save analysis</button>
+          <button id="analysis-external-clear" type="button">Discard paste</button>
+          <span id="analysis-external-status" class="toolbar-status" aria-live="polite"></span>
+        </div>
+      </section>
       <div id="analysis-sentence-sections">
         <section class="analysis-section">
           <h3><span class="section-label-zh">简化英文</span><span class="section-label-en">Simplified English</span></h3>

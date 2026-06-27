@@ -139,6 +139,8 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
     assert 'id="toolbar-translation-delete"' in html
     assert "Delete translation" in html
     assert 'id="toolbar-structure-open"' in html
+    assert 'id="toolbar-external-prompt"' in html
+    assert "Copy AI prompt" in html
     assert 'id="toolbar-structure-editor"' in html
     assert "Write structure" in html
     assert "指代逻辑：" in html
@@ -170,6 +172,10 @@ def test_analysis_panel_wraps_optional_structure_sections() -> None:
     assert 'id="analysis-copy-source"' in html
     assert 'id="analysis-copy-analysis"' in html
     assert 'id="analysis-copy-status"' in html
+    assert 'id="analysis-external-section"' in html
+    assert 'id="analysis-external-result"' in html
+    assert 'id="analysis-external-save"' in html
+    assert "Paste external result" in html
     assert "Copy all" in html
     assert "Copy source" in html
     assert "Copy analysis" in html
@@ -230,6 +236,8 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert "Save takeaway" in html
     assert 'id="analysis-word-role"' in html
     assert 'id="analysis-panel-tab"' in html
+    assert 'id="analysis-external-clear"' in html
+    assert 'id="analysis-external-status"' in html
     assert 'aria-controls="analysis-panel"' in html
     assert html.index("Simplified English") < html.index("Blocking point")
     assert html.index("Blocking point") < html.index("Structure")

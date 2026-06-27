@@ -20,6 +20,8 @@ def test_register_analysis_routes_adds_analysis_endpoints() -> None:
 
     assert ("GET", "/analysis/sentence/{sentence_id}") in paths
     assert ("POST", "/analysis/sentence/{sentence_id}") in paths
+    assert ("GET", "/analysis/sentence/{sentence_id}/external-prompt") in paths
+    assert ("POST", "/analysis/sentence/{sentence_id}/external") in paths
     assert ("GET", "/analysis/word/{card_id}") in paths
     assert ("POST", "/analysis/word/{card_id}") in paths
 
@@ -85,6 +87,63 @@ def test_word_analysis_route_parses_force_refresh(monkeypatch) -> None:
     assert response.status_code == 200
     assert captured["force_refresh"] is True
     assert captured["prefer_pro"] is True
+
+
+def test_external_sentence_prompt_route_returns_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "build_external_sentence_prompt",
+        lambda db, sentence_id: f"prompt for {sentence_id}",
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/sentence/5/external-prompt")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "sentence_id": 5,
+        "prompt": "prompt for 5",
+    }
+
+
+def test_external_sentence_analysis_route_passes_pasted_result(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_save_external_sentence_analysis_for_reader(*args, **kwargs):
+        captured.update(kwargs)
+        captured["sentence_id"] = args[1]
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_sentence_analysis_for_reader",
+        fake_save_external_sentence_analysis_for_reader,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/sentence/7/external",
+        data={
+            "external_result": "full reply",
+            "user_translation": "译文",
+            "user_structure": "主干：x",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "sentence_id": 7,
+        "external_result": "full reply",
+        "user_translation": "译文",
+        "user_structure": "主干：x",
+    }
 
 
 def test_blocking_analysis_post_does_not_block_event_loop(monkeypatch) -> None:

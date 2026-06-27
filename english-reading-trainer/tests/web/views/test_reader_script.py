@@ -270,6 +270,50 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert "userStructure: sentencePanelStructure?.value || \"\"" in retry
 
 
+def test_external_sentence_analysis_prompt_and_paste_flow() -> None:
+    script = _selection_script()
+    refs = script[: script.index("const bookId")]
+    requests = script[script.index("async function copyExternalSentencePrompt") :]
+    requests = requests[: requests.index("function updateSentenceAnalysisState")]
+    modes = script[script.index("function setSentenceMode") :]
+    modes = modes[: modes.index("function updatePreviousAnalysisButton")]
+    boot = script[script.index("if (externalPrompt)") :]
+    boot = boot[: boot.index('analysisOpen.addEventListener("click"')]
+    panel_buttons = script[script.index("if (analysisExternalSave)") :]
+    panel_buttons = panel_buttons[: panel_buttons.index("if (panelPrevious)")]
+
+    assert 'document.getElementById("toolbar-external-prompt")' in refs
+    assert 'document.getElementById("analysis-external-section")' in refs
+    assert 'document.getElementById("analysis-external-result")' in refs
+    assert 'document.getElementById("analysis-external-save")' in refs
+    assert 'document.getElementById("analysis-external-clear")' in refs
+    assert 'document.getElementById("analysis-external-status")' in refs
+    assert "let activeExternalPromptSentenceId = null;" in script
+    assert "function prepareExternalResultBox(sentenceId, status = \"\")" in script
+    assert "async function copyExternalSentencePrompt(sentenceId)" in requests
+    assert 'renderSentenceStudyPanel(sentence, "Waiting for external result.");' in requests
+    assert "fetch(`/analysis/sentence/${sentenceId}/external-prompt`)" in requests
+    assert "await writeClipboard(payload.prompt || \"\");" in requests
+    assert "async function saveExternalSentenceAnalysis()" in requests
+    assert 'body.set("external_result", externalResult);' in requests
+    assert 'body.set("user_translation", translation);' in requests
+    assert 'body.set("user_structure", structure);' in requests
+    assert "fetch(`/analysis/sentence/${sentenceId}/external`" in requests
+    assert "renderAnalysisPayload(payload);" in requests
+    assert "analysisExternalSection.hidden = false;" in modes
+    assert "analysisExternalSection.hidden = true;" in modes
+    assert 'externalPrompt.addEventListener("click"' in boot
+    assert "copyExternalSentencePrompt(sentenceId);" in boot
+    assert (
+        'analysisExternalSave.addEventListener("click", saveExternalSentenceAnalysis);'
+        in panel_buttons
+    )
+    assert (
+        'analysisExternalClear.addEventListener("click", clearExternalResultBox);'
+        in panel_buttons
+    )
+
+
 def _extract_js_function(script: str, declaration: str) -> str:
     """Return one JS function (balanced braces) starting at *declaration*."""
     start = script.index(declaration)

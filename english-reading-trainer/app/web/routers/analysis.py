@@ -14,7 +14,12 @@ from app.web.queries import (
     _fetch_sentence_analysis_payload,
     _fetch_word_analysis_payload,
 )
-from app.web.services.analysis import analyze_sentence_for_reader, analyze_word_card_for_reader
+from app.web.services.analysis import (
+    analyze_sentence_for_reader,
+    analyze_word_card_for_reader,
+    build_external_sentence_prompt,
+    save_external_sentence_analysis_for_reader,
+)
 
 
 def _truthy_form_value(value: str | None) -> bool:
@@ -50,6 +55,39 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             user_structure=form.get("user_structure"),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
             force_refresh=_truthy_form_value(form.get("force_refresh")),
+        )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
+
+    @web_app.get("/analysis/sentence/{sentence_id}/external-prompt")
+    async def external_sentence_prompt_endpoint(sentence_id: int) -> JSONResponse:
+        try:
+            prompt = await run_in_threadpool(
+                build_external_sentence_prompt,
+                db_factory(),
+                sentence_id,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        return JSONResponse({"ok": True, "sentence_id": sentence_id, "prompt": prompt})
+
+    @web_app.post("/analysis/sentence/{sentence_id}/external")
+    async def external_sentence_analysis_endpoint(
+        sentence_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        outcome = await run_in_threadpool(
+            save_external_sentence_analysis_for_reader,
+            db_factory(),
+            sentence_id,
+            external_result=form.get("external_result", ""),
+            user_translation=form.get("user_translation"),
+            user_structure=form.get("user_structure"),
         )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)

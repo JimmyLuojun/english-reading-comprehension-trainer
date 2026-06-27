@@ -23,7 +23,7 @@ _MIGRATIONS   = _PROJECT_ROOT / "migrations"
 
 _CONTEXT_WINDOW = 2   # sentences before/after to include as context
 _MAX_RELATED    = 5   # max related cards to include in prompt
-_SENTENCE_PROMPT_VERSION = "v4"
+_SENTENCE_PROMPT_VERSION = "v6"
 _WORD_PROMPT_VERSION = "v5"
 
 
@@ -35,6 +35,7 @@ def build_sentence_prompt(
     db: DatabaseConnection,
     sentence_id: int,
     user_translation: str | None = None,
+    user_structure: str | None = None,
 ) -> str:
     """
     Return a fully rendered sentence-analysis prompt for *sentence_id*.
@@ -46,6 +47,7 @@ def build_sentence_prompt(
     """
     ctx = _fetch_sentence_context(db, sentence_id)
     cleaned_translation = _resolve_user_translation(user_translation, ctx)
+    cleaned_structure = _resolve_user_structure(user_structure, ctx)
     prompt_name = (
         "sentence_analysis_diagnose"
         if cleaned_translation
@@ -59,6 +61,7 @@ def build_sentence_prompt(
         "related_cards":   ctx["related_cards_text"],
         "learner_profile": ctx["learner_profile"],
         "user_translation": cleaned_translation or "(none)",
+        "user_structure": cleaned_structure or "(none)",
     })
 
 
@@ -98,7 +101,8 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
             """SELECT s.id, s.text, s.idx, s.book_id, s.chapter_id,
                       b.title AS book_title,
                       c.title AS chapter_title,
-                      sc.user_translation
+                      sc.user_translation,
+                      sc.user_structure
                FROM sentences s
                JOIN books    b ON s.book_id    = b.id
                JOIN chapters c ON s.chapter_id = c.id
@@ -184,6 +188,7 @@ def _fetch_sentence_context(db: DatabaseConnection, sentence_id: int) -> dict:
         "related_cards_text": related_cards_text,
         "learner_profile":   learner_profile,
         "user_translation":   sent["user_translation"] or "",
+        "user_structure":     sent["user_structure"] or "",
     }
 
 
@@ -206,6 +211,15 @@ def _resolve_user_translation(
     if explicit_translation is not None:
         return explicit_translation.strip()
     return str(ctx.get("user_translation") or "").strip()
+
+
+def _resolve_user_structure(
+    explicit_structure: str | None,
+    ctx: dict,
+) -> str:
+    if explicit_structure is not None:
+        return explicit_structure.strip()
+    return str(ctx.get("user_structure") or "").strip()
 
 
 def _strip_frontmatter(text: str) -> str:

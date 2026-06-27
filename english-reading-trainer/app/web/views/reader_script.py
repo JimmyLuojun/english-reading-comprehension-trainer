@@ -18,6 +18,7 @@ def _fragment_refs_and_state() -> str:
       const sentenceDelete = document.getElementById("toolbar-sentence-delete");
       const translationOpen = document.getElementById("toolbar-translation-open");
       const structureOpen = document.getElementById("toolbar-structure-open");
+      const externalPrompt = document.getElementById("toolbar-external-prompt");
       const translationDelete = document.getElementById("toolbar-translation-delete");
       const analysisOpen = document.getElementById("toolbar-analysis-open");
       const translationForm = document.getElementById("toolbar-translation-form");
@@ -65,6 +66,11 @@ def _fragment_refs_and_state() -> str:
       const panelTitle = document.getElementById("analysis-panel-title");
       const panelMeta = document.getElementById("analysis-panel-meta");
       const panelStatus = document.getElementById("analysis-panel-status");
+      const analysisExternalSection = document.getElementById("analysis-external-section");
+      const analysisExternalResult = document.getElementById("analysis-external-result");
+      const analysisExternalSave = document.getElementById("analysis-external-save");
+      const analysisExternalClear = document.getElementById("analysis-external-clear");
+      const analysisExternalStatus = document.getElementById("analysis-external-status");
       const copyAll = document.getElementById("analysis-copy-all");
       const copySource = document.getElementById("analysis-copy-source");
       const copyAnalysis = document.getElementById("analysis-copy-analysis");
@@ -219,6 +225,7 @@ def _fragment_refs_and_state() -> str:
       let activeAnalysisSentenceId = null;
       let activeAnalysisSourceSentenceId = null;
       let activeAnalysisWordCardId = null;
+      let activeExternalPromptSentenceId = null;
       let activeAnalysisPayload = null;
       let activeAnalysisLabel = "";
       let analysisHistory = [];
@@ -2079,6 +2086,7 @@ def _fragment_analysis_panel_rendering() -> str:
         if (wordPronunciation) {
           wordPronunciation.hidden = true;
           wordPronunciation.dataset.speakText = "";
+        if (analysisExternalSection) analysisExternalSection.hidden = false;
         }
         if (sentenceSections) sentenceSections.hidden = false;
         if (wordSections) wordSections.hidden = true;
@@ -2088,11 +2096,23 @@ def _fragment_analysis_panel_rendering() -> str:
       function setWordMode() {
         panelMode = "word";
         if (panelKicker) panelKicker.textContent = "Word analysis";
+        if (analysisExternalSection) analysisExternalSection.hidden = true;
         if (panelTitle) panelTitle.textContent = "Word Analysis";
         if (sentenceSections) sentenceSections.hidden = true;
         if (wordSections) wordSections.hidden = false;
         if (panelUnmark) panelUnmark.hidden = true;
       }
+      function clearExternalResultBox() {
+        if (analysisExternalResult) analysisExternalResult.value = "";
+        if (analysisExternalStatus) analysisExternalStatus.textContent = "";
+      }
+
+      function prepareExternalResultBox(sentenceId, status = "") {
+        activeExternalPromptSentenceId = sentenceId || activeAnalysisSentenceId || null;
+        if (analysisExternalSection) analysisExternalSection.hidden = false;
+        if (analysisExternalStatus) analysisExternalStatus.textContent = status;
+      }
+
 
       function updatePreviousAnalysisButton() {
         if (!panelPrevious) return;
@@ -2207,6 +2227,7 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelTab) panelTab.hidden = false;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
+        activeExternalPromptSentenceId = null;
         activeAnalysisSourceSentenceId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
@@ -2230,6 +2251,9 @@ def _fragment_analysis_panel_rendering() -> str:
         panelStatus.textContent = "Select a sentence or marked word, then choose AI analysis.";
         panelMeta.textContent = "";
         panelRetry.hidden = true;
+        activeExternalPromptSentenceId = null;
+        if (analysisExternalSection) analysisExternalSection.hidden = true;
+        clearExternalResultBox();
         if (panelRetryPro) panelRetryPro.hidden = true;
         simplified.textContent = "";
         gloss.textContent = "";
@@ -2249,11 +2273,15 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function setPanelLoading(message) {
         setSentenceMode();
+        prepareExternalResultBox(sentenceId);
         openPanel();
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message;
         panelMeta.textContent = "";
         panelRetry.hidden = true;
+        activeExternalPromptSentenceId = null;
+        if (analysisExternalSection) analysisExternalSection.hidden = true;
+        clearExternalResultBox();
         if (panelRetryPro) panelRetryPro.hidden = true;
         simplified.textContent = "";
         gloss.textContent = "";
@@ -3225,6 +3253,7 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisSentenceId = sentenceId;
         activeAnalysisSourceSentenceId = sentenceId;
         setSentenceMode();
+        prepareExternalResultBox(activeAnalysisSentenceId);
         openPanel();
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message || "";
@@ -3393,7 +3422,75 @@ def _fragment_analysis_panel_rendering() -> str:
 """
 
 def _fragment_analysis_requests_and_evidence() -> str:
-    return r"""      function updateSentenceAnalysisState(sentenceId, payload) {
+    return r"""      async function copyExternalSentencePrompt(sentenceId) {
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        if (!sentence) return;
+        activeAnalysisSentenceId = sentenceId;
+        clearAnalysisHistory();
+        renderSentenceStudyPanel(sentence, "Waiting for external result.");
+        prepareExternalResultBox(sentenceId, "Copying prompt...");
+        try {
+          const response = await fetch(`/analysis/sentence/${sentenceId}/external-prompt`);
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "Prompt copy failed.";
+            }
+            return;
+          }
+          await writeClipboard(payload.prompt || "");
+          prepareExternalResultBox(sentenceId, "Prompt copied. Paste external result here.");
+          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
+          }
+        }
+      }
+
+      async function saveExternalSentenceAnalysis() {
+        const sentenceId = activeAnalysisSentenceId || activeExternalPromptSentenceId;
+        const externalResult = (analysisExternalResult?.value || "").trim();
+        if (!sentenceId) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Select a sentence first.";
+          return;
+        }
+        if (!externalResult) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Paste external result first.";
+          return;
+        }
+        if (analysisExternalStatus) analysisExternalStatus.textContent = "Saving...";
+        const body = new URLSearchParams();
+        body.set("external_result", externalResult);
+        const translation = (sentencePanelTranslation?.value || "").trim();
+        const structure = (sentencePanelStructure?.value || "").trim();
+        if (translation) body.set("user_translation", translation);
+        if (structureAttemptHasContent(structure)) body.set("user_structure", structure);
+        try {
+          const response = await fetch(`/analysis/sentence/${sentenceId}/external`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "External analysis failed.";
+            }
+            return;
+          }
+          updateSentenceAnalysisState(sentenceId, payload);
+          renderAnalysisPayload(payload);
+          clearExternalResultBox();
+          prepareExternalResultBox(sentenceId, "Saved");
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Save failed: ${error}`;
+          }
+        }
+      }
+
+      function updateSentenceAnalysisState(sentenceId, payload) {
         const sentence = document.getElementById(`sentence-${sentenceId}`);
         if (!sentence) return;
         sentence.dataset.marked = "1";
@@ -4003,6 +4100,16 @@ def _fragment_bootstrap() -> str:
           });
         }
       });
+      if (externalPrompt) {
+        externalPrompt.addEventListener("click", () => {
+          if (!activeSentenceId) return;
+          const anchor = captureReadingAnchor(externalPrompt);
+          const sentenceId = activeSentenceId;
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+          copyExternalSentencePrompt(sentenceId);
+        });
+      }
       analysisOpen.addEventListener("click", () => {
         if (!activeSentenceId) return;
         const anchor = captureReadingAnchor(analysisOpen);
@@ -4041,6 +4148,12 @@ def _fragment_bootstrap() -> str:
       if (copyAll) copyAll.addEventListener("click", () => copyAnalysisPayload("all"));
       if (copySource) copySource.addEventListener("click", () => copyAnalysisPayload("source"));
       if (copyAnalysis) copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"));
+      if (analysisExternalSave) {
+        analysisExternalSave.addEventListener("click", saveExternalSentenceAnalysis);
+      }
+      if (analysisExternalClear) {
+        analysisExternalClear.addEventListener("click", clearExternalResultBox);
+      }
       if (panelPrevious) {
         panelPrevious.addEventListener("click", restorePreviousAnalysis);
       }

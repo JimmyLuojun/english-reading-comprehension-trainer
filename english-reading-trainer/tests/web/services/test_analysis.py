@@ -50,6 +50,159 @@ def test_analyze_sentence_for_reader_maps_invalid_ai_response(monkeypatch) -> No
     }
 
 
+def test_extract_external_json_block_uses_last_json_fence() -> None:
+    pasted = (
+        "讲解\n"
+        "```json\n"
+        "{\"subject_skeleton\":\"old\"}\n"
+        "```\n"
+        "最后保存这个：\n"
+        "```JSON\n"
+        "{\"subject_skeleton\":\"new\"}\n"
+        "```"
+    )
+
+    assert analysis.extract_external_json_block(pasted) == '{"subject_skeleton":"new"}'
+
+
+def test_extract_external_json_block_accepts_raw_json() -> None:
+    assert analysis.extract_external_json_block('{"ok": true}') == '{"ok": true}'
+
+
+def test_extract_external_json_block_rejects_free_text() -> None:
+    outcome = analysis.save_external_sentence_analysis_for_reader(
+        object(),
+        1,
+        external_result="Only an explanation, no JSON.",
+    )
+
+    assert outcome.status_code == 400
+    assert "```json code block```" in outcome.error_payload()["error"]
+
+
+def test_build_external_sentence_prompt_wraps_project_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {
+            "text": "The cat sat.",
+            "user_translation": "猫坐着。",
+            "user_structure": "主干：cat sat",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "build_sentence_prompt",
+        lambda db, sentence_id, user_translation=None, user_structure=None: (
+            f"PROJECT PROMPT {user_translation} {user_structure}"
+        ),
+    )
+
+    prompt = analysis.build_external_sentence_prompt(object(), 1)
+
+    assert "先输出给人看的中文讲解" in prompt
+    assert "```json 代码块```" in prompt
+    assert "当前分析模式：诊断模式" in prompt
+    assert "PROJECT PROMPT 猫坐着。 主干：cat sat" in prompt
+
+
+def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_sentence_translation",
+        lambda db, sentence_id, value: captured.update(translation=value),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "save_sentence_structure",
+        lambda db, sentence_id, value: captured.update(structure=value),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": "猫坐着。"},
+    )
+    def fake_active_sentence_prompt_version(db, user_translation):
+        captured["prompt_basis"] = user_translation
+        return "v6"
+
+    monkeypatch.setattr(
+        analysis,
+        "_active_sentence_prompt_version",
+        fake_active_sentence_prompt_version,
+    )
+
+    def fake_save_sentence_analysis(db, sentence_id, raw_json, model, prompt_version):
+        captured.update(
+            sentence_id=sentence_id,
+            raw_json=raw_json,
+            model=model,
+            prompt_version=prompt_version,
+        )
+        return SimpleNamespace(is_valid=True, error="")
+
+    monkeypatch.setattr(analysis, "save_sentence_analysis", fake_save_sentence_analysis)
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_analysis_payload",
+        lambda db, sentence_id: {"ok": True, "sentence_id": sentence_id, "is_stale": True},
+    )
+
+    outcome = analysis.save_external_sentence_analysis_for_reader(
+        object(),
+        3,
+        external_result='```json\n{"subject_skeleton":"cat sat"}\n```',
+        user_translation="猫坐着。",
+        user_structure="主干：cat sat",
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload == {
+        "ok": True,
+        "sentence_id": 3,
+        "is_stale": False,
+        "from_cache": False,
+    }
+    assert captured == {
+        "translation": "猫坐着。",
+        "structure": "主干：cat sat",
+        "prompt_basis": "猫坐着。",
+        "sentence_id": 3,
+        "raw_json": '{"subject_skeleton":"cat sat"}',
+        "model": "external-ai",
+        "prompt_version": "v6",
+    }
+
+
+def test_save_external_sentence_analysis_reports_validation_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": ""},
+    )
+    monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v6")
+    monkeypatch.setattr(
+        analysis,
+        "save_sentence_analysis",
+        lambda *a, **k: SimpleNamespace(is_valid=False, error="schema mismatch"),
+    )
+
+    outcome = analysis.save_external_sentence_analysis_for_reader(
+        object(),
+        1,
+        external_result='```json\n{"bad": true}\n```',
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "External JSON failed validation: schema mismatch",
+        "retry": False,
+    }
+
+
 def test_analyze_sentence_for_reader_uses_pro_model_when_requested(monkeypatch) -> None:
     import app.web.fastapi_app as fastapi_app
 

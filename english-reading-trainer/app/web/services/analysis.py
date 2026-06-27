@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.ai.context_builder import build_sentence_prompt
 from app.ai.ai_provider_config import get_ai_provider_settings, get_pro_analysis_model
 from app.ai.analysis_saver import save_sentence_analysis
 from app.cards.sentence_card_service import (
@@ -25,6 +27,11 @@ from app.web.queries import (
 _WORD_ANALYSIS_FALLBACK_WARNING = (
     "New AI response failed validation. Showing previous saved analysis."
 )
+_JSON_FENCE_RE = re.compile(
+    r"```[ \t]*(?:json)?[ \t]*\r?\n?(.*?)```",
+    re.DOTALL | re.IGNORECASE,
+)
+_EXTERNAL_MODEL_NAME = "external-ai"
 
 
 @dataclass(frozen=True)
@@ -104,6 +111,100 @@ def analyze_sentence_for_reader(
     payload["from_cache"] = result.from_cache
     payload["is_stale"] = bool(payload["is_stale"] or result.is_stale)
     return AnalysisOutcome(payload=payload)
+
+
+def build_external_sentence_prompt(
+    db: DatabaseConnection,
+    sentence_id: int,
+) -> str:
+    """Build a paste-ready prompt for an external AI chat."""
+    sentence = _fetch_sentence_for_analysis(db, sentence_id)
+    project_prompt = build_sentence_prompt(
+        db,
+        sentence_id,
+        user_translation=sentence.get("user_translation") or None,
+        user_structure=sentence.get("user_structure") or None,
+    )
+    mode = "诊断模式" if sentence.get("user_translation") else "预测模式"
+    return f"""你将帮助一名中文母语的英语学习者理解一个英文句子。
+
+请按下面顺序输出：
+
+1. 先输出给人看的中文讲解，必须包含：
+- 句意
+- 结构拆解
+- 难点说明
+- 推荐译文
+- 可能的误读点
+
+2. 最后单独输出一个 ```json 代码块```，用于保存到英语阅读理解专项训练系统。
+
+JSON 规则：
+- JSON 必须严格符合下方 PROJECT JSON CONTRACT 的 schema。
+- JSON 内不要写注释。
+- JSON 后不要追加任何内容。
+- 如果 PROJECT JSON CONTRACT 要求“Return JSON only”，只把这条要求用于最后的 JSON 代码块；前面的中文讲解仍然要输出。
+- 当前分析模式：{mode}
+
+PROJECT JSON CONTRACT:
+
+{project_prompt}
+"""
+
+
+def save_external_sentence_analysis_for_reader(
+    db: DatabaseConnection,
+    sentence_id: int,
+    *,
+    external_result: str,
+    user_translation: str | None = None,
+    user_structure: str | None = None,
+) -> AnalysisOutcome:
+    """Save JSON produced by an external AI chat and return reader payload."""
+    try:
+        raw_json = extract_external_json_block(external_result)
+        if user_translation is not None and user_translation.strip():
+            save_sentence_translation(db, sentence_id, user_translation)
+        if user_structure is not None and user_structure.strip():
+            save_sentence_structure(db, sentence_id, user_structure)
+
+        sentence = _fetch_sentence_for_analysis(db, sentence_id)
+        result = save_sentence_analysis(
+            db,
+            sentence_id,
+            raw_json,
+            model=_EXTERNAL_MODEL_NAME,
+            prompt_version=_active_sentence_prompt_version(
+                db,
+                sentence.get("user_translation") or None,
+            ),
+        )
+        if not result.is_valid:
+            return AnalysisOutcome(
+                error=f"External JSON failed validation: {result.error}",
+                status_code=400,
+                retry=False,
+            )
+    except ValueError as exc:
+        return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
+
+    payload = _fetch_sentence_analysis_payload(db, sentence_id)
+    if payload is None:
+        return AnalysisOutcome(error="External analysis was not saved.", status_code=500, retry=True)
+    payload["from_cache"] = False
+    payload["is_stale"] = False
+    return AnalysisOutcome(payload=payload)
+
+
+def extract_external_json_block(external_result: str) -> str:
+    """Return the last fenced JSON block, or raw JSON when only JSON was pasted."""
+    text = str(external_result or "").strip()
+    matches = [match.strip() for match in _JSON_FENCE_RE.findall(text) if match.strip()]
+    if matches:
+        return matches[-1]
+    if text.startswith("{") and text.endswith("}"):
+        return text
+    raise ValueError("Paste an external AI reply ending with a ```json code block```.")
 
 
 def _fallback_word_analysis_payload(

@@ -29,7 +29,7 @@ from app.ai.context_builder import (
     build_word_prompt,
     get_sentence_info,
 )
-from app.cards.sentence_card_service import save_sentence_translation
+from app.cards.sentence_card_service import save_sentence_structure, save_sentence_translation
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 
@@ -154,8 +154,15 @@ class TestBuildSentencePrompt:
     def test_no_unreplaced_placeholders(self, seeded):
         db, book_id, sid = seeded
         prompt = build_sentence_prompt(db, sid)
-        # The five known template keys must all be replaced
-        for key in ("sentence", "context", "chapter_title", "related_cards", "learner_profile"):
+        # The known sentence template keys must all be replaced
+        for key in (
+            "sentence",
+            "context",
+            "chapter_title",
+            "related_cards",
+            "learner_profile",
+            "user_structure",
+        ):
             assert f"{{{{ {key} }}}}" not in prompt
 
     def test_raises_value_error_for_unknown_id(self, db: DatabaseConnection):
@@ -191,6 +198,18 @@ class TestBuildSentencePrompt:
         prompt = build_sentence_prompt(db, sid)
         assert "Diagnosis Mode" in prompt
         assert "狐狸跳过狗。" in prompt
+
+    def test_explicit_structure_is_rendered(self, seeded):
+        db, book_id, sid = seeded
+        prompt = build_sentence_prompt(db, sid, user_structure="主干：fox jumps")
+        assert "主干：fox jumps" in prompt
+        assert "{{ user_structure }}" not in prompt
+
+    def test_stored_structure_is_rendered(self, seeded):
+        db, book_id, sid = seeded
+        save_sentence_structure(db, sid, "主干：fox jumps")
+        prompt = build_sentence_prompt(db, sid)
+        assert "主干：fox jumps" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +255,7 @@ class TestGetSentenceInfo:
         expected_keys = {
             "sentence_id", "sentence_text", "book_title",
             "chapter_title", "context", "related_cards_text",
-            "learner_profile", "user_translation",
+            "learner_profile", "user_translation", "user_structure",
         }
         assert set(info.keys()) >= expected_keys
 

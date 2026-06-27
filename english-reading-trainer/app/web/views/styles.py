@@ -617,6 +617,27 @@ def _css() -> str:
     .analysis-status.error {
       color: #b91c1c;
     }
+    .analysis-external-section {
+      display: grid;
+      gap: 8px;
+    }
+    .analysis-external-section[hidden] {
+      display: none;
+    }
+    .analysis-external-label {
+      color: var(--text-dim);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    #analysis-external-result {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      font-size: 13px;
+      line-height: 1.45;
+    }
     .analysis-section {
       border-top: 1px solid var(--line);
       padding-top: 12px;
