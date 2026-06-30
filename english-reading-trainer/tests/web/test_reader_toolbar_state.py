@@ -539,6 +539,75 @@ def test_saved_translation_underlines_sentence_and_changes_analysis_action(
     assert action_text == "Check translation"
 
 
+def test_copy_external_prompt_flushes_pending_translation_and_structure(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    translation = "即时译文：猫坐在垫子上。"
+    structure = "主干：The cat sat\n从句：\n修饰成分：on the mat\n指代逻辑："
+    for page in _new_page(browser, reader_url):
+        page.evaluate(
+            """() => {
+              window.__copiedText = "";
+              Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: {
+                  writeText: async (text) => {
+                    window.__copiedText = text;
+                  },
+                },
+              });
+            }"""
+        )
+        _select_sentence_contents(page, 0)
+        sentence_id = int(
+            page.locator("[data-sentence-id]").first.get_attribute("data-sentence-id")
+            or "0"
+        )
+        page.locator("#toolbar-translation-open").click()
+        page.wait_for_function('!document.getElementById("toolbar-translation-editor").hidden')
+        page.locator("#toolbar-translation-text").fill(translation)
+
+        page.locator("#toolbar-structure-open").click()
+        page.wait_for_function('!document.getElementById("toolbar-structure-editor").hidden')
+        page.locator("#toolbar-structure-text").fill(structure)
+        page.locator("#toolbar-external-prompt").click()
+
+        page.wait_for_function(
+            """({translation, structure}) => {
+              const copied = window.__copiedText || "";
+              return copied.includes(translation) && copied.includes(structure);
+            }""",
+            {"translation": translation, "structure": structure},
+        )
+        copied_text = page.evaluate("window.__copiedText")
+        dom_state = page.evaluate(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[0];
+              return {
+                translation: sentence.dataset.translation,
+                structure: sentence.dataset.structure,
+              };
+            }"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT user_translation, user_structure
+                 FROM sentence_cards
+                WHERE sentence_id = ? AND archived_at IS NULL""",
+            (sentence_id,),
+        ).fetchone()
+
+    assert translation in copied_text
+    assert structure in copied_text
+    assert dom_state == {"translation": translation, "structure": structure}
+    assert row is not None
+    assert row["user_translation"] == translation
+    assert row["user_structure"] == structure
+
+
 def test_mark_word_keeps_reader_scroll_position(
     browser: Browser,
     reader_url: str,
@@ -571,9 +640,12 @@ def test_mark_word_keeps_reader_scroll_position(
         after = page.evaluate(
             """() => {
               const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              const bright = Array.from(document.querySelectorAll("[data-word-card]"))
+                .find((node) => node.textContent === "bright");
               return {
-                brightMarked: Array.from(document.querySelectorAll("[data-word-card]"))
-                  .some((node) => node.textContent === "bright"),
+                brightMarked: Boolean(bright),
+                sourceStart: bright?.dataset.sourceStart,
+                sourceEnd: bright?.dataset.sourceEnd,
                 sentenceTop: sentence.getBoundingClientRect().top,
                 scrollY: window.scrollY,
                 toolbarHidden: document.getElementById("selection-toolbar").hidden,
@@ -584,7 +656,10 @@ def test_mark_word_keeps_reader_scroll_position(
 
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT lexical_type FROM word_cards WHERE lemma = ? AND archived_at IS NULL",
+            """SELECT wc.lexical_type, wcs.start_offset, wcs.end_offset, wcs.selected_text
+                 FROM word_cards wc
+                 JOIN word_card_sources wcs ON wcs.card_id = wc.id
+                WHERE wc.lemma = ? AND wc.archived_at IS NULL""",
             ("bright",),
         ).fetchone()
 
@@ -594,8 +669,13 @@ def test_mark_word_keeps_reader_scroll_position(
     assert after["scrollY"] > 0
     assert after["toolbarHidden"] is True
     assert after["brightMarked"] is True
+    assert after["sourceStart"] == "9"
+    assert after["sourceEnd"] == "15"
     assert row is not None
     assert row["lexical_type"] == "word"
+    assert row["start_offset"] == 9
+    assert row["end_offset"] == 15
+    assert row["selected_text"] == "bright"
 
 
 def test_remove_word_card_keeps_reader_scroll_position(

@@ -318,6 +318,8 @@ def test_external_sentence_analysis_prompt_and_paste_flow() -> None:
     assert "analysisExternalSection.hidden = false;" in modes
     assert "analysisExternalSection.hidden = true;" in modes
     assert 'externalPrompt.addEventListener("click"' in boot
+    assert "await flushPendingToolbarEdits();" in boot
+    assert "refreshActiveSentenceSnapshot(sentenceId);" in boot
     assert "copyExternalSentencePrompt(sentenceId);" in boot
     assert (
         'analysisExternalSave.addEventListener("click", saveExternalSentenceAnalysis);'
@@ -856,6 +858,8 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "let structureEditorDirty = false;" in script
     assert "function scheduleTranslationAutoSave" in script
     assert "function scheduleStructureAutoSave" in script
+    assert "async function flushPendingToolbarEdits()" in script
+    assert "function refreshActiveSentenceSnapshot" in script
     assert "function flushPendingToolbarAutoSaveOnPageHide" in script
     assert "sentenceId: options.sentenceId || activeSentenceId" in save_options
     assert "value: hasOption(options, \"value\")" in save_options
@@ -886,6 +890,36 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "setToolbarStatus(structureStatus, automatic ? \"Auto saved\" : \"Saved\");" in save_structure
     assert "if (!translationEditorOpen && !structureEditorOpen) hideToolbar();" in scroll_listener
     assert 'window.addEventListener("pagehide", flushPendingToolbarAutoSaveOnPageHide);' in script
+
+
+def test_toolbar_actions_flush_pending_editor_edits_before_continuing() -> None:
+    script = _selection_script()
+    flush_helper = script[script.index("async function flushPendingToolbarEdits"):]
+    flush_helper = flush_helper[: flush_helper.index("function hideTranslationEditor")]
+    translation_analyze = script[script.index('translationAnalyze.addEventListener("click"'):]
+    translation_analyze = translation_analyze[: translation_analyze.index('structureOpen.addEventListener("click"')]
+    structure_analyze = script[script.index('structureAnalyze.addEventListener("click"'):]
+    structure_analyze = structure_analyze[: structure_analyze.index("if (externalPrompt)")]
+    external_prompt = script[script.index("if (externalPrompt)"):]
+    external_prompt = external_prompt[: external_prompt.index('analysisOpen.addEventListener("click"')]
+    analysis_open = script[script.index('analysisOpen.addEventListener("click"'):]
+    analysis_open = analysis_open[: analysis_open.index('crossSentenceDelete.addEventListener("click"')]
+
+    assert "await enqueueTranslationSave({ automatic: true, keepOpen: true })" in flush_helper
+    assert "await enqueueStructureSave({ automatic: true, keepOpen: true })" in flush_helper
+    assert "const pendingTranslationSaved = await translationSaveChain;" in flush_helper
+    assert "const pendingStructureSaved = await structureSaveChain;" in flush_helper
+    assert "refreshActiveSentenceSnapshot(activeSentenceId);" in flush_helper
+    assert 'translationAnalyze.addEventListener("click", async () =>' in translation_analyze
+    assert "const saved = await flushPendingToolbarEdits();" in translation_analyze
+    assert "const translation = sentence?.dataset.translation || value || null;" in translation_analyze
+    assert 'structureAnalyze.addEventListener("click", async () =>' in structure_analyze
+    assert "const saved = await flushPendingToolbarEdits();" in structure_analyze
+    assert "const structure = sentence?.dataset.structure || value;" in structure_analyze
+    assert 'externalPrompt.addEventListener("click", async () =>' in external_prompt
+    assert "const saved = await flushPendingToolbarEdits();" in external_prompt
+    assert 'analysisOpen.addEventListener("click", async () =>' in analysis_open
+    assert "const sentence = refreshActiveSentenceSnapshot(sentenceId);" in analysis_open
 
 
 def test_bare_structure_template_is_not_saved_or_analyzed() -> None:
@@ -1052,6 +1086,25 @@ def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> 
     assert "readerToolbarBusy = false;" in save_translation
 
 
+def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() -> None:
+    script = _selection_script()
+    refs = script[: script.index("const analysisWordStatus")]
+    update_toolbar = script[script.index("function updateToolbar()"):]
+    update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
+    mark_reader = script[script.index("async function markReaderSelection"):]
+    mark_reader = mark_reader[: mark_reader.index("function updateToolbar")]
+    listeners = script[script.index('wordForm.addEventListener("submit"'):]
+    listeners = listeners[: listeners.index('analysisWordForm.addEventListener("click"')]
+
+    assert 'document.getElementById("toolbar-word-analyze")' in refs
+    assert "analysisOpen.hidden = !wholeSentence;" in update_toolbar
+    assert "function lexicalTypeForSelection(value)" in script
+    assert "const analyzeAfter = Boolean(options.analyzeAfter);" in mark_reader
+    assert "requestWordAnalysis(String(payload.card_id)" in mark_reader
+    assert 'wordAnalyze.addEventListener("click"' in listeners
+    assert "analyzeAfter: true" in listeners
+
+
 def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> None:
     script = _selection_script()
     copy_helper = script[script.index("function copyAnalysisPayload"):]
@@ -1154,7 +1207,8 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
     assert 'new URLSearchParams({ user_translation: value, return_to: returnTo })' in save_translation
     assert "Enter a translation first, or use AI analysis without saving." not in script
     assert 'sentence.dataset.translation = "";' not in unmark_helper
-    assert "const translation = activeSentenceTranslation || null;" in analysis_click
+    assert "const sentence = refreshActiveSentenceSnapshot(sentenceId);" in analysis_click
+    assert "const translation = sentence?.dataset.translation || null;" in analysis_click
     assert "requestAnalysis(sentenceId, translation, {" in analysis_click
     assert "focusAfterRender," in analysis_click
 
@@ -1179,6 +1233,8 @@ def test_reader_script_propagates_lexical_type_and_refreshes_body_highlights() -
     script = _selection_script()
     decorate = script[script.index("function decorateWordCardElement"):]
     decorate = decorate[: decorate.index("function clearWordCardElement")]
+    offset_helpers = script[script.index("function codePointLength"):]
+    offset_helpers = offset_helpers[: offset_helpers.index("function applyWordCardToRange")]
     glossary = script[script.index("function glossaryHighlightFragment"):]
     glossary = glossary[: glossary.index("function applyGlossaryHighlights")]
     apply_highlights = script[script.index("function applyGlossaryHighlights"):]
@@ -1188,10 +1244,14 @@ def test_reader_script_propagates_lexical_type_and_refreshes_body_highlights() -
 
     assert "lexical_type: card.lexical_type || \"\"" in script
     assert "element.dataset.lexicalType = card.lexical_type || \"\";" in decorate
+    assert "element.dataset.sourceId = String(source.id);" in decorate
+    assert "function rangeOffsetsWithinElement(range, element)" in offset_helpers
+    assert "function uniqueOffsetsInSentence(sentence, selectedText)" in offset_helpers
+    assert 'body.set("source_start_offset", String(offsets.start));' in offset_helpers
     assert "span.dataset.lexicalType = entry.card.lexical_type || \"\";" in glossary
     assert 'parent.closest(".glossary-word, [data-word-card]")' in apply_highlights
-    assert "function refreshReaderGlossaryHighlights()" in script
-    assert "refreshReaderGlossaryHighlights();" in mark_analysis
+    assert "function applyWordCardToSource(source, card)" in script
+    assert "applyWordCardToSource(payload.source, payload.word_card);" in mark_analysis
 
 
 def test_reader_script_supports_bare_key_sentence_shortcut() -> None:

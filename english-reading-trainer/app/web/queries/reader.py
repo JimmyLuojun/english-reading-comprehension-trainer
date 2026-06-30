@@ -118,10 +118,17 @@ def _asset_storage_path(db: DatabaseConnection, storage_path: str) -> Path:
 def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT id, lemma, surface_form, lexical_type, first_sentence_id,
-                      current_meaning, user_note
-                 FROM word_cards
-                WHERE archived_at IS NULL
-                ORDER BY created_at DESC"""
+            """SELECT wc.id, wc.lemma, wc.surface_form, wc.lexical_type,
+                      wc.first_sentence_id, wc.current_meaning, wc.user_note,
+                      wcs.id AS source_id,
+                      wcs.sentence_id AS source_sentence_id,
+                      wcs.start_offset,
+                      wcs.end_offset,
+                      wcs.selected_text
+                 FROM word_cards wc
+                 LEFT JOIN word_card_sources wcs
+                   ON wcs.card_id = wc.id
+                WHERE wc.archived_at IS NULL
+                ORDER BY wc.created_at DESC, wcs.is_primary DESC, wcs.created_at ASC, wcs.id ASC"""
         ).fetchall()
     return [dict(row) for row in rows]

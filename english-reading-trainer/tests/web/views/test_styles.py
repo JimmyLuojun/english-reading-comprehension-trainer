@@ -213,11 +213,14 @@ def test_css_analysis_section_labels_are_prominent_bilingual() -> None:
     assert "border-left: 4px solid var(--accent);" in h3
 
 
-def test_css_word_card_lexical_type_colors_keep_sentence_yellow() -> None:
+def test_css_word_card_lexical_type_colors_keep_sentence_state_subtle() -> None:
     css = _css()
 
     assert "[data-sentence-id].marked" in css
-    assert "#ffe58a" in css
+    marked = _css_block(css, "[data-sentence-id].marked {", "[data-sentence-id].translated {")
+    assert "background: transparent;" in marked
+    assert "box-shadow: inset 0 -2px rgba(245, 158, 11, 0.38);" in marked
+    assert "#ffe58a" not in marked
     assert '[data-word-card][data-lexical-type="word"]' in css
     assert '[data-word-card][data-lexical-type="phrase"]' in css
     assert '[data-word-card][data-lexical-type="collocation"]' in css

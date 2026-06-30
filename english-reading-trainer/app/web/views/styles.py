@@ -344,7 +344,8 @@ def _css() -> str:
       box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.10);
     }
     [data-sentence-id].marked {
-      background: linear-gradient(transparent 60%, #ffe58a 60%);
+      background: transparent;
+      box-shadow: inset 0 -2px rgba(245, 158, 11, 0.38);
       box-decoration-break: clone;
       -webkit-box-decoration-break: clone;
     }

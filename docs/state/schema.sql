@@ -164,30 +164,13 @@ CREATE TABLE book_assets (
 );
 CREATE INDEX idx_book_assets_book
     ON book_assets(book_id);
-CREATE TABLE word_card_sources (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
-    sentence_id     INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
-    surface_form    TEXT    NOT NULL,
-    source_key      TEXT    NOT NULL,
-    is_primary      INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0, 1)),
-    created_at      TEXT    NOT NULL,
-    UNIQUE(card_id, sentence_id, source_key)
-);
-CREATE INDEX idx_word_card_sources_card
-    ON word_card_sources(card_id);
-CREATE INDEX idx_word_card_sources_sentence
-    ON word_card_sources(sentence_id);
-CREATE UNIQUE INDEX idx_word_card_sources_one_primary
-    ON word_card_sources(card_id)
-    WHERE is_primary = 1;
-CREATE TABLE IF NOT EXISTS "error_types" (
+CREATE TABLE "error_types" (
     id    INTEGER PRIMARY KEY AUTOINCREMENT,
     code  TEXT    NOT NULL UNIQUE,
     name  TEXT    NOT NULL,
     layer TEXT    NOT NULL CHECK(layer IN ('grammar','lexical','discourse','inference'))
 );
-CREATE TABLE IF NOT EXISTS "books" (
+CREATE TABLE "books" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     title           TEXT    NOT NULL,
     author          TEXT    NOT NULL DEFAULT '',
@@ -198,7 +181,7 @@ CREATE TABLE IF NOT EXISTS "books" (
     total_chapters  INTEGER NOT NULL DEFAULT 0,
     total_sentences INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS "chapter_blocks" (
+CREATE TABLE "chapter_blocks" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     chapter_id      INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
@@ -218,3 +201,32 @@ CREATE INDEX idx_chapter_blocks_book
     ON chapter_blocks(book_id);
 CREATE INDEX idx_chapter_blocks_chapter
     ON chapter_blocks(chapter_id, idx);
+CREATE TABLE "word_card_sources" (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
+    sentence_id     INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+    surface_form    TEXT    NOT NULL,
+    source_key      TEXT    NOT NULL,
+    start_offset    INTEGER,
+    end_offset      INTEGER,
+    selected_text   TEXT    NOT NULL DEFAULT '',
+    is_primary      INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0, 1)),
+    created_at      TEXT    NOT NULL,
+    CHECK (
+        (start_offset IS NULL AND end_offset IS NULL)
+        OR (start_offset >= 0 AND end_offset > start_offset)
+    )
+);
+CREATE INDEX idx_word_card_sources_card
+    ON word_card_sources(card_id);
+CREATE INDEX idx_word_card_sources_sentence
+    ON word_card_sources(sentence_id);
+CREATE UNIQUE INDEX idx_word_card_sources_one_primary
+    ON word_card_sources(card_id)
+    WHERE is_primary = 1;
+CREATE UNIQUE INDEX idx_word_card_sources_exact_unique
+    ON word_card_sources(card_id, sentence_id, source_key, start_offset, end_offset)
+    WHERE start_offset IS NOT NULL AND end_offset IS NOT NULL;
+CREATE UNIQUE INDEX idx_word_card_sources_legacy_unique
+    ON word_card_sources(card_id, sentence_id, source_key)
+    WHERE start_offset IS NULL OR end_offset IS NULL;

@@ -44,16 +44,63 @@ def _source_key(surface_form: str) -> str:
     return surface_form.lower().strip()
 
 
+def _resolve_source_offsets(
+    sentence_text: str,
+    surface_form: str,
+    *,
+    start_offset: int | None = None,
+    end_offset: int | None = None,
+    selected_text: str | None = None,
+) -> tuple[int | None, int | None, str]:
+    if (start_offset is None) != (end_offset is None):
+        raise ValueError("source offsets must include both start and end.")
+
+    if start_offset is not None and end_offset is not None:
+        if start_offset < 0 or end_offset <= start_offset or end_offset > len(sentence_text):
+            raise ValueError("source offsets are outside the sentence text.")
+        actual = sentence_text[start_offset:end_offset]
+        expected = selected_text if selected_text is not None else surface_form
+        if actual != expected:
+            raise ValueError("source offsets do not match the selected text.")
+        return start_offset, end_offset, actual
+
+    key = surface_form.lower()
+    text = sentence_text.lower()
+    start = text.find(key)
+    if start < 0:
+        return None, None, selected_text or ""
+    if text.find(key, start + len(key)) >= 0:
+        return None, None, selected_text or ""
+    end = start + len(surface_form)
+    return start, end, sentence_text[start:end]
+
+
 def _record_word_card_source_conn(
     conn: Any,
     *,
     card_id: int,
     sentence_id: int,
     surface_form: str,
+    start_offset: int | None = None,
+    end_offset: int | None = None,
+    selected_text: str | None = None,
     is_primary: bool = False,
 ) -> bool:
     now = _utcnow()
     key = _source_key(surface_form)
+    sentence = conn.execute(
+        "SELECT text FROM sentences WHERE id = ?",
+        (sentence_id,),
+    ).fetchone()
+    if sentence is None:
+        raise ValueError(f"Sentence id={sentence_id} not found.")
+    start_offset, end_offset, selected_text = _resolve_source_offsets(
+        sentence["text"] or "",
+        surface_form,
+        start_offset=start_offset,
+        end_offset=end_offset,
+        selected_text=selected_text,
+    )
     if is_primary:
         conn.execute(
             "UPDATE word_card_sources SET is_primary = 0 WHERE card_id = ?",
@@ -61,18 +108,39 @@ def _record_word_card_source_conn(
         )
     cursor = conn.execute(
         """INSERT OR IGNORE INTO word_card_sources
-           (card_id, sentence_id, surface_form, source_key, is_primary, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (card_id, sentence_id, surface_form, key, 1 if is_primary else 0, now),
+           (card_id, sentence_id, surface_form, source_key,
+            start_offset, end_offset, selected_text, is_primary, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            card_id,
+            sentence_id,
+            surface_form,
+            key,
+            start_offset,
+            end_offset,
+            selected_text or "",
+            1 if is_primary else 0,
+            now,
+        ),
     )
     inserted = cursor.rowcount > 0
     if is_primary and not inserted:
-        conn.execute(
-            """UPDATE word_card_sources
-                  SET is_primary = 1
-                WHERE card_id = ? AND sentence_id = ? AND source_key = ?""",
-            (card_id, sentence_id, key),
-        )
+        if start_offset is not None and end_offset is not None:
+            conn.execute(
+                """UPDATE word_card_sources
+                      SET is_primary = 1
+                    WHERE card_id = ? AND sentence_id = ? AND source_key = ?
+                      AND start_offset = ? AND end_offset = ?""",
+                (card_id, sentence_id, key, start_offset, end_offset),
+            )
+        else:
+            conn.execute(
+                """UPDATE word_card_sources
+                      SET is_primary = 1
+                    WHERE card_id = ? AND sentence_id = ? AND source_key = ?
+                      AND start_offset IS NULL AND end_offset IS NULL""",
+                (card_id, sentence_id, key),
+            )
     elif inserted and not _has_primary_source_conn(conn, card_id):
         conn.execute(
             "UPDATE word_card_sources SET is_primary = 1 WHERE card_id = ? AND id = last_insert_rowid()",
@@ -119,6 +187,9 @@ def create_or_update_word_card(
     surface_form: str,
     lexical_type: LexicalType = LexicalType.WORD,
     user_note: str = "",
+    source_start_offset: int | None = None,
+    source_end_offset: int | None = None,
+    selected_text: str | None = None,
 ) -> tuple[int, bool]:
     """
     Create a word card or record a distinct source location on an existing one.
@@ -159,6 +230,9 @@ def create_or_update_word_card(
                 card_id=card_id,
                 sentence_id=sentence_id,
                 surface_form=surface_form,
+                start_offset=source_start_offset,
+                end_offset=source_end_offset,
+                selected_text=selected_text,
             )
             return card_id, False
 
@@ -193,6 +267,9 @@ def create_or_update_word_card(
             card_id=card_id,
             sentence_id=sentence_id,
             surface_form=surface_form,
+            start_offset=source_start_offset,
+            end_offset=source_end_offset,
+            selected_text=selected_text,
             is_primary=True,
         )
 
@@ -205,6 +282,9 @@ def record_word_card_source(
     sentence_id: int,
     surface_form: str,
     *,
+    source_start_offset: int | None = None,
+    source_end_offset: int | None = None,
+    selected_text: str | None = None,
     is_primary: bool = False,
 ) -> bool:
     """Record one distinct source location for an active word card."""
@@ -227,6 +307,9 @@ def record_word_card_source(
             card_id=card_id,
             sentence_id=sentence_id,
             surface_form=surface_form,
+            start_offset=source_start_offset,
+            end_offset=source_end_offset,
+            selected_text=selected_text,
             is_primary=is_primary,
         )
 
@@ -308,6 +391,9 @@ def list_word_card_sources(
                       s.book_id,
                       c.idx AS chapter_idx,
                       s.text AS sentence_text,
+                      wcs.start_offset,
+                      wcs.end_offset,
+                      wcs.selected_text,
                       CASE
                         WHEN wc.ai_analysis_id IS NOT NULL
                           OR instr(lower(COALESCE(s.text, '')), lower(wc.surface_form)) = 0

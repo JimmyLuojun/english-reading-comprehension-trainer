@@ -79,3 +79,66 @@ def test_sentence_translation_route_allows_empty_value(monkeypatch) -> None:
         "sentence_id": 42,
         "user_translation": "",
     }
+
+
+def test_mark_word_json_route_passes_and_returns_source_offsets(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_create_or_update_word_card(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return 7, True
+
+    def fake_get_word_card(_db, card_id):
+        assert card_id == 7
+        return {
+            "id": 7,
+            "lemma": "bright",
+            "surface_form": "bright",
+            "lexical_type": "word",
+            "current_meaning": "",
+            "user_note": "",
+        }
+
+    def fake_matching_word_source(*args):
+        captured["source_args"] = args
+        return {
+            "id": 11,
+            "sentence_id": 42,
+            "start_offset": 9,
+            "end_offset": 15,
+            "selected_text": "bright",
+        }
+
+    monkeypatch.setattr(cards, "create_or_update_word_card", fake_create_or_update_word_card)
+    monkeypatch.setattr(cards, "get_word_card", fake_get_word_card)
+    monkeypatch.setattr(cards, "_matching_word_source", fake_matching_word_source)
+    app = FastAPI()
+    register_card_routes(app, lambda: "db")
+
+    response = TestClient(app).post(
+        "/mark/word",
+        data={
+            "sentence_id": "42",
+            "surface_form": "bright",
+            "lexical_type": "word",
+            "source_start_offset": "9",
+            "source_end_offset": "15",
+            "selected_text": "bright",
+        },
+        headers={"X-Requested-With": "fetch", "Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert captured["kwargs"] == {
+        "source_start_offset": 9,
+        "source_end_offset": 15,
+        "selected_text": "bright",
+    }
+    assert response.json()["source"] == {
+        "id": 11,
+        "sentence_id": 42,
+        "start_offset": 9,
+        "end_offset": 15,
+        "selected_text": "bright",
+    }

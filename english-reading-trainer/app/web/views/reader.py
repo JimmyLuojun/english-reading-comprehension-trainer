@@ -269,7 +269,10 @@ def _word_cards_by_sentence(
 ) -> dict[int, list[dict[str, Any]]]:
     grouped: dict[int, list[dict[str, Any]]] = {}
     for card in word_cards:
-        grouped.setdefault(int(card["first_sentence_id"]), []).append(card)
+        sentence_id = card.get("source_sentence_id") or card.get("first_sentence_id")
+        if sentence_id is None:
+            continue
+        grouped.setdefault(int(sentence_id), []).append(card)
     return grouped
 
 def _reader_sentence_span(
@@ -309,15 +312,17 @@ def _highlight_word_cards(
     if not word_cards:
         return _render_inline_markdown_images(_escape(text), book_id)
 
-    lower_text = text.lower()
     matches: list[tuple[int, int, dict[str, Any]]] = []
     for card in word_cards:
-        surface = str(card.get("surface_form") or card.get("lemma") or "").strip()
-        if not surface:
+        start = card.get("start_offset")
+        end = card.get("end_offset")
+        if start is None or end is None:
             continue
-        start = lower_text.find(surface.lower())
-        if start >= 0:
-            matches.append((start, start + len(surface), card))
+        start = int(start)
+        end = int(end)
+        if start < 0 or end <= start or end > len(text):
+            continue
+        matches.append((start, end, card))
 
     selected: list[tuple[int, int, dict[str, Any]]] = []
     occupied_until = -1
@@ -340,8 +345,11 @@ def _highlight_word_cards(
         meaning = _escape(str(card.get("current_meaning") or ""))
         note = _escape(str(card.get("user_note") or ""))
         lexical_type = _escape(str(card.get("lexical_type") or ""))
+        source_id = _escape(str(card.get("source_id") or ""))
         pieces.append(
             f'<span data-word-card="{card["id"]}"'
+            f' data-source-id="{source_id}"'
+            f' data-source-start="{start}" data-source-end="{end}"'
             f' data-lexical-type="{lexical_type}"'
             f' data-meaning="{meaning}" data-note="{note}"'
             f'>{_escape(text[start:end])}</span>'
@@ -412,6 +420,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button type="submit" name="lexical_type" value="word">Mark word</button>
         <button type="submit" name="lexical_type" value="phrase">Mark phrase</button>
         <button type="submit" name="lexical_type" value="collocation">Mark collocation</button>
+        <button id="toolbar-word-analyze" type="button">AI analysis</button>
       </form>
       <form id="toolbar-analysis-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>
         <input id="toolbar-analysis-word-sentence-id" type="hidden" name="sentence_id">

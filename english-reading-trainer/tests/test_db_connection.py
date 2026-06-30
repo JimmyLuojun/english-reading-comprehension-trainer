@@ -52,6 +52,7 @@ class TestMigrationRunner:
         assert "012_word_card_diagnosis.sql" in applied
         assert "013_markdown_source_format.sql" in applied
         assert "014_markdown_reader_blocks.sql" in applied
+        assert "015_word_card_source_offsets.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -73,6 +74,7 @@ class TestMigrationRunner:
         assert "012_word_card_diagnosis.sql" in recorded
         assert "013_markdown_source_format.sql" in recorded
         assert "014_markdown_reader_blocks.sql" in recorded
+        assert "015_word_card_source_offsets.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -121,12 +123,17 @@ class TestMigrationRunner:
         with db.get_connection() as conn:
             card = conn.execute("SELECT id, occurrence_count FROM word_cards").fetchone()
             source = conn.execute(
-                "SELECT sentence_id, is_primary FROM word_card_sources WHERE card_id = ?",
+                """SELECT sentence_id, is_primary, start_offset, end_offset, selected_text
+                     FROM word_card_sources
+                    WHERE card_id = ?""",
                 (card["id"],),
             ).fetchone()
         assert card["occurrence_count"] == 1
         assert source["sentence_id"] == sentence_id
         assert source["is_primary"] == 1
+        assert source["start_offset"] == 0
+        assert source["end_offset"] == len("intangible")
+        assert source["selected_text"] == "intangible"
 
     def test_word_card_diagnosis_migration_defaults_existing_rows(
         self, tmp_path: Path
@@ -210,6 +217,7 @@ class TestMigrationRunner:
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
+            "015_word_card_source_offsets.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -299,6 +307,7 @@ class TestMigrationRunner:
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
+            "015_word_card_source_offsets.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -429,7 +438,7 @@ class TestColumns:
         cols = db.get_table_columns("word_card_sources")
         for col in [
             "id", "card_id", "sentence_id", "surface_form", "source_key",
-            "is_primary", "created_at",
+            "start_offset", "end_offset", "selected_text", "is_primary", "created_at",
         ]:
             assert col in cols
 
@@ -572,6 +581,7 @@ class TestConstraints:
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
+            "015_word_card_source_offsets.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -625,6 +635,7 @@ class TestConstraints:
             if sql_file.name not in {
                 "013_markdown_source_format.sql",
                 "014_markdown_reader_blocks.sql",
+                "015_word_card_source_offsets.sql",
             }:
                 shutil.copy(sql_file, old_migrations / sql_file.name)
 
@@ -665,6 +676,7 @@ class TestConstraints:
         assert applied == [
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
+            "015_word_card_source_offsets.sql",
         ]
         with db.get_connection() as conn:
             conn.execute(
@@ -733,6 +745,7 @@ class TestConstraints:
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
+            "015_word_card_source_offsets.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

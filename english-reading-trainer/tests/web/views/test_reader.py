@@ -22,7 +22,7 @@ def test_group_sentence_paragraphs_and_word_card_index() -> None:
         {"id": 2, "paragraph_id": 10},
         {"id": 3, "paragraph_id": 11},
     ]
-    cards = [{"id": 7, "first_sentence_id": 1}, {"id": 8, "first_sentence_id": 1}]
+    cards = [{"id": 7, "source_sentence_id": 1}, {"id": 8, "source_sentence_id": 1}]
 
     assert [[row["id"] for row in group] for group in _group_sentence_paragraphs(rows)] == [
         [1, 2],
@@ -31,19 +31,39 @@ def test_group_sentence_paragraphs_and_word_card_index() -> None:
     assert [card["id"] for card in _word_cards_by_sentence(cards)[1]] == [7, 8]
 
 
-def test_highlight_word_cards_prefers_long_non_overlapping_match() -> None:
+def test_highlight_word_cards_uses_exact_source_offsets() -> None:
     html = _highlight_word_cards(
-        "long term memory",
+        "long term memory long",
         [
-            {"id": 1, "surface_form": "long", "lexical_type": "word", "current_meaning": "", "user_note": ""},
-            {"id": 2, "surface_form": "long term", "current_meaning": "phrase", "user_note": ""},
+            {
+                "id": 1,
+                "source_id": 11,
+                "start_offset": 17,
+                "end_offset": 21,
+                "surface_form": "long",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            },
         ],
         7,
     )
 
-    assert 'data-word-card="2"' in html
-    assert 'data-lexical-type=""' in html
+    assert html.count('data-word-card="1"') == 1
+    assert 'data-source-id="11"' in html
+    assert 'data-source-start="17"' in html
+    assert ">long</span>" in html
+
+
+def test_highlight_word_cards_ignores_sources_without_offsets() -> None:
+    html = _highlight_word_cards(
+        "long term memory",
+        [{"id": 1, "surface_form": "long", "lexical_type": "word", "current_meaning": "", "user_note": ""}],
+        7,
+    )
+
     assert 'data-word-card="1"' not in html
+    assert html == "long term memory"
 
 
 def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
@@ -63,6 +83,9 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
         [
             {
                 "id": 3,
+                "source_id": 5,
+                "start_offset": 4,
+                "end_offset": 7,
                 "surface_form": "cat",
                 "lexical_type": "word",
                 "current_meaning": "meaning",
@@ -79,6 +102,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
     assert 'data-structure="&lt;structure&gt;"' in html
     assert 'data-analysis-id="9"' in html
     assert 'data-word-card="3"' in html
+    assert 'data-source-id="5"' in html
     assert 'data-lexical-type="word"' in html
 
 
@@ -167,6 +191,8 @@ def test_selection_toolbar_contains_translation_editor_without_delete_action() -
     assert "Write translation" in html
     assert 'id="toolbar-structure-open"' in html
     assert 'id="toolbar-external-prompt"' in html
+    assert 'id="toolbar-word-analyze"' in html
+    assert ">AI analysis</button>" in html
     assert "Copy AI prompt" in html
     assert 'id="toolbar-structure-editor"' in html
     assert "Write structure" in html

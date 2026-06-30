@@ -49,6 +49,41 @@ from app.web.views import (
     _word_cards_table,
 )
 
+
+def _optional_int_form_value(value: str | None) -> int | None:
+    text = (value or "").strip()
+    return int(text) if text else None
+
+
+def _matching_word_source(
+    db: DatabaseConnection,
+    card_id: int,
+    sentence_id: int,
+    surface_form: str,
+    start_offset: int | None,
+    end_offset: int | None,
+) -> dict[str, Any] | None:
+    source_key = surface_form.lower().strip()
+    for source in list_word_card_sources(db, card_id):
+        if int(source["sentence_id"]) != sentence_id:
+            continue
+        if str(source["source_key"]) != source_key:
+            continue
+        if start_offset is not None and end_offset is not None:
+            if source["start_offset"] != start_offset or source["end_offset"] != end_offset:
+                continue
+        elif source["start_offset"] is not None or source["end_offset"] is not None:
+            continue
+        return {
+            "id": source["id"],
+            "sentence_id": source["sentence_id"],
+            "start_offset": source["start_offset"],
+            "end_offset": source["end_offset"],
+            "selected_text": source["selected_text"] or "",
+        }
+    return None
+
+
 def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
     @web_app.post("/mark/sentence/{sentence_id}")
     async def mark_sentence(sentence_id: int, request: Request) -> Any:
@@ -141,6 +176,8 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             sentence_id = int(form.get("sentence_id", "0"))
             lexical_type = LexicalType(form.get("lexical_type", LexicalType.WORD.value))
             surface_form = form.get("surface_form", "")
+            source_start_offset = _optional_int_form_value(form.get("source_start_offset"))
+            source_end_offset = _optional_int_form_value(form.get("source_end_offset"))
         except ValueError as exc:
             if wants_json:
                 return JSONResponse(
@@ -151,7 +188,15 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
 
         db = db_factory()
         try:
-            card_id, created = create_or_update_word_card(db, sentence_id, surface_form, lexical_type)
+            card_id, created = create_or_update_word_card(
+                db,
+                sentence_id,
+                surface_form,
+                lexical_type,
+                source_start_offset=source_start_offset,
+                source_end_offset=source_end_offset,
+                selected_text=form.get("selected_text"),
+            )
         except ValueError as exc:
             if wants_json:
                 return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
@@ -163,12 +208,21 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
                     {"ok": False, "error": "Word card was not saved."},
                     status_code=500,
                 )
+            source = _matching_word_source(
+                db,
+                card_id,
+                sentence_id,
+                surface_form,
+                source_start_offset,
+                source_end_offset,
+            )
             return JSONResponse(
                 {
                     "ok": True,
                     "card_id": card_id,
                     "created": created,
                     "word_card": _word_card_json_payload(card),
+                    "source": source,
                 }
             )
         return _redirect(return_to)

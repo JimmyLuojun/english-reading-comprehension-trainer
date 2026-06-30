@@ -407,6 +407,87 @@ class TestWordCardSources:
         assert inserted is False
         assert len(list_word_card_sources(db, card_id)) == 1
 
+    def test_same_sentence_repeated_word_records_distinct_offsets(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-offsets")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentences SET text = 'Mitigate risk and mitigate cost.' WHERE id = ?",
+                (sid,),
+            )
+
+        card_id, _ = create_or_update_word_card(
+            db,
+            sid,
+            "Mitigate",
+            source_start_offset=0,
+            source_end_offset=8,
+            selected_text="Mitigate",
+        )
+        inserted = record_word_card_source(
+            db,
+            card_id,
+            sid,
+            "mitigate",
+            source_start_offset=18,
+            source_end_offset=26,
+            selected_text="mitigate",
+        )
+
+        sources = list_word_card_sources(db, card_id)
+
+        assert inserted is True
+        assert [(source["start_offset"], source["end_offset"]) for source in sources] == [
+            (0, 8),
+            (18, 26),
+        ]
+
+    def test_duplicate_exact_source_offset_is_not_reinserted(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-offset-duplicate")
+        with db.get_connection() as conn:
+            conn.execute("UPDATE sentences SET text = 'Mitigate risk.' WHERE id = ?", (sid,))
+        card_id, _ = create_or_update_word_card(
+            db,
+            sid,
+            "Mitigate",
+            source_start_offset=0,
+            source_end_offset=8,
+            selected_text="Mitigate",
+        )
+
+        inserted = record_word_card_source(
+            db,
+            card_id,
+            sid,
+            "Mitigate",
+            source_start_offset=0,
+            source_end_offset=8,
+            selected_text="Mitigate",
+        )
+
+        assert inserted is False
+        assert len(list_word_card_sources(db, card_id)) == 1
+
+    def test_source_offset_must_match_selected_text(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-offset-invalid")
+        with db.get_connection() as conn:
+            conn.execute("UPDATE sentences SET text = 'Mitigate risk.' WHERE id = ?", (sid,))
+
+        with pytest.raises(ValueError, match="source offsets"):
+            create_or_update_word_card(
+                db,
+                sid,
+                "Mitigate",
+                source_start_offset=1,
+                source_end_offset=9,
+                selected_text="Mitigate",
+            )
+
     def test_add_source_increments_occurrence_count(
         self, db: DatabaseConnection
     ) -> None:
