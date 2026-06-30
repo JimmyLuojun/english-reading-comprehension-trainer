@@ -13,7 +13,7 @@ _CHAPTER_ORDINAL_RE = re.compile(
     r"chapter\s+(?:[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
     r"nineteen|twenty)"
-    r")(?:[\s.:)-]+)",
+    r")(?:[\s.:)-]+|$)",
     re.I,
 )
 

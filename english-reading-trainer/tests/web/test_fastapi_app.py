@@ -2909,6 +2909,24 @@ class TestImportRoutes:
         assert row["source_format"] == "md"
         assert sentence["text"] == "This Markdown sentence should import cleanly."
 
+    def test_import_markdown_file_without_title_uses_upload_filename(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        md_bytes = b"# Markdown Chapter\n\nThis sentence should import cleanly."
+
+        response = client.post(
+            "/import/file",
+            files={"file": ("Logic Rules Summary.md", md_bytes, "text/markdown")},
+            data={"title": "", "author": ""},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, source_format FROM books LIMIT 1").fetchone()
+        assert row["title"] == "Logic Rules Summary"
+        assert row["source_format"] == "md"
+
     def test_import_markdown_file_duplicate_returns_409(
         self, client: TestClient, db: DatabaseConnection
     ) -> None:

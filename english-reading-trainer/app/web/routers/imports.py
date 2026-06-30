@@ -100,7 +100,13 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 _unlink_silent(tmp_path)
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
-                return _do_import_markdown(db_factory(), tmp_path, title, author)
+                return _do_import_markdown(
+                    db_factory(),
+                    tmp_path,
+                    title,
+                    author,
+                    _upload_title_stem(file.filename or ""),
+                )
             finally:
                 _unlink_silent(tmp_path)
 
@@ -204,6 +210,7 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         file_path: str | Path,
         form_title: str,
         author: str,
+        fallback_title: str = "",
     ) -> Any:
         return _import_outcome_response(
             import_markdown_file(
@@ -211,5 +218,9 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 file_path,
                 form_title=form_title,
                 author=author,
+                fallback_title=fallback_title,
             )
         )
+
+    def _upload_title_stem(filename: str) -> str:
+        return Path(filename.replace("\\", "/")).stem

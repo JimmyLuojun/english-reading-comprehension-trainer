@@ -361,6 +361,32 @@ def test_import_markdown_file_returns_book_id(monkeypatch, tmp_path: Path) -> No
     assert not outcome.is_error
 
 
+def test_import_markdown_file_uses_fallback_title_before_temp_stem(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    md_path = tmp_path / "tmp110d0ebd.md"
+    md_path.write_text("# Heading\n\nReadable sentence.", encoding="utf-8")
+    captured: dict[str, str] = {}
+
+    def fake_import_markdown_bytes(*args, **kwargs):
+        captured["title"] = kwargs["title"]
+        return SimpleNamespace(book_id=42)
+
+    monkeypatch.setattr(imports, "import_markdown_bytes", fake_import_markdown_bytes)
+
+    outcome = imports.import_markdown_file(
+        object(),
+        md_path,
+        form_title="",
+        author="",
+        fallback_title="Logic Rules Summary",
+    )
+
+    assert outcome.book_id == 42
+    assert captured["title"] == "Logic Rules Summary"
+
+
 def test_import_markdown_file_maps_duplicate_to_existing_book(
     monkeypatch,
     tmp_path: Path,

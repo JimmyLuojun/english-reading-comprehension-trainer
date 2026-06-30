@@ -49,7 +49,16 @@ def test_chapter_labels_and_primary_read_idx() -> None:
     assert _section_label(chapter) == "Chapter 2: Methods"
     assert _section_label(appendix) == "Appendix A: Data"
     assert _strip_section_ordinal("Chapter 10 - Title") == "Title"
+    assert _strip_section_ordinal("Chapter 1") == ""
     assert _strip_section_ordinal("Chapter One: A New Way") == "A New Way"
+    assert _section_label(
+        {
+            "idx": 1,
+            "title": "Chapter 1",
+            "section_kind": "chapter",
+            "chapter_number": None,
+        }
+    ) == "Chapter 1"
     assert _section_label(
         {
             "idx": 1,

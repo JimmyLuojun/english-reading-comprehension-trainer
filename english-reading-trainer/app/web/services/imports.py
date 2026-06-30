@@ -328,6 +328,7 @@ def import_markdown_file(
     *,
     form_title: str,
     author: str,
+    fallback_title: str = "",
 ) -> ImportOutcome:
     """Import a Markdown file and return a routing-neutral outcome."""
     path = Path(file_path)
@@ -336,7 +337,7 @@ def import_markdown_file(
         result = import_markdown_bytes(
             db,
             raw,
-            title=form_title.strip() or path.stem,
+            title=form_title.strip() or fallback_title.strip() or path.stem,
             author=author.strip(),
         )
     except DuplicateBookError:
