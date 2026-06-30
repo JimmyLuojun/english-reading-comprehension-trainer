@@ -434,11 +434,35 @@ class TestSaveSentenceTranslation:
         assert card["archived_at"] is not None
         assert card["user_translation"] == "恢复译文"
 
-    def test_empty_translation_raises(self, db: DatabaseConnection) -> None:
+    def test_empty_translation_without_card_is_noop(
+        self, db: DatabaseConnection
+    ) -> None:
         sid = _seed_sentence(db)
 
-        with pytest.raises(ValueError, match="user_translation"):
-            save_sentence_translation(db, sid, "   ")
+        card_id = save_sentence_translation(db, sid, "   ")
+
+        assert card_id is None
+        assert get_sentence_card_by_sentence(db, sid) is None
+
+    def test_empty_translation_clears_existing_translation(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = save_sentence_translation(db, sid, "旧译文")
+
+        cleared_id = save_sentence_translation(db, sid, "   ")
+
+        assert cleared_id == card_id
+        with db.get_connection() as conn:
+            card = conn.execute(
+                """SELECT user_translation, translation_created_at, archived_at
+                     FROM sentence_cards
+                    WHERE id = ?""",
+                (card_id,),
+            ).fetchone()
+        assert card["user_translation"] is None
+        assert card["translation_created_at"] is None
+        assert card["archived_at"] is not None
 
     def test_invalid_sentence_id_raises(self, db: DatabaseConnection) -> None:
         with pytest.raises(ValueError, match="not found"):
@@ -503,7 +527,7 @@ class TestDeleteSentenceTranslation:
         assert card["translation_created_at"] is None
         assert card["archived_at"] is not None
 
-    def test_deleting_active_translation_archives_review_card_and_clears_analysis(
+    def test_deleting_active_translation_preserves_review_card_and_stale_analysis(
         self, db: DatabaseConnection
     ) -> None:
         sid = _seed_sentence(db)
@@ -530,7 +554,7 @@ class TestDeleteSentenceTranslation:
 
         delete_sentence_translation(db, sid)
 
-        assert get_sentence_card(db, card_id) is None
+        assert get_sentence_card(db, card_id) is not None
         with db.get_connection() as conn:
             card = conn.execute(
                 """SELECT archived_at, user_translation, translation_created_at,
@@ -543,10 +567,10 @@ class TestDeleteSentenceTranslation:
                 "SELECT COUNT(*) FROM sentence_card_errors WHERE card_id = ?",
                 (card_id,),
             ).fetchone()[0]
-        assert card["archived_at"] is not None
+        assert card["archived_at"] is None
         assert card["user_translation"] is None
         assert card["translation_created_at"] is None
-        assert card["ai_analysis_id"] is None
+        assert card["ai_analysis_id"] == cache_id
         assert error_count == 0
 
     def test_missing_translation_raises(self, db: DatabaseConnection) -> None:

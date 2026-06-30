@@ -315,7 +315,7 @@ class TestListWordCards:
         self, db: DatabaseConnection
     ) -> None:
         sid = _seed_sentence(db, "source-metadata")
-        create_or_update_word_card(db, sid, "ephemeral")
+        create_or_update_word_card(db, sid, "sentence")
 
         card = list_word_cards(db)[0]
 
@@ -326,6 +326,19 @@ class TestListWordCards:
         assert (
             card["source_href"]
             == f"/read/{card['source_book_id']}?chapter=1#sentence-{sid}"
+        )
+
+    def test_source_metadata_opens_word_panel_when_surface_not_in_sentence(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "source-metadata-missing")
+        card_id, _ = create_or_update_word_card(db, sid, "incantation")
+
+        card = list_word_cards(db)[0]
+
+        assert (
+            card["source_href"]
+            == f"/read/{card['source_book_id']}?chapter=1&word_card={card_id}#sentence-{sid}"
         )
 
     def test_first_book_title_none_when_sentence_missing(

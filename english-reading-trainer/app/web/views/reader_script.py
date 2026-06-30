@@ -19,7 +19,6 @@ def _fragment_refs_and_state() -> str:
       const translationOpen = document.getElementById("toolbar-translation-open");
       const structureOpen = document.getElementById("toolbar-structure-open");
       const externalPrompt = document.getElementById("toolbar-external-prompt");
-      const translationDelete = document.getElementById("toolbar-translation-delete");
       const analysisOpen = document.getElementById("toolbar-analysis-open");
       const translationForm = document.getElementById("toolbar-translation-form");
       const translationValue = document.getElementById("toolbar-translation-value");
@@ -442,7 +441,7 @@ def _fragment_toolbar_selection() -> str:
         const sentenceId = activeSentenceId;
         const value = translationText.value.trim();
         const lastSavedValue = lastSavedTranslation;
-        if (!value || value === lastSavedValue) return;
+        if (value === lastSavedValue) return;
         setToolbarStatus(translationStatus, "Auto saving...");
         translationAutoSaveTimer = window.setTimeout(() => {
           translationAutoSaveTimer = null;
@@ -466,7 +465,6 @@ def _fragment_toolbar_selection() -> str:
 
       function sendPendingToolbarSave(url, fieldName, value) {
         const text = String(value || "").trim();
-        if (!text) return;
         const body = new URLSearchParams({ [fieldName]: text, return_to: returnTo }).toString();
         if (navigator.sendBeacon && navigator.sendBeacon(url, body)) return;
         fetch(url, {
@@ -494,7 +492,7 @@ def _fragment_toolbar_selection() -> str:
         clearPanelAutoSaveTimers();
         if (translationEditorOpen && translationEditorDirty && activeSentenceId) {
           const value = translationText.value.trim();
-          if (value && value !== lastSavedTranslation) {
+          if (value !== lastSavedTranslation) {
             sendPendingToolbarSave(
               `/mark/sentence/${activeSentenceId}/translation`,
               "user_translation",
@@ -524,7 +522,7 @@ def _fragment_toolbar_selection() -> str:
         }
         if (panelTranslationDirty && activeAnalysisSentenceId && sentencePanelTranslation) {
           const value = (sentencePanelTranslation.value || "").trim();
-          if (value && value !== lastSavedPanelTranslation) {
+          if (value !== lastSavedPanelTranslation) {
             sendPendingToolbarSave(
               `/mark/sentence/${activeAnalysisSentenceId}/translation`,
               "user_translation",
@@ -724,7 +722,6 @@ def _fragment_toolbar_selection() -> str:
         sentenceDelete.hidden = sentence.dataset.marked !== "1";
         translationOpen.hidden = false;
         structureOpen.hidden = false;
-        translationDelete.hidden = !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
@@ -983,7 +980,6 @@ def _fragment_toolbar_selection() -> str:
       function setToolbarStatus(statusElement, message) {
         if (!statusElement) return;
         statusElement.textContent = message;
-        scheduleToolbarReposition();
       }
 
       function showToolbar(range) {
@@ -1009,9 +1005,10 @@ def _fragment_toolbar_selection() -> str:
         return sentence?.dataset.analysisId ? "Open analysis panel" : "AI analysis";
       }
 
-      function markSentenceTranslated(sentence, translation) {
+      function updateSentenceTranslation(sentence, translation) {
         if (!sentence) return;
-        sentence.dataset.translation = translation;
+        const cleanTranslation = translation || "";
+        sentence.dataset.translation = cleanTranslation;
         if (sentence.dataset.analysisId) {
           sentence.dataset.analysisStale = "1";
           sentence.classList.remove("analyzed");
@@ -1021,18 +1018,17 @@ def _fragment_toolbar_selection() -> str:
           sentence.dataset.analysisStale = "0";
           sentence.classList.remove("analyzed", "analyzed-stale");
         }
-        sentence.classList.add("translated");
-        sentence.title = "Translation saved";
+        if (cleanTranslation) {
+          sentence.classList.add("translated");
+          sentence.title = "Translation saved";
+        } else {
+          sentence.classList.remove("translated");
+          sentence.removeAttribute("title");
+        }
       }
 
       function clearSentenceTranslation(sentence) {
-        if (!sentence) return;
-        sentence.dataset.translation = "";
-        sentence.dataset.marked = "0";
-        sentence.dataset.analysisId = "";
-        sentence.dataset.analysisStale = "0";
-        sentence.classList.remove("translated", "marked", "analyzed", "analyzed-stale");
-        sentence.removeAttribute("title");
+        updateSentenceTranslation(sentence, "");
       }
 
       function updateSentenceNote(sentenceId, note) {
@@ -1278,7 +1274,6 @@ def _fragment_toolbar_selection() -> str:
         sentenceDelete.hidden = sentence.dataset.marked !== "1";
         translationOpen.hidden = false;
         structureOpen.hidden = false;
-        translationDelete.hidden = !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
@@ -1564,7 +1559,6 @@ def _fragment_toolbar_selection() -> str:
         sentenceDelete.hidden = !wholeSentence || !markedSentence;
         translationOpen.hidden = !wholeSentence;
         structureOpen.hidden = !wholeSentence;
-        translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;
         analysisOpen.hidden = false;
         translationOpen.textContent = activeSentenceTranslation ? "Update translation" : "Write translation";
         structureOpen.textContent = activeSentenceStructure ? "Update structure" : "Write structure";
@@ -1898,7 +1892,7 @@ def _fragment_reader_progress_and_actions() -> str:
           return;
         }
         const afterCursor = value.slice(pos, lineEndActual);
-        if (!afterCursor.trim() && currentLine.trimEnd().endsWith("：")) {
+        if (!afterCursor.trim() && /[:：]$/.test(currentLine.trimEnd())) {
           event.preventDefault();
           const indentMatch = currentLine.match(/^(\s*)/);
           const indent = indentMatch ? indentMatch[1] : "";
@@ -1922,12 +1916,6 @@ def _fragment_reader_progress_and_actions() -> str:
           ? String(options.lastSavedValue || "").trim()
           : lastSavedTranslation;
         const isCurrentEditor = () => sentenceId === activeSentenceId && translationEditorOpen;
-        if (!value) {
-          if (!automatic) {
-            setToolbarStatus(translationStatus, "Enter a translation first, or use AI analysis without saving.");
-          }
-          return true;
-        }
         if (value === lastSavedValue) {
           if (isCurrentEditor()) translationEditorDirty = false;
           if (!automatic) setToolbarStatus(translationStatus, "Saved");
@@ -1950,14 +1938,13 @@ def _fragment_reader_progress_and_actions() -> str:
             return false;
           }
           const sentence = document.getElementById(`sentence-${sentenceId}`);
-          markSentenceTranslated(sentence, value);
+          updateSentenceTranslation(sentence, value);
           if (isCurrentEditor()) {
             activeSentenceTranslation = value;
             lastSavedTranslation = value;
             translationEditorDirty = false;
-            translationDelete.hidden = false;
-            translationOpen.textContent = "Update translation";
-            analysisOpen.textContent = "Check translation";
+            translationOpen.textContent = value ? "Update translation" : "Write translation";
+            analysisOpen.textContent = analysisButtonLabel(sentence);
             setToolbarStatus(translationStatus, automatic ? "Auto saved" : "Saved");
           }
           if (!keepOpen) {
@@ -2052,30 +2039,6 @@ def _fragment_reader_progress_and_actions() -> str:
         }
       }
 
-      async function deleteTranslationInPlace() {
-        if (!activeSentenceId) return;
-        const sentenceId = activeSentenceId;
-        const anchor = captureReadingAnchor(translationDelete);
-        readerToolbarBusy = true;
-        try {
-          const url = `/mark/sentence/${sentenceId}/translation?return_to=${encodeURIComponent(returnTo)}`;
-          const response = await fetch(url, { method: "DELETE" });
-          if (!response.ok) {
-            window.location.assign(response.url || returnTo);
-            return;
-          }
-          const sentence = document.getElementById(`sentence-${sentenceId}`);
-          clearSentenceTranslation(sentence);
-          activeSentenceTranslation = "";
-          window.getSelection()?.removeAllRanges();
-          hideToolbar();
-          restoreReadingAnchor(anchor);
-        } catch {
-          window.location.assign(returnTo);
-        } finally {
-          readerToolbarBusy = false;
-        }
-      }
 """
 
 def _fragment_analysis_panel_rendering() -> str:
@@ -2086,8 +2049,8 @@ def _fragment_analysis_panel_rendering() -> str:
         if (wordPronunciation) {
           wordPronunciation.hidden = true;
           wordPronunciation.dataset.speakText = "";
-        if (analysisExternalSection) analysisExternalSection.hidden = false;
         }
+        if (analysisExternalSection) analysisExternalSection.hidden = false;
         if (sentenceSections) sentenceSections.hidden = false;
         if (wordSections) wordSections.hidden = true;
         if (panelUnmark) panelUnmark.hidden = false;
@@ -2096,12 +2059,13 @@ def _fragment_analysis_panel_rendering() -> str:
       function setWordMode() {
         panelMode = "word";
         if (panelKicker) panelKicker.textContent = "Word analysis";
-        if (analysisExternalSection) analysisExternalSection.hidden = true;
         if (panelTitle) panelTitle.textContent = "Word Analysis";
+        if (analysisExternalSection) analysisExternalSection.hidden = true;
         if (sentenceSections) sentenceSections.hidden = true;
         if (wordSections) wordSections.hidden = false;
         if (panelUnmark) panelUnmark.hidden = true;
       }
+
       function clearExternalResultBox() {
         if (analysisExternalResult) analysisExternalResult.value = "";
         if (analysisExternalStatus) analysisExternalStatus.textContent = "";
@@ -2112,7 +2076,6 @@ def _fragment_analysis_panel_rendering() -> str:
         if (analysisExternalSection) analysisExternalSection.hidden = false;
         if (analysisExternalStatus) analysisExternalStatus.textContent = status;
       }
-
 
       function updatePreviousAnalysisButton() {
         if (!panelPrevious) return;
@@ -2227,8 +2190,8 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelTab) panelTab.hidden = false;
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
-        activeExternalPromptSentenceId = null;
         activeAnalysisSourceSentenceId = null;
+        activeExternalPromptSentenceId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
@@ -2251,10 +2214,10 @@ def _fragment_analysis_panel_rendering() -> str:
         panelStatus.textContent = "Select a sentence or marked word, then choose AI analysis.";
         panelMeta.textContent = "";
         panelRetry.hidden = true;
+        if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
-        if (panelRetryPro) panelRetryPro.hidden = true;
         simplified.textContent = "";
         gloss.textContent = "";
         skeleton.textContent = "";
@@ -2273,16 +2236,16 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function setPanelLoading(message) {
         setSentenceMode();
-        prepareExternalResultBox(sentenceId);
         openPanel();
+        prepareExternalResultBox(activeAnalysisSentenceId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message;
         panelMeta.textContent = "";
         panelRetry.hidden = true;
+        if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
-        if (panelRetryPro) panelRetryPro.hidden = true;
         simplified.textContent = "";
         gloss.textContent = "";
         skeleton.textContent = "";
@@ -3253,8 +3216,8 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisSentenceId = sentenceId;
         activeAnalysisSourceSentenceId = sentenceId;
         setSentenceMode();
-        prepareExternalResultBox(activeAnalysisSentenceId);
         openPanel();
+        prepareExternalResultBox(activeAnalysisSentenceId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message || "";
         panelMeta.textContent = "";
@@ -3496,13 +3459,16 @@ def _fragment_analysis_requests_and_evidence() -> str:
         sentence.dataset.marked = "1";
         sentence.dataset.analysisId = payload.cache_id || "";
         sentence.dataset.analysisStale = payload.is_stale ? "1" : "0";
-        sentence.dataset.translation = payload.user_translation || sentence.dataset.translation || "";
+        sentence.dataset.translation = payload.user_translation || "";
         sentence.dataset.structure = payload.user_structure || sentence.dataset.structure || "";
         sentence.dataset.note = payload.user_note || sentence.dataset.note || "";
         sentence.classList.add("marked");
         if (sentence.dataset.translation.trim()) {
           sentence.classList.add("translated");
           sentence.title = "Translation saved";
+        } else {
+          sentence.classList.remove("translated");
+          sentence.removeAttribute("title");
         }
         sentence.classList.remove("analyzed", "analyzed-stale");
         sentence.classList.add(payload.is_stale ? "analyzed-stale" : "analyzed");
@@ -3616,7 +3582,7 @@ def _fragment_analysis_requests_and_evidence() -> str:
         }
         if (!activeAnalysisSentenceId || !sentencePanelTranslation) return;
         const value = (sentencePanelTranslation.value || "").trim();
-        if (!value || value === lastSavedPanelTranslation) return;
+        if (value === lastSavedPanelTranslation) return;
         if (sentencePanelTranslationStatus) sentencePanelTranslationStatus.textContent = "Auto saving...";
         panelTranslationAutoSaveTimer = window.setTimeout(() => {
           panelTranslationAutoSaveTimer = null;
@@ -3660,12 +3626,6 @@ def _fragment_analysis_requests_and_evidence() -> str:
         const sentenceId = activeAnalysisSentenceId;
         const value = (sentencePanelTranslation?.value || "").trim();
         if (!sentenceId) return true;
-        if (!value) {
-          if (!automatic && sentencePanelTranslationStatus) {
-            sentencePanelTranslationStatus.textContent = "Enter a translation first.";
-          }
-          return true;
-        }
         if (value === lastSavedPanelTranslation) {
           panelTranslationDirty = false;
           if (!automatic && sentencePanelTranslationStatus) {
@@ -3682,7 +3642,7 @@ def _fragment_analysis_requests_and_evidence() -> str:
             body: body.toString(),
           });
           if (!response.ok) throw new Error("Save failed");
-          markSentenceTranslated(document.getElementById(`sentence-${sentenceId}`), value);
+          updateSentenceTranslation(document.getElementById(`sentence-${sentenceId}`), value);
           activeSentenceTranslation = value;
           lastSavedPanelTranslation = value;
           panelTranslationDirty = false;
@@ -4062,7 +4022,6 @@ def _fragment_bootstrap() -> str:
         translationEditorDirty = true;
         scheduleTranslationAutoSave();
       });
-      translationDelete.addEventListener("click", deleteTranslationInPlace);
       translationAnalyze.addEventListener("click", () => {
         clearTranslationAutoSaveTimer();
         const sentenceId = activeSentenceId;
@@ -4209,7 +4168,7 @@ def _fragment_bootstrap() -> str:
         const markButton = target?.closest("[data-analysis-mark]");
         if (markButton && analysisWordForm.contains(markButton)) {
           return {
-            analyzeAfter: false,
+            analyzeAfter: true,
             lexicalType: markButton.dataset.analysisMark || "word",
           };
         }

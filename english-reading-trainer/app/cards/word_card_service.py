@@ -102,8 +102,14 @@ def _sync_occurrence_count_conn(conn: Any, card_id: int) -> None:
     )
 
 
-def _href(book_id: int, chapter_idx: int, sentence_id: int, card_id: int, analyzed: bool) -> str:
-    word_param = f"&word_card={card_id}" if analyzed else ""
+def _href(
+    book_id: int,
+    chapter_idx: int,
+    sentence_id: int,
+    card_id: int,
+    open_word_card: bool,
+) -> str:
+    word_param = f"&word_card={card_id}" if open_word_card else ""
     return f"/read/{book_id}?chapter={chapter_idx}{word_param}#sentence-{sentence_id}"
 
 
@@ -269,6 +275,7 @@ def list_word_cards(
                       CASE
                         WHEN s.id IS NULL OR c.idx IS NULL THEN ''
                         WHEN wc.ai_analysis_id IS NOT NULL
+                          OR instr(lower(COALESCE(s.text, '')), lower(wc.surface_form)) = 0
                           THEN '/read/' || s.book_id || '?chapter=' || c.idx || '&word_card=' || wc.id || '#sentence-' || s.id
                         ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
                       END AS source_href,
@@ -303,6 +310,7 @@ def list_word_card_sources(
                       s.text AS sentence_text,
                       CASE
                         WHEN wc.ai_analysis_id IS NOT NULL
+                          OR instr(lower(COALESCE(s.text, '')), lower(wc.surface_form)) = 0
                           THEN '/read/' || s.book_id || '?chapter=' || c.idx || '&word_card=' || wc.id || '#sentence-' || s.id
                         ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
                       END AS source_href

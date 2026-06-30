@@ -21,6 +21,7 @@ from app.web.services.imports import (
     import_epub_file,
     import_pdf_file,
     import_text_bytes,
+    import_url_content,
 )
 from app.web.utils import _format_mb
 from app.web.views import (
@@ -118,6 +119,23 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             import_text_bytes(
                 db_factory(),
                 raw,
+                form_title=title,
+                author=author,
+            )
+        )
+
+    @web_app.post("/import/url")
+    async def import_url(request: Request) -> Any:
+        form = await _read_form(request)
+        url = form.get("url", "")
+        title = form.get("title", "")
+        author = form.get("author", "")
+        if not url.strip():
+            return _error_page("URL is empty.", status_code=400)
+        return _import_outcome_response(
+            import_url_content(
+                db_factory(),
+                url,
                 form_title=title,
                 author=author,
             )

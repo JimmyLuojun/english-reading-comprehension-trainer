@@ -777,7 +777,40 @@ def test_analysis_panel_mark_phrase_keeps_current_analysis(
     reader_url: str,
     db: DatabaseConnection,
 ) -> None:
+    word_analysis_requests: list[dict[str, list[str]]] = []
+
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        word_analysis_requests.append(parse_qs(route.request.post_data or ""))
+        card_id = int(route.request.url.rstrip("/").rsplit("/", 1)[-1])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": card_id,
+                "sentence_id": 1,
+                "lemma": "feline",
+                "surface_form": "feline",
+                "lexical_type": "phrase",
+                "analysis": {
+                    "meaning_in_context": "catlike animal",
+                    "chinese_meaning": "猫科动物",
+                    "register": "neutral",
+                    "why_this_word": "It names the animal precisely.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "felis", "family": ["feline"]},
+                    "predicted_error_types": ["L01"],
+                },
+                "prompt_version": "v2",
+                "active_prompt_version": "v2",
+                "model": "test",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
     for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
         page.locator("[data-sentence-id]").first.click()
         page.wait_for_function('!document.getElementById("analysis-panel").hidden')
         before_url = page.url
@@ -797,13 +830,15 @@ def test_analysis_panel_mark_phrase_keeps_current_analysis(
         page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
         page.locator('[data-analysis-mark="phrase"]').click()
         page.wait_for_function(
-            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+            'document.getElementById("analysis-word-meaning").textContent === "catlike animal"'
         )
         state = page.evaluate(
             """() => ({
               url: window.location.href,
               panelHidden: document.getElementById("analysis-panel").hidden,
               simplified: document.getElementById("analysis-simplified").textContent,
+              wordSectionsHidden: document.getElementById("analysis-word-sections").hidden,
+              previousHidden: document.getElementById("analysis-panel-previous").hidden,
               highlighted: Boolean(document.querySelector("#analysis-simplified .glossary-word")),
             })"""
         )
@@ -818,26 +853,61 @@ def test_analysis_panel_mark_phrase_keeps_current_analysis(
         "url": before_url,
         "panelHidden": False,
         "simplified": "The feline rested.",
+        "wordSectionsHidden": False,
+        "previousHidden": False,
         "highlighted": True,
     }
+    assert word_analysis_requests[0]["context_text"] == ["The feline rested."]
     assert row is not None
     assert row["lexical_type"] == "phrase"
 
 
-def test_analysis_panel_new_selection_survives_previous_saved_hide_timer(
+def test_analysis_panel_new_selection_survives_previous_word_analysis(
     browser: Browser,
     reader_url: str,
     db: DatabaseConnection,
 ) -> None:
+    def fulfill_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        card_id = int(route.request.url.rstrip("/").rsplit("/", 1)[-1])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": card_id,
+                "sentence_id": 1,
+                "lemma": "selection",
+                "surface_form": "selection",
+                "lexical_type": "word",
+                "analysis": {
+                    "meaning_in_context": "selected text",
+                    "chinese_meaning": "选中文本",
+                    "register": "neutral",
+                    "why_this_word": "It is the current selection.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "", "family": []},
+                    "predicted_error_types": [],
+                },
+                "prompt_version": "v2",
+                "active_prompt_version": "v2",
+                "model": "test",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
     for page in _new_page(browser, reader_url):
+        page.route("**/analysis/word/*", fulfill_word_analysis)
         page.locator("[data-sentence-id]").first.click()
         page.wait_for_function('!document.getElementById("analysis-panel").hidden')
         _select_analysis_text(page, "#analysis-simplified", "feline")
         page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
         page.locator('[data-analysis-mark="phrase"]').click()
         page.wait_for_function(
-            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+            '!document.getElementById("analysis-word-sections").hidden'
         )
+        page.locator("#analysis-panel-previous").click()
+        page.wait_for_function('!document.getElementById("analysis-sentence-sections").hidden')
 
         _select_analysis_text(page, "#analysis-simplified", "rested")
         page.wait_for_timeout(800)
@@ -853,7 +923,7 @@ def test_analysis_panel_new_selection_survives_previous_saved_hide_timer(
         )
         page.locator('[data-analysis-mark="collocation"]').click()
         page.wait_for_function(
-            'document.getElementById("toolbar-analysis-word-status").textContent === "Saved"'
+            '!document.getElementById("analysis-word-sections").hidden'
         )
 
     with db.get_connection() as conn:

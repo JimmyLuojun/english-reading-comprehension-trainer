@@ -388,7 +388,7 @@ def _css() -> str:
       flex-wrap: wrap;
       align-items: center;
       box-sizing: border-box;
-      max-width: min(calc(100vw - 16px), 520px);
+      max-width: min(calc(100vw - 16px), 760px);
       padding: 8px;
       border-radius: var(--radius);
       background: #111827;
@@ -403,6 +403,9 @@ def _css() -> str:
       flex-wrap: wrap;
       max-width: 100%;
     }
+    #toolbar-sentence-form {
+      flex-wrap: nowrap;
+    }
     .toolbar-group[hidden] { display: none; }
     .selection-toolbar button {
       border-color: #374151;
@@ -411,19 +414,36 @@ def _css() -> str:
       max-width: 100%;
       white-space: normal;
     }
+    #toolbar-sentence-form button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
     .selection-toolbar button.danger {
       border-color: #fecaca;
       color: #991b1b;
     }
+    .selection-toolbar button:disabled {
+      border-color: #d1d5db;
+      background: #e5e7eb;
+      color: #9ca3af;
+      cursor: not-allowed;
+    }
+    .selection-toolbar button.danger:disabled {
+      border-color: #d1d5db;
+      color: #9ca3af;
+    }
     .toolbar-status {
       flex: 1 0 100%;
       box-sizing: border-box;
-      min-height: 28px;
+      height: 28px;
+      margin: 0;
       padding: 5px 4px;
       color: #e5e7eb;
       font-size: 14px;
       line-height: 18px;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     #toolbar-analysis-word-status {
       flex-basis: 100%;
@@ -494,6 +514,20 @@ def _css() -> str:
       gap: 6px;
       justify-content: flex-end;
       flex-wrap: wrap;
+    }
+    /* While a translation/structure editor is open, stack the toolbar as a
+       stable vertical column: action buttons on top, the editor below. The
+       toolbar shrink-wraps to the editor's own width, so the button row no
+       longer wraps awkwardly and the popover stops being stretched wide with
+       right/bottom whitespace. The standalone "AI analysis" button is dropped
+       from this flow (the editor carries its own "Save and AI analyze/check"
+       action), so it no longer floats to the right-middle of the textarea. */
+    .selection-toolbar:has(.translation-editor:not([hidden])) {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .selection-toolbar:has(.translation-editor:not([hidden])) #toolbar-analysis-open {
+      display: none;
     }
     .analysis-panel {
       --analysis-panel-padding: 18px;
@@ -1126,6 +1160,9 @@ def _css() -> str:
         bottom: 10px;
         top: auto !important;
         max-width: none;
+      }
+      #toolbar-sentence-form {
+        flex-wrap: wrap;
       }
       .translation-editor {
         width: 100%;

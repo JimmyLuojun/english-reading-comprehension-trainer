@@ -7,12 +7,20 @@ from pathlib import Path
 import pytest
 
 from app.db_connection import DatabaseConnection
-from app.importers.pdf_importer import calculate_pdf_file_hash, import_pdf
+from app.importers.pdf_importer import (
+    PdfWordLine,
+    _is_nonprose_line,
+    calculate_pdf_file_hash,
+    import_pdf,
+)
 from app.importers.txt_importer import DuplicateBookError
 from tests.importers.pdf_builder import (
     make_chapter_heading_pdf,
     make_empty_pdf,
+    make_logic_proof_pdf,
+    make_margin_decoration_pdf,
     make_nonprose_text_pdf,
+    make_outline_chapter_pdf,
     make_text_pdf,
     make_vector_figure_pdf,
 )
@@ -218,6 +226,52 @@ def test_import_pdf_detects_part_and_chapter_headings(
     assert "Chapter One" not in text
 
 
+def test_import_pdf_prefers_outline_boundaries_over_toc_text(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> None:
+    pdf_path = make_outline_chapter_pdf(tmp_path)
+
+    result = import_pdf(db, pdf_path)
+
+    assert result.chapter_count == 2
+    with db.get_connection() as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT title, section_kind, chapter_number
+                     FROM chapters
+                    WHERE book_id = ?
+                    ORDER BY idx""",
+                (result.book_id,),
+            ).fetchall()
+        ]
+
+    assert rows == [
+        {
+            "title": "Frontmatter",
+            "section_kind": "frontmatter",
+            "chapter_number": None,
+        },
+        {
+            "title": "Chapter 1: Real Beginning",
+            "section_kind": "chapter",
+            "chapter_number": 1,
+        },
+        {
+            "title": "Chapter 2: Second Topic",
+            "section_kind": "chapter",
+            "chapter_number": 2,
+        },
+        {
+            "title": "Answers to Selected Exercises",
+            "section_kind": "backmatter",
+            "chapter_number": None,
+        },
+    ]
+    assert all("Fake TOC Entry" not in row["title"] for row in rows)
+
+
 def test_import_pdf_preserves_vector_figure_and_deduplicates_labels(
     db: DatabaseConnection,
     tmp_path: Path,
@@ -293,6 +347,85 @@ def test_import_pdf_renders_math_and_code_regions_without_sentence_pollution(
         assert (tmp_path / "assets" / figure["storage_path"]).read_bytes().startswith(
             b"\x89PNG\r\n\x1a\n"
         )
+
+
+def test_import_pdf_renders_numbered_logic_proof_as_single_figure(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> None:
+    pdf_path = make_logic_proof_pdf(tmp_path)
+
+    result = import_pdf(db, pdf_path, title="Logic Proof")
+
+    assert result.paragraph_count == 2
+    assert result.sentence_count == 2
+    sentences = " ".join(_sentences_for_book(db, result.book_id))
+    assert "Before the proof sentence remains readable" in sentences
+    assert "After the proof sentence remains readable" in sentences
+    assert "invalid-line 2 must assert the antecedent" not in sentences
+    with db.get_connection() as conn:
+        blocks = conn.execute(
+            """SELECT cb.kind, cb.paragraph_id, cb.asset_id,
+                      ba.media_type, ba.storage_path, ba.byte_size
+                 FROM chapter_blocks cb
+                 LEFT JOIN book_assets ba ON ba.id = cb.asset_id
+                WHERE cb.book_id = ?
+                ORDER BY cb.idx""",
+            (result.book_id,),
+        ).fetchall()
+
+    assert [row["kind"] for row in blocks] == ["prose", "figure", "prose"]
+    figure = blocks[1]
+    assert figure["paragraph_id"] is None
+    assert figure["asset_id"] is not None
+    assert figure["media_type"] == "image/png"
+    assert figure["byte_size"] > 0
+    assert (tmp_path / "assets" / figure["storage_path"]).read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+
+
+def test_import_pdf_skips_margin_decoration_figures(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> None:
+    pdf_path = make_margin_decoration_pdf(tmp_path)
+
+    result = import_pdf(db, pdf_path, title="Margin Decoration")
+
+    assert result.sentence_count == 1
+    sentences = " ".join(_sentences_for_book(db, result.book_id))
+    assert "body sentence beside the margin art remains readable" in sentences
+    assert "7" not in sentences
+    with db.get_connection() as conn:
+        figure_count = conn.execute(
+            "SELECT COUNT(*) FROM chapter_blocks WHERE book_id = ? AND kind = 'figure'",
+            (result.book_id,),
+        ).fetchone()[0]
+        asset_count = conn.execute(
+            "SELECT COUNT(*) FROM book_assets WHERE book_id = ?",
+            (result.book_id,),
+        ).fetchone()[0]
+
+    assert figure_count == 0
+    assert asset_count == 0
+
+
+def test_inline_math_prose_line_is_not_nonprose() -> None:
+    line = PdfWordLine(
+        page_number=1,
+        x0=72.0,
+        top=120.0,
+        x1=520.0,
+        bottom=132.0,
+        text="ing ~ ( A B ) and ~ ( E F ) -> ( C -> D ), in place of p and q",
+        words=(
+            {"fontname": "MinionPro-Regular", "size": 10.5},
+            {"fontname": "MathematicalPiLTStd", "size": 10.5},
+        ),
+    )
+
+    assert _is_nonprose_line(line) is False
 
 
 def test_import_pdf_duplicate_raises_duplicate_book_error(

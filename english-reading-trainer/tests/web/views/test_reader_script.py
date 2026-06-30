@@ -111,7 +111,7 @@ def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
     assert "if (toolbar.hidden || (!translationEditorOpen && !structureEditorOpen)) return;" in position_toolbar
     assert "positionToolbar(sentence.getBoundingClientRect());" in position_toolbar
     assert "statusElement.textContent = message;" in position_toolbar
-    assert "scheduleToolbarReposition();" in position_toolbar
+    assert "statusElement.textContent = message;\n      }" in position_toolbar
 
 
 def test_analysis_selection_toolbar_reenables_buttons_when_shown() -> None:
@@ -167,6 +167,21 @@ def test_sentence_deep_link_opens_analysis_panel_without_auto_ai() -> None:
     assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in opener
     assert 'renderSentenceStudyPanel(sentence, "No saved AI analysis yet.");' in opener
     assert "openInitialSentenceAnalysis();" in boot
+
+
+def test_saved_sentence_analysis_loading_uses_active_sentence_id() -> None:
+    script = _selection_script()
+    loading = script[script.index("function setPanelLoading(message)"):]
+    loading = loading[: loading.index("function setPanelLoadingWord")]
+    load_saved = script[script.index("async function loadSavedAnalysis"):]
+    load_saved = load_saved[: load_saved.index("async function requestAnalysis")]
+
+    assert "activeAnalysisSentenceId = sentenceId;" in load_saved
+    assert load_saved.index("activeAnalysisSentenceId = sentenceId;") < load_saved.index(
+        'setPanelLoading("Loading analysis...");'
+    )
+    assert "prepareExternalResultBox(activeAnalysisSentenceId);" in loading
+    assert "prepareExternalResultBox(sentenceId);" not in loading
 
 
 def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> None:
@@ -733,6 +748,8 @@ def test_analysis_toolbar_actions_run_on_single_click_only() -> None:
     assert 'target?.closest("[data-analysis-analyze]")' in action_helper
     assert "analysisWordForm.contains(markButton)" in action_helper
     assert "analysisWordForm.contains(analyzeButton)" in action_helper
+    assert "analyzeAfter: true" in action_helper
+    assert "analyzeAfter: false" not in action_helper
 
     assert 'analysisWordForm.addEventListener("submit"' not in script
     assert 'analysisWordForm.addEventListener("pointerdown"' not in script
@@ -826,7 +843,7 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     save_translation = script[script.index("async function saveTranslationOnly"):]
     save_translation = save_translation[: save_translation.index("function markSentenceStructured")]
     save_structure = script[script.index("async function saveStructureOnly"):]
-    save_structure = save_structure[: save_structure.index("async function deleteTranslationInPlace")]
+    save_structure = save_structure[: save_structure.index("function setSentenceMode")]
     listeners = script[script.index('translationCancel.addEventListener("click"'):]
     listeners = listeners[: listeners.index('analysisOpen.addEventListener("click"')]
     scroll_listener = script[script.index('window.addEventListener("scroll"'):]
@@ -874,7 +891,7 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
 def test_bare_structure_template_is_not_saved_or_analyzed() -> None:
     script = _selection_script()
     save_structure = script[script.index("async function saveStructureOnly"):]
-    save_structure = save_structure[: save_structure.index("async function deleteTranslationInPlace")]
+    save_structure = save_structure[: save_structure.index("function setSentenceMode")]
     schedule_structure = script[script.index("function scheduleStructureAutoSave"):]
     schedule_structure = schedule_structure[: schedule_structure.index("function sendPendingToolbarSave")]
     structure_analyze = script[script.index('structureAnalyze.addEventListener("click"'):]
@@ -1020,7 +1037,7 @@ def test_analysis_rendering_preserves_new_reader_toolbar_during_pending_ai() -> 
     mark_reader = script[script.index("async function markReaderSelection"):]
     mark_reader = mark_reader[: mark_reader.index("function updateToolbar")]
     save_translation = script[script.index("async function saveTranslationOnly"):]
-    save_translation = save_translation[: save_translation.index("async function deleteTranslationInPlace")]
+    save_translation = save_translation[: save_translation.index("function markSentenceStructured")]
 
     assert "let readerToolbarBusy = false;" in script
     assert "let toolbarInteractionSeq = 0;" in script
@@ -1103,44 +1120,39 @@ def test_translation_editor_repositions_after_expanding() -> None:
 def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> None:
     script = _selection_script()
     label_helper = script[script.index("function analysisButtonLabel"):]
-    label_helper = label_helper[: label_helper.index("function markSentenceTranslated")]
-    translated_helper = script[script.index("function markSentenceTranslated"):]
+    label_helper = label_helper[: label_helper.index("function updateSentenceTranslation")]
+    translated_helper = script[script.index("function updateSentenceTranslation"):]
     translated_helper = translated_helper[: translated_helper.index("function clearSentenceTranslation")]
     clear_translation = script[script.index("function clearSentenceTranslation"):]
     clear_translation = clear_translation[: clear_translation.index("function showWordDetail")]
     save_translation = script[script.index("async function saveTranslationOnly"):]
-    save_translation = save_translation[: save_translation.index("async function deleteTranslationInPlace")]
-    delete_translation = script[script.index("async function deleteTranslationInPlace"):]
-    delete_translation = delete_translation[: delete_translation.index("function setSentenceMode")]
+    save_translation = save_translation[: save_translation.index("function markSentenceStructured")]
     unmark_helper = script[script.index("function markSentenceSpanUnmarked"):]
     unmark_helper = unmark_helper[: unmark_helper.index("function markSentenceSpanMarked")]
     analysis_click = script[script.index('analysisOpen.addEventListener("click"'):]
     analysis_click = analysis_click[: analysis_click.index('crossSentenceDelete.addEventListener("click"')]
 
-    assert 'const translationDelete = document.getElementById("toolbar-translation-delete");' in script
+    assert "toolbar-translation-delete" not in script
+    assert "deleteTranslationInPlace" not in script
     assert '"Check translation"' in label_helper
-    assert 'sentence.dataset.translation = translation;' in translated_helper
+    assert 'const cleanTranslation = translation || "";' in translated_helper
+    assert "sentence.dataset.translation = cleanTranslation;" in translated_helper
     assert "if (sentence.dataset.analysisId)" in translated_helper
     assert 'sentence.dataset.analysisStale = "1";' in translated_helper
     assert 'sentence.classList.add("analyzed-stale");' in translated_helper
     assert 'sentence.dataset.analysisId = "";' in translated_helper
+    assert "if (cleanTranslation)" in translated_helper
     assert 'sentence.classList.add("translated");' in translated_helper
     assert 'sentence.classList.add("marked", "translated");' not in translated_helper
     assert 'sentence.classList.remove("analyzed", "analyzed-stale");' in translated_helper
     assert 'sentence.title = "Translation saved";' in translated_helper
-    assert 'sentence.dataset.translation = "";' in clear_translation
-    assert 'sentence.dataset.marked = "0";' in clear_translation
-    assert (
-        'sentence.classList.remove("translated", "marked", "analyzed", "analyzed-stale");'
-        in clear_translation
-    )
-    assert 'sentence.removeAttribute("title");' in clear_translation
-    assert "markSentenceTranslated(sentence, value);" in save_translation
-    assert 'fetch(url, { method: "DELETE" })' in delete_translation
-    assert "clearSentenceTranslation(sentence);" in delete_translation
-    assert 'translationDelete.hidden = !activeSentenceTranslation;' in script
-    assert 'translationDelete.hidden = !wholeSentence || !activeSentenceTranslation;' in script
-    assert 'translationDelete.addEventListener("click", deleteTranslationInPlace);' in script
+    assert 'sentence.classList.remove("translated");' in translated_helper
+    assert 'sentence.removeAttribute("title");' in translated_helper
+    assert 'updateSentenceTranslation(sentence, "");' in clear_translation
+    assert 'sentence.dataset.marked = "0";' not in clear_translation
+    assert "updateSentenceTranslation(sentence, value);" in save_translation
+    assert 'new URLSearchParams({ user_translation: value, return_to: returnTo })' in save_translation
+    assert "Enter a translation first, or use AI analysis without saving." not in script
     assert 'sentence.dataset.translation = "";' not in unmark_helper
     assert "const translation = activeSentenceTranslation || null;" in analysis_click
     assert "requestAnalysis(sentenceId, translation, {" in analysis_click
@@ -1149,7 +1161,7 @@ def test_saved_translation_does_not_mark_sentence_and_checks_translation() -> No
 
 def test_translation_update_preserves_analysis_id_as_stale() -> None:
     script = _selection_script()
-    translated_helper = script[script.index("function markSentenceTranslated"):]
+    translated_helper = script[script.index("function updateSentenceTranslation"):]
     translated_helper = translated_helper[: translated_helper.index("function clearSentenceTranslation")]
     save_panel_translation = script[script.index("async function savePanelTranslation"):]
     save_panel_translation = save_panel_translation[: save_panel_translation.index("async function savePanelNote")]
@@ -1456,6 +1468,26 @@ def test_structure_number_keydown_auto_start_after_section_header() -> None:
     assert "input" in result["dispatched"]
 
 
+def test_structure_number_keydown_auto_start_after_main_header() -> None:
+    value = "主干："
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "主干：\n1. "
+    assert result["pos"] == len("主干：\n1. ")
+    assert "input" in result["dispatched"]
+
+
+def test_structure_number_keydown_auto_start_after_halfwidth_colon_header() -> None:
+    value = "主干:"
+    result = _run_structure_number_keydown(value, len(value))
+
+    assert result["prevented"] is True
+    assert result["value"] == "主干:\n1. "
+    assert result["pos"] == len("主干:\n1. ")
+    assert "input" in result["dispatched"]
+
+
 def test_structure_number_keydown_auto_start_inside_template() -> None:
     # Cursor at end of "从句：" inside the full template.
     template = "主干：\n从句：\n修饰成分：\n指代逻辑："
@@ -1466,6 +1498,18 @@ def test_structure_number_keydown_auto_start_inside_template() -> None:
     expected = "主干：\n从句：\n1. \n修饰成分：\n指代逻辑："
     assert result["value"] == expected
     assert result["pos"] == template.index("从句：") + len("从句：\n1. ")
+
+
+def test_structure_number_keydown_auto_starts_main_header_inside_template() -> None:
+    # Cursor at end of "主干：" inside the full template.
+    template = "主干：\n从句：\n修饰成分：\n指代逻辑："
+    pos = template.index("主干：") + len("主干：")
+    result = _run_structure_number_keydown(template, pos)
+
+    assert result["prevented"] is True
+    expected = "主干：\n1. \n从句：\n修饰成分：\n指代逻辑："
+    assert result["value"] == expected
+    assert result["pos"] == len("主干：\n1. ")
 
 
 def test_structure_number_keydown_auto_start_not_triggered_mid_line() -> None:

@@ -14,6 +14,9 @@ def test_import_forms_expose_file_and_paste_flows() -> None:
     assert ".pdf" in html
     assert "application/pdf" in html
     assert 'action="/import/paste"' in html
+    assert 'action="/import/url"' in html
+    assert 'type="url"' in html
+    assert "Import URL" in html
 
 
 def test_duplicate_page_links_to_existing_book_or_books() -> None:

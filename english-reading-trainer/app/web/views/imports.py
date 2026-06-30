@@ -37,6 +37,18 @@ def _import_forms() -> str:
         <button type="submit">Import pasted text</button>
       </form>
     </section>
+    <section class="band">
+      <h2>Import from URL</h2>
+      <form method="post" action="/import/url" class="stack-form">
+        <label for="url-title">Title (optional)</label>
+        <input id="url-title" name="title" placeholder="Leave blank to auto-detect">
+        <label for="url-author">Author (optional)</label>
+        <input id="url-author" name="author">
+        <label for="url-input">Article URL</label>
+        <input id="url-input" type="url" name="url" placeholder="https://example.com/article" required>
+        <button type="submit">Import URL</button>
+      </form>
+    </section>
     """
     )
 

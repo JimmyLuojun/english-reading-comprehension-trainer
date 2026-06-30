@@ -275,7 +275,6 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <button id="toolbar-translation-open" type="button">Write translation</button>
         <button id="toolbar-structure-open" type="button">Write structure</button>
         <button id="toolbar-external-prompt" type="button">Copy AI prompt</button>
-        <button id="toolbar-translation-delete" type="button" class="danger" hidden>Delete translation</button>
       </form>
       <form id="toolbar-translation-form" method="post" class="toolbar-group" hidden>
         <input id="toolbar-translation-value" type="hidden" name="user_translation">

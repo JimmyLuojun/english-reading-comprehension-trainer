@@ -13,7 +13,7 @@ These rules describe behavior that should not change accidentally. Each implemen
 
 ## Data Model
 
-- The current implemented source formats are `txt` and `epub`; `pdf` remains planned until a migration expands `books.source_format`.
+- The current implemented `books.source_format` values are `txt`, `epub`, and `pdf`; URL import intentionally stores extracted web text as `txt` until a future source metadata migration exists.
 - Schema migrations and SQL schema changes must be tested with real SQLite, not mocks.
 - `sentences.id` is the stable anchor for reader selection, sentence cards, word card source links, AI analysis context, and review navigation.
 - `word_cards.lemma` remains globally unique for the current card model.

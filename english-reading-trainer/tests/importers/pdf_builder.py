@@ -77,6 +77,54 @@ def make_chapter_heading_pdf(
     return path
 
 
+def make_outline_chapter_pdf(tmp_path: Path, name: str = "outline-chapters.pdf") -> Path:
+    """Create a PDF with bookmark chapters and misleading TOC-like text."""
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    pdf.setTitle("Outline PDF Book")
+    pdf.setAuthor("PDF Author")
+    _width, height = letter
+
+    pdf.bookmarkPage("contents")
+    pdf.addOutlineEntry("Contents", "contents", level=0)
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(72, height - 96, "Contents")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 132, "10 Fake TOC Entry 500")
+    pdf.drawString(72, height - 150, "11 Another Fake TOC Entry 520")
+    pdf.drawString(72, height - 190, "The contents page should remain frontmatter.")
+    pdf.showPage()
+
+    pdf.bookmarkPage("chapter-1")
+    pdf.addOutlineEntry("Ch 1: Real Beginning", "chapter-1", level=0)
+    pdf.setFont("Helvetica-Bold", 24)
+    pdf.drawString(72, height - 96, "1")
+    pdf.drawString(72, height - 132, "Real Beginning")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 190, "The first outline chapter sentence is readable.")
+    pdf.showPage()
+
+    pdf.bookmarkPage("chapter-2")
+    pdf.addOutlineEntry("Ch 2: Second Topic", "chapter-2", level=0)
+    pdf.setFont("Helvetica-Bold", 24)
+    pdf.drawString(72, height - 96, "2")
+    pdf.drawString(72, height - 132, "Second Topic")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 190, "The second outline chapter sentence is readable.")
+    pdf.showPage()
+
+    pdf.bookmarkPage("answers")
+    pdf.addOutlineEntry("Answers to Selected Exercises", "answers", level=0)
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(72, height - 96, "Answers to Selected Exercises")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 150, "The answers page should be backmatter.")
+    pdf.showPage()
+
+    pdf.save()
+    return path
+
+
 def make_empty_pdf(tmp_path: Path, name: str = "empty.pdf") -> Path:
     """Create a PDF page with no extractable text."""
     path = tmp_path / name
@@ -140,6 +188,57 @@ def make_nonprose_text_pdf(tmp_path: Path, name: str = "nonprose-text.pdf") -> P
 
     pdf.setFont("Helvetica", 12)
     pdf.drawString(72, height - 315, "After the code sentence remains readable.")
+    pdf.showPage()
+    pdf.save()
+    return path
+
+
+def make_logic_proof_pdf(tmp_path: Path, name: str = "logic-proof.pdf") -> Path:
+    """Create a PDF with a numbered logic proof that should render as one figure."""
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    _width, height = letter
+
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 96, "Before the proof sentence remains readable.")
+
+    pdf.setFillColorRGB(0.72, 0.08, 0.04)
+    pdf.setFont("Helvetica", 11)
+    y = height - 150
+    for line in [
+        "1. A -> B",
+        "2. B",
+        "3. A 1, 2, MP (invalid-line 2 must assert the antecedent)",
+    ]:
+        pdf.drawString(120, y, line)
+        y -= 14
+
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 235, "After the proof sentence remains readable.")
+    pdf.showPage()
+    pdf.save()
+    return path
+
+
+def make_margin_decoration_pdf(
+    tmp_path: Path,
+    name: str = "margin-decoration.pdf",
+) -> Path:
+    """Create a PDF with a decorative margin chapter box beside readable text."""
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    _width, height = letter
+
+    pdf.setFillColorRGB(0.30, 0.18, 0.45)
+    pdf.rect(18, height - 330, 60, 45, stroke=0, fill=1)
+    pdf.setFillColorRGB(1, 1, 1)
+    pdf.setFont("Helvetica-Bold", 28)
+    pdf.drawString(46, height - 318, "7")
+
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(140, height - 300, "The body sentence beside the margin art remains readable.")
     pdf.showPage()
     pdf.save()
     return path

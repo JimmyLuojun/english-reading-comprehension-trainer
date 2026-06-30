@@ -229,6 +229,7 @@ def _word_due_sql() -> str:
             CASE
                 WHEN s.id IS NULL OR c.idx IS NULL THEN ''
                 WHEN wc.ai_analysis_id IS NOT NULL
+                  OR instr(lower(COALESCE(s.text, '')), lower(wc.surface_form)) = 0
                   THEN '/read/' || s.book_id || '?chapter=' || c.idx || '&word_card=' || wc.id || '#sentence-' || s.id
                 ELSE '/read/' || s.book_id || '?chapter=' || c.idx || '#sentence-' || s.id
             END AS source_href,

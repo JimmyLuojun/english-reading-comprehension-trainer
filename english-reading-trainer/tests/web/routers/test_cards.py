@@ -52,3 +52,30 @@ def test_sentence_structure_route_saves_form_value(monkeypatch) -> None:
         "sentence_id": 42,
         "user_structure": "主干：The cat sat",
     }
+
+
+def test_sentence_translation_route_allows_empty_value(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_save_sentence_translation(db, sentence_id, user_translation):
+        captured["db"] = db
+        captured["sentence_id"] = sentence_id
+        captured["user_translation"] = user_translation
+
+    monkeypatch.setattr(cards, "save_sentence_translation", fake_save_sentence_translation)
+    app = FastAPI()
+    register_card_routes(app, lambda: "db")
+
+    response = TestClient(app).post(
+        "/mark/sentence/42/translation",
+        data={"user_translation": "", "return_to": "/read/1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/read/1"
+    assert captured == {
+        "db": "db",
+        "sentence_id": 42,
+        "user_translation": "",
+    }

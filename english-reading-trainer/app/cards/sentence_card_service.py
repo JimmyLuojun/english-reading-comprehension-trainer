@@ -93,7 +93,7 @@ def save_sentence_translation(
     sentence_id: int,
     user_translation: str,
     user_note: str = "",
-) -> int:
+) -> int | None:
     """
     Store the latest user translation for *sentence_id* and return the card id.
 
@@ -101,13 +101,12 @@ def save_sentence_translation(
     the previous translation and clears stale error links so the next analysis
     uses a cache key that includes the latest translation. Existing AI analysis
     remains attached as a stale reference until a fresh check replaces it.
+    Saving an empty translation clears the current translation without removing
+    the historical analysis snapshot.
     Saving a translation alone must not add the sentence to the active Review
     queue.
     """
     cleaned_translation = user_translation.strip()
-    if not cleaned_translation:
-        raise ValueError("user_translation must not be empty.")
-
     now = _utcnow()
     with db.get_connection() as conn:
         if not conn.execute(
@@ -119,6 +118,12 @@ def save_sentence_translation(
             "SELECT id, user_note FROM sentence_cards WHERE sentence_id = ?",
             (sentence_id,),
         ).fetchone()
+        if not cleaned_translation:
+            if existing is None:
+                return None
+            _clear_sentence_translation(conn, existing["id"])
+            return existing["id"]
+
         if existing:
             note = user_note if user_note else existing["user_note"]
             conn.execute(
@@ -190,13 +195,12 @@ def save_sentence_structure(
 
 def delete_sentence_translation(db: DatabaseConnection, sentence_id: int) -> int:
     """
-    Clear the saved translation for *sentence_id* and archive its review card.
+    Clear the saved translation for *sentence_id*.
 
-    Deleting the translation removes the reason for reviewing this sentence in
-    the translation workflow, so the active sentence card is archived as well.
-    Review logs and SM-2 history remain preserved on the soft-deleted card.
+    Historical AI analysis remains attached to the sentence card so the reader
+    can still show the analyzed input snapshot and mark it stale against the
+    current empty translation.
     """
-    now = _utcnow()
     with db.get_connection() as conn:
         if not conn.execute(
             "SELECT 1 FROM sentences WHERE id = ?", (sentence_id,)
@@ -214,16 +218,7 @@ def delete_sentence_translation(db: DatabaseConnection, sentence_id: int) -> int
                 f"No saved translation exists for sentence id={sentence_id}."
             )
 
-        conn.execute(
-            """UPDATE sentence_cards
-                  SET user_translation = NULL,
-                      translation_created_at = NULL,
-                      ai_analysis_id = NULL,
-                      archived_at = ?
-                WHERE id = ?""",
-            (now, existing["id"]),
-        )
-        _clear_sentence_card_errors(conn, existing["id"])
+        _clear_sentence_translation(conn, existing["id"])
     return existing["id"]
 
 
@@ -409,6 +404,17 @@ def _insert_sentence_card(
 
 def _clear_sentence_card_errors(conn: Any, card_id: int) -> None:
     conn.execute("DELETE FROM sentence_card_errors WHERE card_id = ?", (card_id,))
+
+
+def _clear_sentence_translation(conn: Any, card_id: int) -> None:
+    conn.execute(
+        """UPDATE sentence_cards
+              SET user_translation = NULL,
+                  translation_created_at = NULL
+            WHERE id = ?""",
+        (card_id,),
+    )
+    _clear_sentence_card_errors(conn, card_id)
 
 
 def _clean_optional_translation(value: str | None) -> str | None:

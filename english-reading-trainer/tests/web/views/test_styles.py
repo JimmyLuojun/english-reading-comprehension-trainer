@@ -11,6 +11,28 @@ def _css_block(css: str, selector: str, next_selector: str) -> str:
     return css[start:end]
 
 
+def test_css_editor_open_toolbar_stacks_and_drops_standalone_analysis() -> None:
+    css = _css()
+
+    # While an editor is open the toolbar becomes a stable vertical stack so
+    # the action buttons, textarea and editor actions stop squeezing together.
+    editing = _css_block(
+        css,
+        ".selection-toolbar:has(.translation-editor:not([hidden])) {",
+        ".analysis-panel {",
+    )
+    assert "flex-direction: column;" in editing
+    assert "align-items: stretch;" in editing
+
+    # The standalone AI-analysis button leaves the editor's flex flow entirely
+    # (the editor has its own "Save and AI analyze/check" action).
+    assert (
+        ".selection-toolbar:has(.translation-editor:not([hidden])) #toolbar-analysis-open {\n"
+        "      display: none;\n"
+        "    }"
+    ) in css
+
+
 def test_css_contains_reader_and_popover_selectors() -> None:
     css = _css()
 
@@ -44,8 +66,17 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "max-width: var(--reader-max-width)" in css
     assert "#toolbar-analysis-word-status" in css
     assert ".toolbar-status {\n      flex: 1 0 100%;" in css
-    assert "min-height: 28px;" in css
+    assert "height: 28px;" in css
+    assert "margin: 0;" in css
     assert "line-height: 18px;" in css
+    assert "overflow: hidden;" in css
+    assert "text-overflow: ellipsis;" in css
+    assert "max-width: min(calc(100vw - 16px), 760px)" in css
+    assert "#toolbar-sentence-form" in css
+    assert "white-space: nowrap;" in css
+    assert ".selection-toolbar button:disabled" in css
+    assert "cursor: not-allowed;" in css
+    assert ".selection-toolbar button.danger:disabled" in css
     assert "[data-sentence-id].translated" in css
     assert "text-decoration-style: dotted" in css
     assert ".speak-button" in css

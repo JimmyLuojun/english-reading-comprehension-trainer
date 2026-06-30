@@ -6,7 +6,7 @@
 
 ### §25.1 背景
 
-`books` 表同时承载 TXT 文章和 EPUB 书籍。当前没有任何删除入口，用户误导入或不再需要的材料只能用脚本手工清理，会留下 `chapters/paragraphs/sentences/sentence_cards/word_cards/review_logs/book_assets/chapter_blocks` 以及磁盘上的 EPUB 图片资源。
+`books` 表同时承载 TXT/URL 文章、EPUB 书籍和 PDF 文档。删除入口必须清理同一套 `chapters/paragraphs/sentences/sentence_cards/word_cards/review_logs/book_assets/chapter_blocks` 关系，并在 DB commit 后清理 EPUB/PDF 导入产生的磁盘资源目录。
 
 本节定义"从 Books 页删除一本书"的语义为**彻底删除**，而不是从列表隐藏。
 
@@ -16,7 +16,7 @@
 2. **词卡尽量保留**：`word_cards` 按 `lemma` UNIQUE，可能在多本书中复习过。删书时优先把 `first_sentence_id` 迁移到剩余书中包含同一 lemma/短语的句子，**仅当再也找不到锚点时才删除**。
 3. **可迁移词卡的 SM-2 状态与 ****`review_logs`**** 必须保留**，不允许在 re-anchor 之前粗暴删 `review_logs`。
 4. **AI 缓存不动**：`ai_cache` 按 `content_hash` 跨书共享，删书时保持原状，`sentence_cards.ai_analysis_id` 已经是 `ON DELETE SET NULL`，自然无悬挂。
-5. **磁盘资源跟在 DB 之后**：先在事务内完成 DB 删除，commit 之后再 `shutil.rmtree(..., ignore_errors=True)` 删 EPUB asset 目录。文件清理失败不回滚 DB。
+5. **磁盘资源跟在 DB 之后**：先在事务内完成 DB 删除，commit 之后再 `shutil.rmtree(..., ignore_errors=True)` 删导入资产目录。文件清理失败不回滚 DB。
 
 ### §25.3 UI
 
@@ -140,8 +140,8 @@ def delete_book(book_id: int) -> Any:
 
 1. **404**：删不存在的 book 返回 404。
 2. **UI**：Books 列表渲染 `Delete` 按钮和 `POST /books/{id}/delete` 表单；删除后 302 到 `/books`。
-3. **TXT 完整链**：删 TXT book 后，`books / chapters / paragraphs / sentences / sentence_cards / sentence_card_tags / sentence_card_errors` 涉及该书的行清零。
-4. **EPUB 资源**：删 EPUB book 后，`book_assets / chapter_blocks` 清零；`data/assets/books/{book_id}/` 目录被删；目录不存在或权限错时 DB 已提交不回滚。
+3. **TXT/URL 完整链**：删 TXT 或 URL 导入 book 后，`books / chapters / paragraphs / sentences / sentence_cards / sentence_card_tags / sentence_card_errors` 涉及该书的行清零。
+4. **EPUB/PDF 资源**：删 EPUB 或 PDF book 后，`book_assets / chapter_blocks` 清零；`data/assets/books/{book_id}/` 目录被删；目录不存在或权限错时 DB 已提交不回滚。
 5. **review\_logs 隔离**：删 book A 不影响 book B 的句卡/词卡 `review_logs`。
 6. **ai\_cache 保留**：删 book 前后 `SELECT COUNT(*) FROM ai_cache` 不变。
 7. **多书隔离**：两本书各有句卡词卡，删其一不影响另一本任何表的数据。

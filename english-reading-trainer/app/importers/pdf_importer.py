@@ -19,6 +19,7 @@ import re
 from typing import Any
 
 import pdfplumber
+from pdfminer.pdftypes import resolve1
 
 from app.db_connection import DatabaseConnection
 from app.db_models import SourceFormat
@@ -38,14 +39,28 @@ _MIN_FIGURE_WIDTH = 36.0
 _MIN_FIGURE_HEIGHT = 24.0
 _FULL_WIDTH_RULE_RATIO = 0.75
 _HAIRLINE_THICKNESS = 2.0
+_MARGIN_DECORATION_BAND_RATIO = 0.18
+_MARGIN_DECORATION_MAX_WIDTH_RATIO = 0.18
+_MARGIN_DECORATION_MAX_HEIGHT_RATIO = 0.14
+_MARGIN_DECORATION_MIN_WORD_HEIGHT_RATIO = 0.02
 _PDF_FIGURE_MEDIA_TYPE = "image/png"
 _PDF_FIGURE_RENDER_DPI = 150
 _NONPROSE_CLUSTER_GAP = 22.0
+_PROOF_LINE_X_TOLERANCE = 8.0
+_PROOF_CONTINUATION_INDENT = 24.0
+_PROOF_LINE_GAP_MULTIPLIER = 1.75
+_PROOF_LINE_MAX_GAP = 18.0
 
 _CODE_SYMBOLS = frozenset("{}[]();#=+-*/<>")
 _MATH_SYMBOLS = frozenset("=<>+-*/^()[]{}∑∏∫∞≤≥≠±√⋅−λ")
 _MONOSPACE_FONT_RE = re.compile(r"(?:courier|mono|consolas|menlo)", re.I)
 _SYMBOL_FONT_RE = re.compile(r"(?:symbol|math)", re.I)
+_PROOF_LINE_RE = re.compile(r"^\s*(?P<number>\d{1,3})\.\s+(?P<body>\S.*)$")
+_PROOF_RULE_CITATION_RE = re.compile(
+    r"\b\d+\s*,\s*\d+(?:\s*,\s*\d+)?\s*,?\s*"
+    r"(?:MP|MT|HS|DS|CD|SIMP|CONJ|ADD|DN|COMM|ASSOC|DIST|DEM)\b",
+    re.I,
+)
 
 _PAGE_NUMBER_RE = re.compile(r"^(?:page\s+)?\d+$", re.I)
 _REPEATED_WHITESPACE_RE = re.compile(r"\s+")
@@ -68,6 +83,16 @@ _PDF_CHAPTER_HEADING_RE = re.compile(
 )
 _PDF_NUMERIC_CHAPTER_HEADING_RE = re.compile(
     r"^\s*(?P<number>\d{1,3})\.\s+[A-Z][A-Za-z0-9 ,:'’&-]{2,}$"
+)
+_PDF_OUTLINE_CHAPTER_HEADING_RE = re.compile(
+    rf"^\s*(?:ch\.?|chapter)\s+(?P<number>{_PDF_NUMBER_TOKEN_RE})"
+    r"(?:[\s.:)-]+(?P<title>.+))?$",
+    re.I,
+)
+_PDF_BACKMATTER_OUTLINE_RE = re.compile(
+    r"^\s*(?:answers?\b|glossary\b|index\b|glossary\s*/\s*index\b|"
+    r"bibliography\b|references\b|notes\b)",
+    re.I,
 )
 _NUMBER_WORDS = {
     "one": 1,
@@ -165,6 +190,15 @@ class PdfSectionMarker:
     chapter_number: int | None = None
 
 
+@dataclass(frozen=True)
+class PdfOutlineItem:
+    """One usable PDF outline/bookmark item."""
+
+    title: str
+    page_number: int
+    level: int
+
+
 def calculate_pdf_file_hash(file_path: str | Path) -> str:
     """Return the duplicate-detection hash import_pdf() will store."""
     path = Path(file_path)
@@ -198,6 +232,7 @@ def import_pdf(
             metadata = pdf.metadata or {}
             resolved_title = title or _metadata_value(metadata, "Title") or path.stem
             resolved_author = author or _metadata_value(metadata, "Author") or ""
+            outline_items = _extract_pdf_outline(pdf)
             pages, asset_sources = _extract_pdf_pages(pdf.pages)
     except FileNotFoundError:
         raise
@@ -206,7 +241,7 @@ def import_pdf(
     except Exception as exc:
         raise ValueError(f"Could not read PDF: {path}") from exc
 
-    chapters_raw = _build_chapters(pages)
+    chapters_raw = _build_chapters(pages, outline_items)
     if not chapters_raw:
         raise ValueError(f"PDF contains no extractable text: {path}")
 
@@ -232,6 +267,89 @@ def _metadata_value(metadata: dict[str, Any], key: str) -> str:
         if text:
             return text
     return ""
+
+
+def _extract_pdf_outline(pdf: Any) -> tuple[PdfOutlineItem, ...]:
+    """Return bookmark/outline entries with resolved physical page numbers."""
+    try:
+        raw_items = list(pdf.doc.get_outlines())
+    except Exception:
+        return ()
+
+    page_numbers_by_objid = {
+        page.page_obj.pageid: page.page_number
+        for page in getattr(pdf, "pages", [])
+        if getattr(getattr(page, "page_obj", None), "pageid", None) is not None
+    }
+    if not page_numbers_by_objid:
+        return ()
+
+    outline_items: list[PdfOutlineItem] = []
+    seen: set[tuple[int, str, int]] = set()
+    for raw_item in raw_items:
+        if len(raw_item) < 5:
+            continue
+        level, title, dest, action, _se = raw_item
+        clean_title = _clean_outline_title(title)
+        page_number = _outline_destination_page_number(
+            dest,
+            action,
+            page_numbers_by_objid,
+        )
+        if not clean_title or page_number is None:
+            continue
+        item_level = _safe_int(level) or 1
+        key = (item_level, clean_title, page_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        outline_items.append(PdfOutlineItem(clean_title, page_number, item_level))
+    return tuple(outline_items)
+
+
+def _outline_destination_page_number(
+    dest: Any,
+    action: Any,
+    page_numbers_by_objid: dict[int, int],
+) -> int | None:
+    """Resolve a PDF outline destination/action to a 1-based physical page."""
+    target = dest
+    if target is None and action is not None:
+        try:
+            resolved_action = resolve1(action)
+        except Exception:
+            resolved_action = None
+        if isinstance(resolved_action, dict):
+            target = resolved_action.get("D")
+
+    try:
+        resolved_target = resolve1(target)
+    except Exception:
+        return None
+    if isinstance(resolved_target, list) and resolved_target:
+        page_ref = resolved_target[0]
+    else:
+        page_ref = resolved_target
+    objid = getattr(page_ref, "objid", None)
+    if objid is None:
+        return None
+    return page_numbers_by_objid.get(objid)
+
+
+def _clean_outline_title(title: Any) -> str:
+    """Normalize PDF bookmark titles, including NUL-padded titles."""
+    if isinstance(title, bytes):
+        text = title.decode("utf-8", errors="replace")
+    else:
+        text = str(title)
+    return _clean_line_text(text.replace("\x00", ""))
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_pdf_pages(
@@ -280,6 +398,7 @@ def _body_words(
     figure_regions: tuple[PdfFigureRegion, ...],
 ) -> list[dict[str, Any]]:
     """Return words outside margin bands and detected figure regions."""
+    page_width = float(getattr(page, "width", 0) or 0)
     page_height = float(getattr(page, "height", 0) or 0)
     header_cutoff = page_height * _HEADER_BAND_RATIO
     footer_cutoff = page_height * (1 - _FOOTER_BAND_RATIO)
@@ -292,6 +411,8 @@ def _body_words(
         if not text or top is None:
             continue
         if page_height and not (header_cutoff < top < footer_cutoff):
+            continue
+        if _is_margin_decoration_word(word, text, page_width, page_height):
             continue
         if _word_inside_any_region(word, figure_regions):
             continue
@@ -483,6 +604,7 @@ def _nonprose_regions(
         return ()
 
     flags = [_is_nonprose_line(line) for line in lines]
+    flags = _include_numbered_proof_blocks(lines, flags)
     flags = _include_neighboring_formula_fragments(lines, flags)
     clusters: list[list[PdfWordLine]] = []
     current: list[PdfWordLine] = []
@@ -516,6 +638,7 @@ def _body_words_with_font_metadata(
     excluded_regions: tuple[PdfFigureRegion, ...],
 ) -> list[dict[str, Any]]:
     """Return body words with font metadata for non-prose classification."""
+    page_width = float(getattr(page, "width", 0) or 0)
     page_height = float(getattr(page, "height", 0) or 0)
     header_cutoff = page_height * _HEADER_BAND_RATIO
     footer_cutoff = page_height * (1 - _FOOTER_BAND_RATIO)
@@ -529,6 +652,8 @@ def _body_words_with_font_metadata(
             continue
         if page_height and not (header_cutoff < top < footer_cutoff):
             continue
+        if _is_margin_decoration_word(word, text, page_width, page_height):
+            continue
         if _word_inside_any_region(word, excluded_regions):
             continue
         body_words.append(word)
@@ -541,15 +666,129 @@ def _is_nonprose_line(line: PdfWordLine) -> bool:
         return False
     if _has_monospace_font(line):
         return True
-    if _has_math_font(line) and _math_symbol_ratio(text) >= 0.10:
+    math_ratio = _math_symbol_ratio(text)
+    alpha_ratio = _alpha_ratio(text)
+    if _has_math_font(line) and math_ratio >= 0.10 and alpha_ratio <= 0.65:
         return True
-    if _math_symbol_ratio(text) >= 0.22 and _alpha_ratio(text) <= 0.45:
+    if math_ratio >= 0.22 and alpha_ratio <= 0.45:
         return True
-    if _code_symbol_ratio(text) >= 0.22 and _alpha_ratio(text) <= 0.65:
+    if _code_symbol_ratio(text) >= 0.22 and alpha_ratio <= 0.65:
         return True
-    if _font_size_spread(line) >= 3.0 and _alpha_ratio(text) <= 0.55:
+    if _font_size_spread(line) >= 3.0 and alpha_ratio <= 0.55:
         return True
     return False
+
+
+def _include_numbered_proof_blocks(
+    lines: list[PdfWordLine],
+    flags: list[bool],
+) -> list[bool]:
+    """Expand non-prose detection to full numbered proof/inference examples."""
+    expanded = list(flags)
+    index = 0
+    while index < len(lines):
+        if _proof_line_match(lines[index]) is None:
+            index += 1
+            continue
+
+        block_indices = _numbered_proof_candidate_indices(lines, index)
+        if len(block_indices) < 2:
+            index += 1
+            continue
+
+        if any(flags[item] or _has_strong_proof_signal(lines[item]) for item in block_indices):
+            for item in block_indices:
+                expanded[item] = True
+            next_index = _include_proof_continuations(lines, expanded, block_indices)
+            index = max(next_index, block_indices[-1] + 1)
+            continue
+
+        index = block_indices[-1] + 1
+    return expanded
+
+
+def _numbered_proof_candidate_indices(
+    lines: list[PdfWordLine],
+    start_index: int,
+) -> list[int]:
+    base_line = lines[start_index]
+    base_match = _proof_line_match(base_line)
+    if base_match is None:
+        return []
+
+    indices = [start_index]
+    previous_line = base_line
+    previous_number = _safe_int(base_match.group("number"))
+    for candidate_index in range(start_index + 1, len(lines)):
+        candidate = lines[candidate_index]
+        if not _is_close_vertical_neighbor(previous_line, candidate):
+            break
+        match = _proof_line_match(candidate)
+        if match is None:
+            break
+        if abs(candidate.x0 - base_line.x0) > _PROOF_LINE_X_TOLERANCE:
+            break
+        number = _safe_int(match.group("number"))
+        if (
+            previous_number is not None
+            and number is not None
+            and number not in {previous_number, previous_number + 1}
+        ):
+            break
+        indices.append(candidate_index)
+        previous_line = candidate
+        previous_number = number
+    return indices
+
+
+def _include_proof_continuations(
+    lines: list[PdfWordLine],
+    flags: list[bool],
+    block_indices: list[int],
+) -> int:
+    base_x = lines[block_indices[0]].x0
+    previous_index = block_indices[-1]
+    candidate_index = previous_index + 1
+    while candidate_index < len(lines):
+        candidate = lines[candidate_index]
+        if _proof_line_match(candidate) is not None:
+            break
+        if not _is_close_vertical_neighbor(lines[previous_index], candidate):
+            break
+        if candidate.x0 < base_x + _PROOF_CONTINUATION_INDENT:
+            break
+        flags[candidate_index] = True
+        previous_index = candidate_index
+        candidate_index += 1
+    return candidate_index
+
+
+def _is_close_vertical_neighbor(previous: PdfWordLine, candidate: PdfWordLine) -> bool:
+    if previous.page_number != candidate.page_number:
+        return False
+    gap = candidate.top - previous.bottom
+    if gap < -1.0:
+        return False
+    line_height = max(1.0, previous.bottom - previous.top)
+    return gap <= min(_PROOF_LINE_MAX_GAP, line_height * _PROOF_LINE_GAP_MULTIPLIER)
+
+
+def _has_strong_proof_signal(line: PdfWordLine) -> bool:
+    match = _proof_line_match(line)
+    if match is None:
+        return False
+    body = match.group("body")
+    if _PROOF_RULE_CITATION_RE.search(body):
+        return True
+    if _math_symbol_ratio(body) >= 0.12 and _alpha_ratio(body) <= 0.75:
+        return True
+    if _code_symbol_ratio(body) >= 0.18 and _alpha_ratio(body) <= 0.75:
+        return True
+    return bool(_is_nonprose_line(line) and len(body.split()) <= 8)
+
+
+def _proof_line_match(line: PdfWordLine) -> re.Match[str] | None:
+    return _PROOF_LINE_RE.match(line.text.strip())
 
 
 def _include_neighboring_formula_fragments(
@@ -664,6 +903,11 @@ def _region_from_pdf_object(
         return None
     if _is_full_width_hairline(x0, top, x1, bottom, page_width):
         return None
+    if (
+        not contains_image
+        and _is_margin_decoration_bbox(x0, top, x1, bottom, page_width, page_height)
+    ):
+        return None
     return _padded_region(
         PdfFigureRegion(page_number, x0, top, x1, bottom, contains_image),
         page_width=page_width,
@@ -707,6 +951,59 @@ def _is_full_width_hairline(
     width = x1 - x0
     height = bottom - top
     return width >= page_width * _FULL_WIDTH_RULE_RATIO and height <= _HAIRLINE_THICKNESS
+
+
+def _is_margin_decoration_bbox(
+    x0: float,
+    top: float,
+    x1: float,
+    bottom: float,
+    page_width: float,
+    page_height: float,
+) -> bool:
+    if not page_width or not page_height:
+        return False
+    width = x1 - x0
+    height = bottom - top
+    in_outer_margin = (
+        x1 <= page_width * _MARGIN_DECORATION_BAND_RATIO
+        or x0 >= page_width * (1 - _MARGIN_DECORATION_BAND_RATIO)
+    )
+    return (
+        in_outer_margin
+        and width <= page_width * _MARGIN_DECORATION_MAX_WIDTH_RATIO
+        and height <= page_height * _MARGIN_DECORATION_MAX_HEIGHT_RATIO
+    )
+
+
+def _is_margin_decoration_object(
+    obj: dict[str, Any],
+    page_width: float,
+    page_height: float,
+) -> bool:
+    bbox = _object_bbox(obj)
+    if bbox is None:
+        return False
+    return _is_margin_decoration_bbox(*bbox, page_width, page_height)
+
+
+def _is_margin_decoration_word(
+    word: dict[str, Any],
+    text: str,
+    page_width: float,
+    page_height: float,
+) -> bool:
+    if not re.fullmatch(r"[A-Z]?\d{1,3}[A-Z]?", text.strip()):
+        return False
+    bbox = _object_bbox(word)
+    if bbox is None:
+        return False
+    _x0, top, _x1, bottom = bbox
+    return (
+        page_height > 0
+        and bottom - top >= page_height * _MARGIN_DECORATION_MIN_WORD_HEIGHT_RATIO
+        and _is_margin_decoration_bbox(*bbox, page_width, page_height)
+    )
 
 
 def _padded_region(
@@ -882,13 +1179,177 @@ def _ends_with_hyphenated_word(text: str) -> bool:
     return bool(re.search(r"[A-Za-z]-$", text.rstrip()))
 
 
-def _build_chapters(pages: list[PdfPageText]) -> list[dict[str, Any]]:
+def _build_chapters(
+    pages: list[PdfPageText],
+    outline_items: tuple[PdfOutlineItem, ...] = (),
+) -> list[dict[str, Any]]:
     """Group extracted page paragraphs into virtual reading chapters."""
     nonempty_pages = [page for page in pages if page.blocks]
+    outline_chapters = _build_outline_chapters(nonempty_pages, outline_items)
+    if outline_chapters is not None:
+        return outline_chapters
     detected_chapters = _build_heading_chapters(nonempty_pages)
     if detected_chapters is not None:
         return detected_chapters
     return _build_virtual_chapters(nonempty_pages)
+
+
+def _build_outline_chapters(
+    nonempty_pages: list[PdfPageText],
+    outline_items: tuple[PdfOutlineItem, ...],
+) -> list[dict[str, Any]] | None:
+    """Build chapters from PDF outline/bookmark boundaries when available."""
+    if not nonempty_pages or not outline_items:
+        return None
+
+    boundary_items = _outline_boundary_items(outline_items)
+    chapter_markers = [
+        (item, marker)
+        for item in boundary_items
+        if (marker := _pdf_outline_section_marker(item.title)) is not None
+        and marker.section_kind == "chapter"
+    ]
+    chapter_markers.sort(key=lambda item: item[0].page_number)
+    if not chapter_markers:
+        return None
+
+    page_numbers = [page.page_number for page in nonempty_pages]
+    first_page = min(page_numbers)
+    last_page = max(page_numbers)
+    first_chapter_page = chapter_markers[0][0].page_number
+    last_chapter_page = chapter_markers[-1][0].page_number
+
+    sections: list[tuple[int, PdfSectionMarker]] = []
+    if first_page < first_chapter_page:
+        sections.append((first_page, PdfSectionMarker("Frontmatter", "frontmatter")))
+
+    sections.extend((item.page_number, marker) for item, marker in chapter_markers)
+    sections.extend(
+        (item.page_number, marker)
+        for item in boundary_items
+        if item.page_number > last_chapter_page
+        and (marker := _pdf_outline_section_marker(item.title)) is not None
+        and marker.section_kind == "backmatter"
+    )
+    sections = _deduplicate_outline_sections(sections)
+    if not sections:
+        return None
+
+    chapters: list[dict[str, Any]] = []
+    for index, (start_page, marker) in enumerate(sections):
+        end_page = sections[index + 1][0] if index + 1 < len(sections) else last_page + 1
+        blocks = _page_blocks_in_range(nonempty_pages, start_page, end_page)
+        if marker.section_kind == "chapter":
+            blocks = _trim_leading_outline_title_blocks(blocks, marker)
+        text_blocks = [page_block.block for page_block in blocks]
+        if not text_blocks:
+            continue
+        chapters.append(
+            {
+                "title": marker.title,
+                "section_kind": marker.section_kind,
+                "chapter_number": marker.chapter_number,
+                "blocks": text_blocks,
+            }
+        )
+
+    if not any(ch["section_kind"] == "chapter" for ch in chapters):
+        return None
+    return chapters
+
+
+def _outline_boundary_items(
+    outline_items: tuple[PdfOutlineItem, ...],
+) -> tuple[PdfOutlineItem, ...]:
+    """Return outline items to use as section boundaries."""
+    min_level = min(item.level for item in outline_items)
+    top_level_items = tuple(item for item in outline_items if item.level == min_level)
+    if any(
+        (marker := _pdf_outline_section_marker(item.title)) is not None
+        and marker.section_kind == "chapter"
+        for item in top_level_items
+    ):
+        return top_level_items
+    return outline_items
+
+
+def _deduplicate_outline_sections(
+    sections: list[tuple[int, PdfSectionMarker]],
+) -> list[tuple[int, PdfSectionMarker]]:
+    """Sort outline sections and drop duplicates on the same page/kind/number."""
+    result: list[tuple[int, PdfSectionMarker]] = []
+    seen: set[tuple[int, str, int | None]] = set()
+    for page_number, marker in sorted(sections, key=lambda item: item[0]):
+        key = (page_number, marker.section_kind, marker.chapter_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append((page_number, marker))
+    return result
+
+
+def _page_blocks_in_range(
+    pages: list[PdfPageText],
+    start_page: int,
+    end_page: int,
+) -> list[PdfPageBlock]:
+    return [
+        page_block
+        for page in pages
+        if start_page <= page.page_number < end_page
+        for page_block in page.blocks
+    ]
+
+
+def _trim_leading_outline_title_blocks(
+    blocks: list[PdfPageBlock],
+    marker: PdfSectionMarker,
+) -> list[PdfPageBlock]:
+    """Remove a duplicated title block from an outline-delimited chapter."""
+    if not blocks:
+        return []
+    leading = blocks[0]
+    if leading.block.kind != "prose":
+        return blocks
+    leading_text = _clean_line_text(leading.block.text)
+    if not leading_text:
+        return blocks[1:]
+    variants = _outline_title_variants(marker)
+    if _normalized_heading_text(leading_text) in variants:
+        return blocks[1:]
+    trimmed = _remove_title_from_block(leading, marker.title)
+    if trimmed is not None:
+        return [trimmed, *blocks[1:]]
+    return blocks
+
+
+def _outline_title_variants(marker: PdfSectionMarker) -> set[str]:
+    title = _clean_line_text(marker.title)
+    variants = {_normalized_heading_text(title)}
+    if marker.section_kind == "chapter" and marker.chapter_number is not None:
+        variants.add(_normalized_heading_text(f"Chapter {marker.chapter_number}"))
+        variants.add(_normalized_heading_text(f"Ch {marker.chapter_number}"))
+        stripped = _strip_pdf_chapter_ordinal(title)
+        if stripped:
+            variants.add(_normalized_heading_text(stripped))
+    return {variant for variant in variants if variant}
+
+
+def _strip_pdf_chapter_ordinal(title: str) -> str:
+    chapter_match = _PDF_CHAPTER_HEADING_RE.match(title)
+    if chapter_match:
+        return title[chapter_match.end("number"):].lstrip(" \t\r\n.:)-")
+    outline_match = _PDF_OUTLINE_CHAPTER_HEADING_RE.match(title)
+    if outline_match:
+        return (outline_match.group("title") or "").strip()
+    numeric_match = _PDF_NUMERIC_CHAPTER_HEADING_RE.match(title)
+    if numeric_match:
+        return title[numeric_match.end("number"):].lstrip(" \t\r\n.:)-")
+    return title
+
+
+def _normalized_heading_text(text: str) -> str:
+    return _clean_line_text(text).casefold()
 
 
 def _build_virtual_chapters(nonempty_pages: list[PdfPageText]) -> list[dict[str, Any]]:
@@ -1062,6 +1523,33 @@ def _pdf_section_marker(text: str) -> PdfSectionMarker | None:
             "chapter",
             _number_token_to_int(numeric_match.group("number")),
         )
+    return None
+
+
+def _pdf_outline_section_marker(text: str) -> PdfSectionMarker | None:
+    clean_text = _clean_line_text(text)
+    if not clean_text or len(clean_text) > _PDF_HEADING_MAX_LENGTH:
+        return None
+
+    chapter_match = _PDF_OUTLINE_CHAPTER_HEADING_RE.match(clean_text)
+    if chapter_match:
+        chapter_number = _number_token_to_int(chapter_match.group("number"))
+        title_text = _clean_line_text(chapter_match.group("title") or "")
+        if chapter_number is not None:
+            title = (
+                f"Chapter {chapter_number}: {title_text}"
+                if title_text
+                else f"Chapter {chapter_number}"
+            )
+            return PdfSectionMarker(title, "chapter", chapter_number)
+
+    marker = _pdf_section_marker(clean_text)
+    if marker is not None:
+        return marker
+
+    if _PDF_BACKMATTER_OUTLINE_RE.match(clean_text):
+        return PdfSectionMarker(clean_text, "backmatter")
+
     return None
 
 

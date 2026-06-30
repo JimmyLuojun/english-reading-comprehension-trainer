@@ -998,20 +998,33 @@ class TestReadingAndMarking:
             ).fetchone()
         assert row["user_translation"] == "新译文"
 
-    def test_empty_sentence_translation_returns_400(
+    def test_empty_sentence_translation_clears_current_value(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            f"/mark/sentence/{sentence_ids[0]}/translation",
+            data={"user_translation": "旧译文", "return_to": "/cards"},
+        )
 
         response = client.post(
             f"/mark/sentence/{sentence_ids[0]}/translation",
             data={"user_translation": "  ", "return_to": "/cards"},
+            follow_redirects=False,
         )
 
-        assert response.status_code == 400
-        assert "user_translation" in response.text
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT user_translation, translation_created_at
+                     FROM sentence_cards
+                    WHERE sentence_id = ?""",
+                (sentence_ids[0],),
+            ).fetchone()
+        assert row["user_translation"] is None
+        assert row["translation_created_at"] is None
 
-    def test_delete_sentence_translation_archives_review_card(
+    def test_delete_sentence_translation_clears_translation_only(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         _, sentence_ids = _seed_book(db, tmp_path)
@@ -1039,7 +1052,7 @@ class TestReadingAndMarking:
                     WHERE sentence_id = ?""",
                 (sentence_ids[0],),
             ).fetchone()
-        assert row["archived_at"] is not None
+        assert row["archived_at"] is None
         assert row["user_translation"] is None
         assert row["translation_created_at"] is None
 
@@ -1623,7 +1636,7 @@ class TestReadingAndMarking:
         assert "glossary_return_url" in response.text
         assert "/cards#card-${cardId}" in response.text
         assert "background: #fef3c7" in response.text
-        assert "max-width: min(calc(100vw - 16px), 520px)" in response.text
+        assert "max-width: min(calc(100vw - 16px), 760px)" in response.text
         assert ".word-detail-actions button" in response.text
         assert "flex-wrap: wrap" in response.text
 
@@ -1816,6 +1829,29 @@ class TestReadingAndMarking:
         assert response.status_code == 200
         assert response.text.count(f'href="{source_href}"') >= 2
         assert 'data-speak-text="cat"' in response.text
+
+    def test_cards_page_opens_word_panel_for_non_source_text_word(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "incantation",
+                "lexical_type": "word",
+            },
+        )
+        card_id = _word_card_id(db, "incantation")
+        source_href = (
+            f"/read/{book_id}?chapter=1&amp;word_card={card_id}"
+            f"#sentence-{sentence_ids[0]}"
+        )
+
+        response = client.get("/cards")
+
+        assert response.status_code == 200
+        assert f'href="{source_href}"' in response.text
 
     def test_word_card_sources_page_adds_source_and_sets_primary(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -2288,6 +2324,30 @@ class TestReviewRoutes:
         assert response.status_code == 200
         assert f'href="{source_href}"' in response.text
         assert 'data-speak-text="cat"' in response.text
+
+    def test_review_page_opens_word_panel_for_non_source_text_word(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "incantation",
+                "lexical_type": "word",
+            },
+        )
+        word_card_id = _word_card_id(db, "incantation")
+        _make_due_yesterday(db, "word_cards", word_card_id)
+        source_href = (
+            f"/read/{book_id}?chapter=1&word_card={word_card_id}"
+            f"#sentence-{sentence_ids[0]}"
+        )
+
+        response = client.get("/review")
+
+        assert response.status_code == 200
+        assert f'href="{source_href.replace("&", "&amp;")}"' in response.text
 
     def test_review_page_sentence_prompt_links_to_analysis_panel(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

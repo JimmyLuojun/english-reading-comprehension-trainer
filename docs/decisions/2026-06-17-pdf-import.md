@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: Accepted for planned PDF import
+Status: Accepted; implemented via `source_format='pdf'`
 
 ## Context
 
@@ -20,8 +20,8 @@ This keeps PDF support compatible with the existing learning workflow: sentence 
 
 - PDF visual layout will not be reproduced 1:1 in Phase 1.
 - Scanned PDFs or PDFs without extractable text fail with a clear error.
-- The schema must later expand `books.source_format` to include `pdf`.
-- Migration tests must use real SQLite and prove existing TXT/EPUB rows survive the CHECK-constraint rebuild.
+- The schema was expanded to include `books.source_format='pdf'`.
+- Migration tests must use real SQLite and prove existing TXT/EPUB rows survive CHECK-constraint rebuilds.
 
 ## Revisit When
 

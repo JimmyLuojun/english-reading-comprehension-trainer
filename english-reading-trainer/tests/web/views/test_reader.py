@@ -121,7 +121,7 @@ def test_reader_sentence_span_can_show_translation_without_marked_state() -> Non
     assert 'data-translation="猫坐着。"' in html
 
 
-def test_selection_toolbar_contains_delete_translation_action() -> None:
+def test_selection_toolbar_contains_translation_editor_without_delete_action() -> None:
     html = _selection_toolbar(
         "/read/1",
         [
@@ -136,8 +136,10 @@ def test_selection_toolbar_contains_delete_translation_action() -> None:
         ],
     )
 
-    assert 'id="toolbar-translation-delete"' in html
-    assert "Delete translation" in html
+    assert 'id="toolbar-translation-delete"' not in html
+    assert "Delete translation" not in html
+    assert 'id="toolbar-translation-open"' in html
+    assert "Write translation" in html
     assert 'id="toolbar-structure-open"' in html
     assert 'id="toolbar-external-prompt"' in html
     assert "Copy AI prompt" in html

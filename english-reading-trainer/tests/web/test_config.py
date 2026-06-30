@@ -9,6 +9,9 @@ def test_upload_limits_and_paths_are_defined() -> None:
     assert config._MAX_TEXT_IMPORT_BYTES > 0
     assert config._MAX_EPUB_IMPORT_BYTES > config._MAX_TEXT_IMPORT_BYTES
     assert config._MAX_PDF_IMPORT_BYTES == config._MAX_EPUB_IMPORT_BYTES
+    assert config._MAX_URL_IMPORT_BYTES == config._MAX_TEXT_IMPORT_BYTES
+    assert config._URL_IMPORT_TIMEOUT_SECONDS > 0
+    assert config._URL_IMPORT_MAX_REDIRECTS > 0
     assert config._UPLOAD_CHUNK_BYTES > 0
     assert config._DEFAULT_DB.name == "reading_trainer.db"
     assert config._MIGRATIONS.name == "migrations"

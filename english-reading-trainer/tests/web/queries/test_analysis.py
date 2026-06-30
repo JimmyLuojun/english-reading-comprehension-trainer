@@ -247,6 +247,35 @@ def test_sentence_analysis_payload_includes_translation_snapshot_when_changed(
     assert sentence_payload["user_translation"] == "新译文。"
 
 
+def test_sentence_analysis_payload_survives_cleared_translation(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence(db, tmp_path)
+    card_id = create_sentence_card(db, sentence_id, user_translation="旧译文。")
+    cache_id = _insert_cache(
+        db,
+        {"ok": True},
+        content_hash=compute_content_hash("The cat sat.", "", "旧译文。"),
+        input_translation="旧译文。",
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE sentence_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+
+    save_sentence_translation(db, sentence_id, "")
+
+    sentence_payload = _fetch_sentence_analysis_payload(db, sentence_id)
+
+    assert sentence_payload["cache_id"] == cache_id
+    assert sentence_payload["is_stale"] is True
+    assert sentence_payload["analyzed_translation"] == "旧译文。"
+    assert sentence_payload["user_translation"] == ""
+
+
 def test_sentence_analysis_payload_is_stale_when_structure_changes(
     tmp_path: Path,
 ) -> None:

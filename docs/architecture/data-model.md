@@ -87,7 +87,7 @@ prompt_versions(id, name, version, body_md, created_at, is_active)
 - `text_hash` 用 SHA256(normalized\_text)；用于跨书去重（见 §4）。
 - `paragraphs` / `sentences` 继续作为复习、标注、AI 诊断的句子流；`chapter_blocks` 只补充阅读页的原书顺序和非文本媒体，不把图片塞进 `sentences`。
 - `chapter_blocks.paragraph_id` 指向有句子流支撑的块（`prose` / `pre` / `table`），图片和缺失资源块为 `NULL`。
-- `book_assets` 只存 EPUB 内资源元数据和文件系统相对路径；实际二进制写入 `data/assets/books/<book_id>/`。
+- `book_assets` 存 EPUB/PDF 导入产生的资源元数据和文件系统相对路径；实际二进制写入 `data/assets/books/<book_id>/`。
 - `mastery_state` 与 SM-2 状态字段并存：`ef / interval_days / repetitions` 是算法状态，`mastery_state` 是衍生标签（new / learning / mature / lapsed），由 `repetitions` 与 `ef` 派生（见 §7.4）。
 - `due_at` 直接预计算下次到期，避免每次查询时算。
 - `ai_analysis_id` 指向 `ai_cache`，不直接存 JSON 在卡片表里。

@@ -327,6 +327,28 @@ class TestListDueCards:
         assert items[0].source_book_title == "B"
         assert items[0].source_href.endswith(f"?chapter=1#sentence-{sentence_id}")
 
+    def test_word_card_source_link_opens_word_panel_when_surface_missing(
+        self, db: DatabaseConnection
+    ) -> None:
+        sentence_id = _seed_sentence(db, "Bitcoin: A Peer-to-Peer Electronic Cash System")
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, lexical_type, first_sentence_id,
+                    current_meaning, pos, created_at, last_reviewed_at,
+                    review_count, mastery_state, ef, interval_days, repetitions,
+                    due_at, occurrence_count, user_note)
+                   VALUES ('incantation', 'incantation', 'word', ?, '', '', ?, NULL,
+                           0, 'new', 2.5, 0, 0, ?, 1, '')""",
+                (sentence_id, NOW.isoformat(), NOW.isoformat()),
+            ).lastrowid
+
+        items = list_due_cards(db, as_of=NOW, card_type="word")
+
+        assert items[0].source_href.endswith(
+            f"?chapter=1&word_card={card_id}#sentence-{sentence_id}"
+        )
+
     def test_analyzed_word_source_link_opens_word_analysis(
         self, db: DatabaseConnection
     ) -> None:
