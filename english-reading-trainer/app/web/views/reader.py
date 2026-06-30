@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.web.views.books import _section_label
 from app.web.views.layout import _escape
 from app.web.views.reader_script import _selection_script
+
+_INLINE_MARKDOWN_IMAGE_RE = re.compile(r"\[\[md-image:(\d+)\]\]")
 
 def _reader_view(
     rows: list[dict[str, Any]],
@@ -77,7 +80,7 @@ def _reader_content_blocks(
         if not paragraphs:
             return '<p class="empty">No sentences in this chapter.</p>'
         return "\n".join(
-            _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
+            _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence, book_id)
             for paragraph_rows in paragraphs
         )
 
@@ -87,18 +90,67 @@ def _reader_content_blocks(
         if paragraph_rows
     }
     parts: list[str] = []
+    pending_list_items: list[str] = []
+    pending_list_ordered: bool | None = None
+
+    def flush_list() -> None:
+        nonlocal pending_list_items, pending_list_ordered
+        if not pending_list_items:
+            return
+        tag = "ol" if pending_list_ordered else "ul"
+        parts.append(
+            f'<{tag} class="reader-md-list">'
+            + "".join(pending_list_items)
+            + f"</{tag}>"
+        )
+        pending_list_items = []
+        pending_list_ordered = None
+
     for block in blocks:
         paragraph_id = block.get("paragraph_id")
         if paragraph_id:
             paragraph_rows = rows_by_paragraph.get(paragraph_id, [])
             if paragraph_rows:
-                parts.append(
-                    _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence)
-                )
+                if block.get("kind") == "list_item":
+                    ordered = _block_payload_bool(block, "ordered")
+                    if pending_list_items and pending_list_ordered != ordered:
+                        flush_list()
+                    pending_list_ordered = ordered
+                    pending_list_items.append(
+                        _reader_list_item(
+                            paragraph_rows,
+                            chapter_id,
+                            cards_by_sentence,
+                            book_id,
+                        )
+                    )
+                else:
+                    flush_list()
+                    parts.append(
+                        _reader_paragraph(
+                            paragraph_rows,
+                            chapter_id,
+                            cards_by_sentence,
+                            book_id,
+                        )
+                    )
+            continue
+        flush_list()
+        if block["kind"] == "heading":
+            parts.append(_reader_markdown_heading(block, book_id))
             continue
         if block["kind"] in {"image", "figure", "missing_asset"}:
             parts.append(_reader_media_block(block, book_id))
+    flush_list()
     return "\n".join(parts) if parts else '<p class="empty">No sentences in this chapter.</p>'
+
+
+def _block_payload_bool(block: dict[str, Any], key: str) -> bool:
+    try:
+        payload = json.loads(str(block.get("payload_json") or "{}"))
+    except json.JSONDecodeError:
+        return False
+    return bool(payload.get(key))
 
 def _reader_boundary_link(
     book_id: int,
@@ -140,12 +192,50 @@ def _reader_paragraph(
     rows: list[dict[str, Any]],
     chapter_id: int,
     cards_by_sentence: dict[int, list[dict[str, Any]]],
+    book_id: int,
 ) -> str:
     sentence_spans = " ".join(
-        _reader_sentence_span(row, chapter_id, cards_by_sentence.get(row["id"], []))
+        _reader_sentence_span(
+            row,
+            chapter_id,
+            cards_by_sentence.get(row["id"], []),
+            book_id,
+        )
         for row in rows
     )
     return f'<p class="reader-para">{sentence_spans}</p>'
+
+
+def _reader_list_item(
+    rows: list[dict[str, Any]],
+    chapter_id: int,
+    cards_by_sentence: dict[int, list[dict[str, Any]]],
+    book_id: int,
+) -> str:
+    sentence_spans = " ".join(
+        _reader_sentence_span(
+            row,
+            chapter_id,
+            cards_by_sentence.get(row["id"], []),
+            book_id,
+        )
+        for row in rows
+    )
+    return f'<li class="reader-md-list-item">{sentence_spans}</li>'
+
+
+def _reader_markdown_heading(block: dict[str, Any], book_id: int) -> str:
+    try:
+        payload = json.loads(str(block.get("payload_json") or "{}"))
+    except json.JSONDecodeError:
+        payload = {}
+    source_level = int(payload.get("level") or 2)
+    heading_level = min(max(source_level + 2, 3), 6)
+    text = _render_inline_markdown_images(_escape(str(block.get("text") or "")), book_id)
+    return (
+        f'<h{heading_level} class="reader-md-heading '
+        f'reader-md-heading-level-{source_level}">{text}</h{heading_level}>'
+    )
 
 def _reader_media_block(block: dict[str, Any], book_id: int) -> str:
     caption = str(block.get("text") or "")
@@ -186,6 +276,7 @@ def _reader_sentence_span(
     row: dict[str, Any],
     chapter_id: int,
     word_cards: list[dict[str, Any]],
+    book_id: int,
 ) -> str:
     marked = "1" if row["has_card"] else "0"
     classes = ["reader-sentence"]
@@ -196,7 +287,7 @@ def _reader_sentence_span(
     if row.get("has_analysis"):
         classes.append("analyzed-stale" if row.get("analysis_is_stale") else "analyzed")
     analysis_id = row.get("ai_analysis_id") if row.get("has_analysis") else ""
-    text = _highlight_word_cards(row["text"], word_cards)
+    text = _highlight_word_cards(row["text"], word_cards, book_id)
     title_attr = ' title="Translation saved"' if "translated" in classes else ""
     return (
         f'<span id="sentence-{row["id"]}" class="{" ".join(classes)}"{title_attr} '
@@ -210,9 +301,13 @@ def _reader_sentence_span(
         f'{text}</span>'
     )
 
-def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
+def _highlight_word_cards(
+    text: str,
+    word_cards: list[dict[str, Any]],
+    book_id: int,
+) -> str:
     if not word_cards:
-        return _escape(text)
+        return _render_inline_markdown_images(_escape(text), book_id)
 
     lower_text = text.lower()
     matches: list[tuple[int, int, dict[str, Any]]] = []
@@ -236,7 +331,7 @@ def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
         occupied_until = end
 
     if not selected:
-        return _escape(text)
+        return _render_inline_markdown_images(_escape(text), book_id)
 
     pieces: list[str] = []
     cursor = 0
@@ -253,7 +348,17 @@ def _highlight_word_cards(text: str, word_cards: list[dict[str, Any]]) -> str:
         )
         cursor = end
     pieces.append(_escape(text[cursor:]))
-    return "".join(pieces)
+    return _render_inline_markdown_images("".join(pieces), book_id)
+
+
+def _render_inline_markdown_images(html: str, book_id: int) -> str:
+    return _INLINE_MARKDOWN_IMAGE_RE.sub(
+        lambda match: (
+            f'<img class="reader-inline-image" '
+            f'src="/assets/books/{book_id}/{match.group(1)}" alt="">'
+        ),
+        html,
+    )
 
 def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
     word_index = {

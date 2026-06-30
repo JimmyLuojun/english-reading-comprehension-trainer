@@ -270,6 +270,37 @@ def _css() -> str:
       font-size: 20px;
       line-height: 1.8;
     }
+    .reader-md-heading {
+      margin: 1.65em 0 0.65em;
+      color: var(--text-dim);
+      font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .reader-md-heading-level-1 {
+      font-size: 30px;
+    }
+    .reader-md-heading-level-2 {
+      font-size: 25px;
+    }
+    .reader-md-heading-level-3,
+    .reader-md-heading-level-4,
+    .reader-md-heading-level-5,
+    .reader-md-heading-level-6 {
+      font-size: 22px;
+    }
+    .reader-md-list {
+      margin: 0 0 1.2em 1.6em;
+      padding: 0;
+      color: var(--text);
+      font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
+      font-size: 20px;
+      line-height: 1.8;
+    }
+    .reader-md-list-item {
+      margin: 0.28em 0;
+      padding-left: 0.25em;
+    }
     .reader-figure {
       margin: 28px 0;
     }
@@ -285,6 +316,15 @@ def _css() -> str:
       font-size: 14px;
       line-height: 1.45;
       text-align: center;
+    }
+    .reader-inline-image {
+      display: inline-block;
+      max-height: 1.2em;
+      max-width: 12em;
+      width: auto;
+      height: auto;
+      margin: 0 0.08em;
+      vertical-align: -0.18em;
     }
     .reader-missing-asset {
       border: 1px dashed var(--line);

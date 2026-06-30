@@ -6,6 +6,7 @@ from app.web.views.reader import (
     _analysis_panel,
     _group_sentence_paragraphs,
     _highlight_word_cards,
+    _reader_content_blocks,
     _reader_boundary_link,
     _reader_media_block,
     _reader_sentence_span,
@@ -37,6 +38,7 @@ def test_highlight_word_cards_prefers_long_non_overlapping_match() -> None:
             {"id": 1, "surface_form": "long", "lexical_type": "word", "current_meaning": "", "user_note": ""},
             {"id": 2, "surface_form": "long term", "current_meaning": "phrase", "user_note": ""},
         ],
+        7,
     )
 
     assert 'data-word-card="2"' in html
@@ -67,6 +69,7 @@ def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
                 "user_note": "",
             }
         ],
+        7,
     )
 
     assert 'class="reader-sentence marked translated analyzed-stale"' in html
@@ -93,6 +96,7 @@ def test_reader_sentence_span_omits_invalid_analysis_id() -> None:
         },
         2,
         [],
+        7,
     )
 
     assert 'class="reader-sentence marked"' in html
@@ -113,12 +117,33 @@ def test_reader_sentence_span_can_show_translation_without_marked_state() -> Non
         },
         2,
         [],
+        7,
     )
 
     assert 'class="reader-sentence translated"' in html
     assert 'class="reader-sentence marked' not in html
     assert 'data-marked="0"' in html
     assert 'data-translation="猫坐着。"' in html
+
+
+def test_reader_sentence_span_renders_markdown_inline_image_tokens() -> None:
+    html = _reader_sentence_span(
+        {
+            "id": 1,
+            "text": "If [[md-image:42]] is true.",
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+        2,
+        [],
+        7,
+    )
+
+    assert "[[md-image" not in html
+    assert '<img class="reader-inline-image" src="/assets/books/7/42" alt="">' in html
 
 
 def test_selection_toolbar_contains_translation_editor_without_delete_action() -> None:
@@ -203,6 +228,71 @@ def test_reader_view_has_book_and_chapter_navigation() -> None:
 
     assert '<a class="button small" href="/books">All books</a>' in html
     assert '<a class="button small" href="/books/7">Chapters</a>' in html
+
+
+def test_reader_content_blocks_render_markdown_headings_and_lists() -> None:
+    rows = [
+        {
+            "id": 1,
+            "idx": 0,
+            "text": "First item sentence.",
+            "paragraph_id": 10,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+        {
+            "id": 2,
+            "idx": 1,
+            "text": "Second item sentence.",
+            "paragraph_id": 11,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+        {
+            "id": 3,
+            "idx": 2,
+            "text": "Normal paragraph.",
+            "paragraph_id": 12,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+    ]
+    blocks = [
+        {
+            "kind": "heading",
+            "text": "7.1: Rules of Implication I",
+            "payload_json": '{"level": 3}',
+        },
+        {"kind": "list_item", "paragraph_id": 10, "payload_json": '{"ordered": true}'},
+        {"kind": "list_item", "paragraph_id": 11, "payload_json": '{"ordered": true}'},
+        {"kind": "prose", "paragraph_id": 12, "payload_json": ""},
+    ]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert '<h5 class="reader-md-heading reader-md-heading-level-3">' in html
+    assert "7.1: Rules of Implication I" in html
+    assert '<ol class="reader-md-list">' in html
+    assert html.count('<li class="reader-md-list-item">') == 2
+    assert 'data-sentence-id="1"' in html
+    assert 'data-sentence-id="2"' in html
+    assert '<p class="reader-para">' in html
+    assert 'data-sentence-id="3"' in html
 
 
 def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:

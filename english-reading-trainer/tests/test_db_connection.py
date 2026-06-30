@@ -51,6 +51,7 @@ class TestMigrationRunner:
         assert "011_ai_cache_input_snapshot.sql" in applied
         assert "012_word_card_diagnosis.sql" in applied
         assert "013_markdown_source_format.sql" in applied
+        assert "014_markdown_reader_blocks.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -71,6 +72,7 @@ class TestMigrationRunner:
         assert "011_ai_cache_input_snapshot.sql" in recorded
         assert "012_word_card_diagnosis.sql" in recorded
         assert "013_markdown_source_format.sql" in recorded
+        assert "014_markdown_reader_blocks.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -207,6 +209,7 @@ class TestMigrationRunner:
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
+            "014_markdown_reader_blocks.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -295,6 +298,7 @@ class TestMigrationRunner:
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
+            "014_markdown_reader_blocks.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -567,6 +571,7 @@ class TestConstraints:
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
+            "014_markdown_reader_blocks.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -617,7 +622,10 @@ class TestConstraints:
         old_migrations = tmp_path / "old_migrations"
         old_migrations.mkdir()
         for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            if sql_file.name != "013_markdown_source_format.sql":
+            if sql_file.name not in {
+                "013_markdown_source_format.sql",
+                "014_markdown_reader_blocks.sql",
+            }:
                 shutil.copy(sql_file, old_migrations / sql_file.name)
 
         db = DatabaseConnection(tmp_path / "before_md.db")
@@ -654,7 +662,10 @@ class TestConstraints:
 
         applied = db.apply_migrations(MIGRATIONS_DIR)
 
-        assert applied == ["013_markdown_source_format.sql"]
+        assert applied == [
+            "013_markdown_source_format.sql",
+            "014_markdown_reader_blocks.sql",
+        ]
         with db.get_connection() as conn:
             conn.execute(
                 "INSERT INTO books (title, source_format, file_hash, imported_at) "
@@ -721,6 +732,7 @@ class TestConstraints:
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
             "013_markdown_source_format.sql",
+            "014_markdown_reader_blocks.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

@@ -37,6 +37,11 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     css = _css()
 
     assert ".reader-sentence" in css
+    assert ".reader-inline-image" in css
+    assert "vertical-align: -0.18em;" in css
+    assert ".reader-md-heading" in css
+    assert ".reader-md-list" in css
+    assert ".reader-md-list-item" in css
     assert ".reader-sentence.editing-target" in css
     assert "background: rgba(96, 165, 250, 0.16)" in css
     assert "box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.10)" in css

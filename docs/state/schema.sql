@@ -164,26 +164,6 @@ CREATE TABLE book_assets (
 );
 CREATE INDEX idx_book_assets_book
     ON book_assets(book_id);
-CREATE TABLE chapter_blocks (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    chapter_id      INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
-    idx             INTEGER NOT NULL,
-    kind            TEXT    NOT NULL
-                            CHECK(kind IN (
-                                'prose', 'pre', 'table',
-                                'image', 'figure', 'missing_asset'
-                            )),
-    paragraph_id    INTEGER REFERENCES paragraphs(id) ON DELETE SET NULL,
-    asset_id        INTEGER REFERENCES book_assets(id) ON DELETE SET NULL,
-    text            TEXT    NOT NULL DEFAULT '',
-    payload_json    TEXT    NOT NULL DEFAULT '',
-    UNIQUE(chapter_id, idx)
-);
-CREATE INDEX idx_chapter_blocks_book
-    ON chapter_blocks(book_id);
-CREATE INDEX idx_chapter_blocks_chapter
-    ON chapter_blocks(chapter_id, idx);
 CREATE TABLE word_card_sources (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
@@ -218,3 +198,23 @@ CREATE TABLE IF NOT EXISTS "books" (
     total_chapters  INTEGER NOT NULL DEFAULT 0,
     total_sentences INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS "chapter_blocks" (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    chapter_id      INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+    idx             INTEGER NOT NULL,
+    kind            TEXT    NOT NULL
+                            CHECK(kind IN (
+                                'prose', 'heading', 'list_item', 'pre', 'table',
+                                'image', 'figure', 'missing_asset'
+                            )),
+    paragraph_id    INTEGER REFERENCES paragraphs(id) ON DELETE SET NULL,
+    asset_id        INTEGER REFERENCES book_assets(id) ON DELETE SET NULL,
+    text            TEXT    NOT NULL DEFAULT '',
+    payload_json    TEXT    NOT NULL DEFAULT '',
+    UNIQUE(chapter_id, idx)
+);
+CREATE INDEX idx_chapter_blocks_book
+    ON chapter_blocks(book_id);
+CREATE INDEX idx_chapter_blocks_chapter
+    ON chapter_blocks(chapter_id, idx);
