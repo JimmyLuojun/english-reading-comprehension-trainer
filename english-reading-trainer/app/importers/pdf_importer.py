@@ -45,11 +45,13 @@ _MARGIN_DECORATION_MAX_HEIGHT_RATIO = 0.14
 _MARGIN_DECORATION_MIN_WORD_HEIGHT_RATIO = 0.02
 _PDF_FIGURE_MEDIA_TYPE = "image/png"
 _PDF_FIGURE_RENDER_DPI = 150
-_NONPROSE_CLUSTER_GAP = 22.0
+_NONPROSE_CLUSTER_GAP = 36.0
 _PROOF_LINE_X_TOLERANCE = 8.0
 _PROOF_CONTINUATION_INDENT = 24.0
 _PROOF_LINE_GAP_MULTIPLIER = 1.75
 _PROOF_LINE_MAX_GAP = 18.0
+_LOGIC_EXAMPLE_LINE_X_TOLERANCE = 24.0
+_LOGIC_EXAMPLE_LINE_MAX_GAP = 36.0
 
 _CODE_SYMBOLS = frozenset("{}[]();#=+-*/<>")
 _MATH_SYMBOLS = frozenset("=<>+-*/^()[]{}∑∏∫∞≤≥≠±√⋅−λ")
@@ -60,6 +62,19 @@ _PROOF_RULE_CITATION_RE = re.compile(
     r"\b\d+\s*,\s*\d+(?:\s*,\s*\d+)?\s*,?\s*"
     r"(?:MP|MT|HS|DS|CD|SIMP|CONJ|ADD|DN|COMM|ASSOC|DIST|DEM)\b",
     re.I,
+)
+_LOGIC_RULE_TERM_RE = re.compile(
+    r"\b(?:modus\s+ponens|modus\s+tollens|"
+    r"(?:pure\s+)?hypothetical\s+syllogism|disjunctive\s+syllogism|"
+    r"constructive\s+dilemma|MP|MT|HS|DS|CD|SIMP|CONJ|ADD|DN|COMM|"
+    r"ASSOC|DIST|DEM)\b",
+    re.I,
+)
+_LOGIC_OPERATOR_RE = re.compile(
+    r"(?:[~¬∼]\s*[A-Za-z]|\b[A-Za-z]\s*(?:->|=>|⊃|→|∨|⋁|∧|&|•|·|\bv\b)\s*[A-Za-z])"
+)
+_LOGIC_STANDALONE_VARIABLE_RE = re.compile(
+    r"(?:^|[\s.;])(?:[~¬∼]\s*)?[pqr](?=\s+[A-Z])"
 )
 
 _PAGE_NUMBER_RE = re.compile(r"^(?:page\s+)?\d+$", re.I)
@@ -548,8 +563,7 @@ def _has_region_between(
         return False
     return any(
         region.page_number == line.page_number
-        and previous.bottom <= region.top
-        and region.bottom <= line.top
+        and previous.bottom <= region.top <= line.top
         for region in regions
     )
 
@@ -691,6 +705,13 @@ def _include_numbered_proof_blocks(
             index += 1
             continue
 
+        logic_example_indices = _numbered_logic_example_candidate_indices(lines, index)
+        if logic_example_indices:
+            for item in logic_example_indices:
+                expanded[item] = True
+            index = logic_example_indices[-1] + 1
+            continue
+
         block_indices = _numbered_proof_candidate_indices(lines, index)
         if len(block_indices) < 2:
             index += 1
@@ -705,6 +726,73 @@ def _include_numbered_proof_blocks(
 
         index = block_indices[-1] + 1
     return expanded
+
+
+def _numbered_logic_example_candidate_indices(
+    lines: list[PdfWordLine],
+    start_index: int,
+) -> list[int]:
+    """Return a numbered logic-rule example list plus wrapped continuations."""
+    base_line = lines[start_index]
+    base_match = _proof_line_match(base_line)
+    if base_match is None:
+        return []
+
+    indices: list[int] = []
+    numbered_count = 0
+    rule_term_count = 0
+    logic_statement_count = 0
+    previous_line = base_line
+    previous_number: int | None = None
+    candidate_index = start_index
+
+    while candidate_index < len(lines):
+        candidate = lines[candidate_index]
+        if candidate_index != start_index and not _is_logic_example_neighbor(
+            previous_line,
+            candidate,
+        ):
+            break
+
+        match = _proof_line_match(candidate)
+        if match is not None:
+            if abs(candidate.x0 - base_line.x0) > _LOGIC_EXAMPLE_LINE_X_TOLERANCE:
+                break
+            number = _safe_int(match.group("number"))
+            if (
+                previous_number is not None
+                and number is not None
+                and number not in {previous_number, previous_number + 1}
+            ):
+                break
+            numbered_count += 1
+            previous_number = number
+            if _has_logic_rule_term(candidate.text):
+                rule_term_count += 1
+            if _has_logic_statement_signal(candidate.text):
+                logic_statement_count += 1
+            indices.append(candidate_index)
+            previous_line = candidate
+            candidate_index += 1
+            continue
+
+        if not _has_logic_statement_signal(candidate.text):
+            break
+        logic_statement_count += 1
+        indices.append(candidate_index)
+        previous_line = candidate
+        candidate_index += 1
+
+    if numbered_count >= 2 and rule_term_count >= 1 and logic_statement_count >= 1:
+        return indices
+    return []
+
+
+def _is_logic_example_neighbor(previous: PdfWordLine, candidate: PdfWordLine) -> bool:
+    if previous.page_number != candidate.page_number:
+        return False
+    gap = candidate.top - previous.bottom
+    return -1.0 <= gap <= _LOGIC_EXAMPLE_LINE_MAX_GAP
 
 
 def _numbered_proof_candidate_indices(
@@ -757,6 +845,8 @@ def _include_proof_continuations(
             break
         if candidate.x0 < base_x + _PROOF_CONTINUATION_INDENT:
             break
+        if not _is_proof_continuation_line(candidate):
+            break
         flags[candidate_index] = True
         previous_index = candidate_index
         candidate_index += 1
@@ -778,6 +868,8 @@ def _has_strong_proof_signal(line: PdfWordLine) -> bool:
     if match is None:
         return False
     body = match.group("body")
+    if _has_logic_rule_example_signal(body):
+        return True
     if _PROOF_RULE_CITATION_RE.search(body):
         return True
     if _math_symbol_ratio(body) >= 0.12 and _alpha_ratio(body) <= 0.75:
@@ -789,6 +881,41 @@ def _has_strong_proof_signal(line: PdfWordLine) -> bool:
 
 def _proof_line_match(line: PdfWordLine) -> re.Match[str] | None:
     return _PROOF_LINE_RE.match(line.text.strip())
+
+
+def _has_logic_rule_example_signal(text: str) -> bool:
+    return _has_logic_rule_term(text) and _has_logic_statement_signal(text)
+
+
+def _has_logic_rule_term(text: str) -> bool:
+    return bool(_LOGIC_RULE_TERM_RE.search(text))
+
+
+def _has_logic_statement_signal(text: str) -> bool:
+    return bool(
+        _LOGIC_OPERATOR_RE.search(text)
+        or _LOGIC_STANDALONE_VARIABLE_RE.search(text)
+    )
+
+
+def _has_logic_example_continuation_signal(text: str) -> bool:
+    return _has_logic_statement_signal(text)
+
+
+def _is_proof_continuation_line(line: PdfWordLine) -> bool:
+    text = line.text.strip()
+    if not text:
+        return False
+    if _PROOF_RULE_CITATION_RE.search(text):
+        return True
+    if _looks_like_long_prose_line(text):
+        return False
+    return bool(_is_nonprose_line(line) or _has_logic_example_continuation_signal(text))
+
+
+def _looks_like_long_prose_line(text: str) -> bool:
+    words = text.split()
+    return len(text) >= 72 and len(words) >= 8 and _alpha_ratio(text) >= 0.65
 
 
 def _include_neighboring_formula_fragments(

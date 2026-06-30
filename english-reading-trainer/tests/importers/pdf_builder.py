@@ -221,6 +221,89 @@ def make_logic_proof_pdf(tmp_path: Path, name: str = "logic-proof.pdf") -> Path:
     return path
 
 
+def make_logic_rule_examples_pdf(
+    tmp_path: Path,
+    name: str = "logic-rule-examples.pdf",
+) -> Path:
+    """Create prose-like numbered implication rule examples."""
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    _width, height = letter
+
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 96, "Before the logic examples sentence remains readable.")
+
+    pdf.setFont("Helvetica", 11)
+    y = height - 150
+    for line in [
+        "1. Modus ponens (MP)",
+        "p ⊃ q If Su Lin is a panda, then Su Lin is cute.",
+        "p Su Lin is a panda.",
+        "q Su Lin is cute.",
+        "",
+        "2. Modus tollens (MT )",
+        "p ⊃ q If Koko is a koala, then Koko is cuddly.",
+        "∼ q Koko is not cuddly.",
+        "∼ p Koko is not a koala.",
+        "",
+        "3. Pure hypothetical syllogism (HS)",
+        "p ⊃ q If Leo is a lion, then Leo roars.",
+        "q ⊃ r If Leo roars, then Leo is fierce.",
+        "p ⊃ r If Leo is a lion, then Leo is fierce.",
+        "4. Disjunctive syllogism (DS)",
+        "p ⋁ q Scooter is either a mouse or a rat.",
+        "∼ p Scooter is not a mouse.",
+        "q Scooter is a rat.",
+    ]:
+        if line:
+            pdf.drawString(96, y, line)
+            y -= 17
+        else:
+            y -= 26
+
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, y - 42, "After the logic examples sentence remains readable.")
+    pdf.showPage()
+    pdf.save()
+    return path
+
+
+def make_logic_proof_with_nearby_prose_pdf(
+    tmp_path: Path,
+    name: str = "logic-proof-nearby-prose.pdf",
+) -> Path:
+    """Create a proof block followed closely by normal prose."""
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=letter)
+    _width, height = letter
+
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(72, height - 96, "Before the nearby proof sentence remains readable.")
+
+    pdf.setFont("Helvetica", 11)
+    y = height - 150
+    for line in [
+        "1. A -> B",
+        "2. B",
+        "3. A 1, 2, MP",
+    ]:
+        pdf.drawString(120, y, line)
+        y -= 14
+
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(
+        160,
+        y - 2,
+        (
+            "In this case, if you mentally substitute ordinary statements, "
+            "the prose remains readable."
+        ),
+    )
+    pdf.showPage()
+    pdf.save()
+    return path
+
+
 def make_margin_decoration_pdf(
     tmp_path: Path,
     name: str = "margin-decoration.pdf",

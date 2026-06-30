@@ -17,7 +17,9 @@ from app.importers.txt_importer import DuplicateBookError
 from tests.importers.pdf_builder import (
     make_chapter_heading_pdf,
     make_empty_pdf,
+    make_logic_proof_with_nearby_prose_pdf,
     make_logic_proof_pdf,
+    make_logic_rule_examples_pdf,
     make_margin_decoration_pdf,
     make_nonprose_text_pdf,
     make_outline_chapter_pdf,
@@ -383,6 +385,65 @@ def test_import_pdf_renders_numbered_logic_proof_as_single_figure(
     assert (tmp_path / "assets" / figure["storage_path"]).read_bytes().startswith(
         b"\x89PNG\r\n\x1a\n"
     )
+
+
+def test_import_pdf_renders_numbered_logic_rule_examples_as_figure(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> None:
+    pdf_path = make_logic_rule_examples_pdf(tmp_path)
+
+    result = import_pdf(db, pdf_path, title="Logic Rule Examples")
+
+    sentences = " ".join(_sentences_for_book(db, result.book_id))
+    assert "Before the logic examples sentence remains readable" in sentences
+    assert "After the logic examples sentence remains readable" in sentences
+    assert "Modus ponens (MP)" not in sentences
+    assert "Disjunctive syllogism (DS)" not in sentences
+    assert "Su Lin" not in sentences
+    assert "Koko" not in sentences
+    assert "Scooter" not in sentences
+    with db.get_connection() as conn:
+        blocks = conn.execute(
+            """SELECT cb.kind, cb.paragraph_id, cb.asset_id,
+                      ba.media_type, ba.storage_path, ba.byte_size
+                 FROM chapter_blocks cb
+                 LEFT JOIN book_assets ba ON ba.id = cb.asset_id
+                WHERE cb.book_id = ?
+                ORDER BY cb.idx""",
+            (result.book_id,),
+        ).fetchall()
+
+    assert [row["kind"] for row in blocks] == ["prose", "figure", "prose"]
+    figure = blocks[1]
+    assert figure["paragraph_id"] is None
+    assert figure["asset_id"] is not None
+    assert figure["media_type"] == "image/png"
+    assert figure["byte_size"] > 0
+    assert (tmp_path / "assets" / figure["storage_path"]).read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+
+
+def test_import_pdf_keeps_nearby_prose_after_numbered_logic_proof(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> None:
+    pdf_path = make_logic_proof_with_nearby_prose_pdf(tmp_path)
+
+    result = import_pdf(db, pdf_path, title="Nearby Prose")
+
+    sentences = " ".join(_sentences_for_book(db, result.book_id))
+    assert "Before the nearby proof sentence remains readable" in sentences
+    assert "prose remains readable" in sentences
+    assert "1, 2, MP" not in sentences
+    with db.get_connection() as conn:
+        blocks = conn.execute(
+            "SELECT kind FROM chapter_blocks WHERE book_id = ? ORDER BY idx",
+            (result.book_id,),
+        ).fetchall()
+
+    assert [row["kind"] for row in blocks] == ["prose", "figure", "prose"]
 
 
 def test_import_pdf_skips_margin_decoration_figures(
