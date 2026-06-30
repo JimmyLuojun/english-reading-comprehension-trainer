@@ -59,6 +59,7 @@ Updated: 2026-06-30
 
 - Improve PDF importer quality only after real sample PDFs expose gaps: multi-column handling, better multi-figure clustering, caption extraction, or OCR should be separate scoped follow-ups.
 - Continue moving complex web workflows into `app/web/services/` when a route starts coordinating multiple queries or domain services.
+- If starting external webpage sentence analysis, begin from `docs/features/external-web-sentence-analysis.md`: first implement the backend bridge with explicit context, then the Chrome Extension selection/drawer.
 - Keep `docs/state/schema.sql` regenerated after schema migrations.
 - Keep mirrored tests in sync when adding or splitting Python source files.
 

@@ -68,6 +68,7 @@
 - [Cards 与 Review](features/cards-review.md)：Cards/Review 信息增强、Notes、Reveal、来源跳转和 EPUB 导入接入。
 - [删除导入材料](features/book-deletion.md)：彻底删除书籍/文章、词卡 re-anchor、review log 保留规则。
 - [URL 导入执行方案](features/url-import.md)：已实现的 Web URL 导入 MVP，远程 HTML/plain-text 抽正文后作为 TXT 内容导入，不改 schema。
+- [外部网页选句分析方案](features/external-web-sentence-analysis.md)：计划中的 Chrome Extension + 本地 FastAPI bridge，第一版按 `s` 选中网页当前句子并在右侧 drawer 显示结合上下文的 AI 分析；后续再做来源管理、词/短语分析和 Review 整合。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。
 - [PDF 导入执行方案](features/pdf-import.md)：已实现的 PDF 导入归一化方案。
 - [推理错误层执行方案](features/inference-error-layer.md)：计划中的 `inference` 错误层（I01/I02），补全"词法语法全懂但没读懂意思"的诊断盲区。
