@@ -1,7 +1,7 @@
 # English Reading Comprehension Trainer
 
-A local-first English reading training system with TXT/EPUB/PDF/URL import, sentence
-and word cards, manual AI analysis prompts, SM-2 review scheduling, learner
+A local-first English reading training system with TXT/Markdown/EPUB/PDF/URL import,
+sentence and word cards, manual AI analysis prompts, SM-2 review scheduling, learner
 profile snapshots, and a small FastAPI web UI.
 
 ## Quick Start
@@ -88,6 +88,7 @@ Run commands from `english-reading-trainer/`:
 
 ```bash
 .venv/bin/python -m app.cli_entry books import txt /path/to/book.txt --title "Book Title"
+.venv/bin/python -m app.cli_entry books import md /path/to/notes.md --title "Notes"
 .venv/bin/python -m app.cli_entry books import epub /path/to/book.epub
 .venv/bin/python -m app.cli_entry books import pdf /path/to/book.pdf
 .venv/bin/python -m app.cli_entry books list
@@ -133,10 +134,10 @@ cd english-reading-trainer
 
 Then open `http://127.0.0.1:8001`.
 
-The web UI supports TXT/EPUB/PDF file import, URL import for HTML/plain-text
-pages, the dashboard, book browsing, chapter reading, sentence and word marking,
-card lists, review actions, profile prompt generation, profile saving, and latest
-profile viewing.
+The web UI supports TXT/Markdown/EPUB/PDF file import, URL import for
+HTML/plain-text pages, the dashboard, book browsing, chapter reading, sentence
+and word marking, card lists, review actions, profile prompt generation, profile
+saving, and latest profile viewing.
 
 ## Tests
 
@@ -157,7 +158,7 @@ english-reading-trainer/
   app/
     ai/          Manual AI prompts, JSON validation, response cache, savers
     cards/       Sentence cards, word cards, similar-card lookup
-    importers/   TXT, EPUB, PDF, and URL import workflows
+    importers/   TXT, Markdown, EPUB, PDF, and URL import workflows
     nlp/         Sentence segmentation and lemmatization
     profile/     Learner profile statistics, prompts, snapshots
     review/      SM-2 scheduling and daily review queue

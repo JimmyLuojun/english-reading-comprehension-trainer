@@ -370,6 +370,28 @@ class TestBasicPages:
         assert response.status_code == 404
         assert "Book not found" in response.text
 
+    def test_missing_read_book_restore_clears_stale_local_storage(
+        self,
+        client: TestClient,
+    ) -> None:
+        response = client.get("/read/999?chapter=1&restore=1")
+
+        assert response.status_code == 200
+        assert "Book not found" in response.text
+        assert 'const bookId = "999"' in response.text
+        assert 'localStorage.removeItem("reader:last-book-id")' in response.text
+        assert "reader:progress:book:${bookId}" in response.text
+        assert 'window.location.replace("/books")' in response.text
+
+    def test_missing_read_book_without_restore_still_returns_404(
+        self,
+        client: TestClient,
+    ) -> None:
+        response = client.get("/read/999?chapter=1")
+
+        assert response.status_code == 404
+        assert "Book not found" in response.text
+
     def test_missing_chapter_returns_404(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -379,6 +401,19 @@ class TestBasicPages:
 
         assert response.status_code == 404
         assert "Chapter not found" in response.text
+
+    def test_missing_chapter_restore_clears_stale_progress(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.get(f"/read/{book_id}?chapter=999&restore=1")
+
+        assert response.status_code == 200
+        assert "Chapter not found" in response.text
+        assert f'const bookId = "{book_id}"' in response.text
+        assert "reader:progress:book:${bookId}" in response.text
+        assert "window.location.replace(`/read/${encodeURIComponent(bookId)}`)" in response.text
 
 
 class TestBookDeletion:
@@ -2846,6 +2881,53 @@ class TestImportRoutes:
         assert response.status_code == 413
         assert "Uploaded PDF exceeds 1 MB limit" in response.text
         assert list(tmp_path.glob("*.pdf")) == []
+
+    # --- POST /import/file (Markdown) ---
+
+    def test_import_markdown_file_success_redirects_to_read(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        md_bytes = (
+            b"# Markdown Chapter\n\n"
+            b"This **Markdown** sentence should import cleanly. "
+            b"It keeps readable prose."
+        )
+
+        response = client.post(
+            "/import/file",
+            files={"file": ("notes.md", md_bytes, "text/markdown")},
+            data={"title": "My Markdown", "author": "Author One"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/read/")
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title, source_format FROM books LIMIT 1").fetchone()
+            sentence = conn.execute("SELECT text FROM sentences LIMIT 1").fetchone()
+        assert row["title"] == "My Markdown"
+        assert row["source_format"] == "md"
+        assert sentence["text"] == "This Markdown sentence should import cleanly."
+
+    def test_import_markdown_file_duplicate_returns_409(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        md_bytes = b"# Markdown Chapter\n\nThis Markdown sentence is unique."
+
+        client.post(
+            "/import/file",
+            files={"file": ("notes.md", md_bytes, "text/markdown")},
+            data={"title": "First", "author": ""},
+            follow_redirects=False,
+        )
+        response = client.post(
+            "/import/file",
+            files={"file": ("copy.markdown", md_bytes, "text/markdown")},
+            data={"title": "Second", "author": ""},
+        )
+
+        assert response.status_code == 409
+        assert "Already imported" in response.text
 
 
 # ---------------------------------------------------------------------------

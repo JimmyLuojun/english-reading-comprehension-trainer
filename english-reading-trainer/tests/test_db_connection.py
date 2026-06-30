@@ -49,6 +49,8 @@ class TestMigrationRunner:
         assert "009_inference_error_layer.sql" in applied
         assert "010_sentence_user_structure.sql" in applied
         assert "011_ai_cache_input_snapshot.sql" in applied
+        assert "012_word_card_diagnosis.sql" in applied
+        assert "013_markdown_source_format.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -67,6 +69,8 @@ class TestMigrationRunner:
         assert "009_inference_error_layer.sql" in recorded
         assert "010_sentence_user_structure.sql" in recorded
         assert "011_ai_cache_input_snapshot.sql" in recorded
+        assert "012_word_card_diagnosis.sql" in recorded
+        assert "013_markdown_source_format.sql" in recorded
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -202,6 +206,7 @@ class TestMigrationRunner:
         assert applied == [
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
+            "013_markdown_source_format.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -289,6 +294,7 @@ class TestMigrationRunner:
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
+            "013_markdown_source_format.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -462,7 +468,7 @@ class TestColumns:
 # ---------------------------------------------------------------------------
 
 class TestConstraints:
-    def test_books_source_format_accepts_pdf_and_rejects_invalid(
+    def test_books_source_format_accepts_pdf_markdown_and_rejects_invalid(
         self,
         db: DatabaseConnection,
     ) -> None:
@@ -470,6 +476,10 @@ class TestConstraints:
             conn.execute(
                 "INSERT INTO books (title, source_format, file_hash, imported_at) "
                 "VALUES ('PDF', 'pdf', 'h_pdf', '2026-01-01T00:00:00+00:00')"
+            )
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('Markdown', 'md', 'h_md', '2026-01-01T00:00:00+00:00')"
             )
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -556,6 +566,7 @@ class TestConstraints:
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
+            "013_markdown_source_format.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -598,6 +609,69 @@ class TestConstraints:
             "chapter_blocks": 1,
         }
         assert sentence["text"] == "Existing EPUB sentence."
+
+    def test_markdown_source_format_migration_preserves_existing_related_data(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            if sql_file.name != "013_markdown_source_format.sql":
+                shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "before_md.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                "INSERT INTO books "
+                "(title, author, source_format, file_hash, imported_at) "
+                "VALUES ('PDF', '', 'pdf', 'h_pdf_before_md', '2026-01-01')"
+            ).lastrowid
+            chapter_id = conn.execute(
+                "INSERT INTO chapters "
+                "(book_id, idx, title, section_kind, chapter_number) "
+                "VALUES (?, 1, 'Chapter 1', 'chapter', 1)",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                "INSERT INTO paragraphs (chapter_id, idx) VALUES (?, 1)",
+                (chapter_id,),
+            ).lastrowid
+            sentence_id = conn.execute(
+                """INSERT INTO sentences
+                   (book_id, chapter_id, paragraph_id, idx, text, text_hash)
+                   VALUES (?, ?, ?, 0, 'Existing PDF sentence.', 'hash-md-upgrade')""",
+                (book_id, chapter_id, paragraph_id),
+            ).lastrowid
+
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO books "
+                    "(title, source_format, file_hash, imported_at) "
+                    "VALUES ('Markdown Before', 'md', 'h_md_before', '2026-01-01')"
+                )
+
+        applied = db.apply_migrations(MIGRATIONS_DIR)
+
+        assert applied == ["013_markdown_source_format.sql"]
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('Markdown After', 'md', 'h_md_after', '2026-01-01')"
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                    "VALUES ('Bad', 'html', 'h_bad_md', '2026-01-01')"
+                )
+            assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+            sentence = conn.execute(
+                "SELECT text FROM sentences WHERE id = ?",
+                (sentence_id,),
+            ).fetchone()
+
+        assert sentence["text"] == "Existing PDF sentence."
 
     def test_sentence_user_structure_migration_preserves_existing_cards(
         self,
@@ -646,6 +720,7 @@ class TestConstraints:
             "010_sentence_user_structure.sql",
             "011_ai_cache_input_snapshot.sql",
             "012_word_card_diagnosis.sql",
+            "013_markdown_source_format.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

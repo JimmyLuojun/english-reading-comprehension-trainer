@@ -11,7 +11,7 @@
 ### 当前现状
 
 - FastAPI Web UI（`app/web/fastapi_app.py`）已可用
-- SQLite 单机存储，本地 TXT/EPUB/PDF 导入，以及 URL 导入 HTML/plain-text 页面
+- SQLite 单机存储，本地 TXT/Markdown/EPUB/PDF 导入，以及 URL 导入 HTML/plain-text 页面
 - AI 难句分析 + 响应缓存
 - SM-2 复习队列、卡片定义内联编辑、Review Reveal AI meaning
 - EPUB/PDF 媒体与章节边界支持

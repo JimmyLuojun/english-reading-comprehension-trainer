@@ -184,17 +184,6 @@ CREATE INDEX idx_chapter_blocks_book
     ON chapter_blocks(book_id);
 CREATE INDEX idx_chapter_blocks_chapter
     ON chapter_blocks(chapter_id, idx);
-CREATE TABLE IF NOT EXISTS "books" (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    title           TEXT    NOT NULL,
-    author          TEXT    NOT NULL DEFAULT '',
-    language        TEXT    NOT NULL DEFAULT 'en',
-    source_format   TEXT    NOT NULL CHECK(source_format IN ('txt', 'epub', 'pdf')),
-    file_hash       TEXT    NOT NULL UNIQUE,
-    imported_at     TEXT    NOT NULL,
-    total_chapters  INTEGER NOT NULL DEFAULT 0,
-    total_sentences INTEGER NOT NULL DEFAULT 0
-);
 CREATE TABLE word_card_sources (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
@@ -217,4 +206,15 @@ CREATE TABLE IF NOT EXISTS "error_types" (
     code  TEXT    NOT NULL UNIQUE,
     name  TEXT    NOT NULL,
     layer TEXT    NOT NULL CHECK(layer IN ('grammar','lexical','discourse','inference'))
+);
+CREATE TABLE IF NOT EXISTS "books" (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    title           TEXT    NOT NULL,
+    author          TEXT    NOT NULL DEFAULT '',
+    language        TEXT    NOT NULL DEFAULT 'en',
+    source_format   TEXT    NOT NULL CHECK(source_format IN ('txt', 'epub', 'pdf', 'md')),
+    file_hash       TEXT    NOT NULL UNIQUE,
+    imported_at     TEXT    NOT NULL,
+    total_chapters  INTEGER NOT NULL DEFAULT 0,
+    total_sentences INTEGER NOT NULL DEFAULT 0
 );

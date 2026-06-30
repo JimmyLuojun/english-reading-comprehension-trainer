@@ -19,6 +19,7 @@ from app.web.models import UploadTooLargeError
 from app.web.services.imports import (
     ImportOutcome,
     import_epub_file,
+    import_markdown_file,
     import_pdf_file,
     import_text_bytes,
     import_url_content,
@@ -80,6 +81,26 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
                 return _do_import_pdf(db_factory(), tmp_path, title, author)
+            finally:
+                _unlink_silent(tmp_path)
+
+        if filename.endswith((".md", ".markdown")):
+            try:
+                tmp_path, size = await _save_upload_to_temp(
+                    file,
+                    suffix=".md",
+                    max_bytes=fastapi_app._MAX_TEXT_IMPORT_BYTES,
+                )
+            except UploadTooLargeError as exc:
+                return _error_page(
+                    f"Uploaded Markdown exceeds {_format_mb(exc.max_bytes)} MB limit.",
+                    status_code=413,
+                )
+            if size == 0:
+                _unlink_silent(tmp_path)
+                return _error_page("Uploaded file is empty.", status_code=400)
+            try:
+                return _do_import_markdown(db_factory(), tmp_path, title, author)
             finally:
                 _unlink_silent(tmp_path)
 
@@ -171,6 +192,21 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
     ) -> Any:
         return _import_outcome_response(
             import_pdf_file(
+                db,
+                file_path,
+                form_title=form_title,
+                author=author,
+            )
+        )
+
+    def _do_import_markdown(
+        db: DatabaseConnection,
+        file_path: str | Path,
+        form_title: str,
+        author: str,
+    ) -> Any:
+        return _import_outcome_response(
+            import_markdown_file(
                 db,
                 file_path,
                 form_title=form_title,

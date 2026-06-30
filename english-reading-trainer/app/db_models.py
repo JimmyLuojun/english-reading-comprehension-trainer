@@ -19,6 +19,7 @@ class SourceFormat(str, Enum):
     TXT  = "txt"
     EPUB = "epub"
     PDF  = "pdf"
+    MD   = "md"
 
 
 class SectionKind(str, Enum):

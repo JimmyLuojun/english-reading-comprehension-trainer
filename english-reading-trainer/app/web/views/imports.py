@@ -10,7 +10,7 @@ def _import_forms() -> str:
     return (
         _page_header(
             "Import",
-            "Add a TXT, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.",
+            "Add a TXT, Markdown, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.",
         )
         + """
     <section class="band">
@@ -20,8 +20,8 @@ def _import_forms() -> str:
         <input id="file-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="file-author">Author (optional)</label>
         <input id="file-author" name="author">
-        <label for="file-input">TXT, EPUB, or PDF file</label>
-        <input id="file-input" type="file" name="file" accept=".txt,.epub,.pdf,text/plain,application/epub+zip,application/pdf" required>
+        <label for="file-input">TXT, Markdown, EPUB, or PDF file</label>
+        <input id="file-input" type="file" name="file" accept=".txt,.md,.markdown,.epub,.pdf,text/plain,text/markdown,text/x-markdown,application/epub+zip,application/pdf" required>
         <button type="submit">Import file</button>
       </form>
     </section>

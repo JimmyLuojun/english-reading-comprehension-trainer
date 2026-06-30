@@ -10,8 +10,11 @@ def test_import_forms_expose_file_and_paste_flows() -> None:
 
     assert 'action="/import/file"' in html
     assert ".txt" in html
+    assert ".md" in html
+    assert ".markdown" in html
     assert ".epub" in html
     assert ".pdf" in html
+    assert "text/markdown" in html
     assert "application/pdf" in html
     assert 'action="/import/paste"' in html
     assert 'action="/import/url"' in html

@@ -1200,7 +1200,11 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     shortcut = shortcut[: shortcut.index("function captureReadingAnchor")]
 
     assert "function sentenceFromSelectionOrViewport()" in script
+    assert "function sentenceIsInViewport(sentence)" in script
+    assert "function lastClickedSentence()" in script
+    assert "function recordClickedSentenceTarget(event)" in script
     assert "function selectWholeSentence(sentence)" in script
+    assert 'reader.addEventListener("pointerdown", recordClickedSentenceTarget);' in script
     assert 'document.addEventListener("keydown", handleReaderShortcut);' in script
     # macOS global hotkey tools steal modifier combos, so the shortcut uses bare keys:
     # it must bail out when any modifier is held and ignore IME composition.
@@ -1217,6 +1221,28 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     assert "selection.addRange(range);" in script
     assert "updateToolbar();" in script
     assert "if (isTranslate)" in shortcut
+
+
+def test_reader_shortcut_prefers_recent_clicked_sentence_over_selection() -> None:
+    script = _selection_script()
+    resolver = script[script.index("function sentenceFromSelectionOrViewport") :]
+    resolver = resolver[: resolver.index("function selectWholeSentence")]
+    recorder = script[script.index("function recordClickedSentenceTarget") :]
+    recorder = recorder[: recorder.index("function handleReaderShortcut")]
+
+    assert "let lastClickedSentenceId = null;" in script
+    assert "return sentenceIsInViewport(sentence) ? sentence : null;" in script
+    assert 'event.target?.closest?.("[data-sentence-id]")' in recorder
+    assert "lastClickedSentenceId = sentence?.dataset.sentenceId || null;" in recorder
+    assert "const clickedSentence = lastClickedSentence();" in resolver
+    assert "if (clickedSentence) return clickedSentence;" in resolver
+    assert resolver.index("if (clickedSentence) return clickedSentence;") < resolver.index(
+        "const selection = window.getSelection();"
+    )
+    assert "const activeSentence = document.getElementById(`sentence-${activeSentenceId}`);" in resolver
+    assert resolver.index("const activeSentence = document.getElementById") < resolver.index(
+        "return topVisibleSentence();"
+    )
 
 
 def test_translated_sentence_double_click_shortcut_preserves_word_card_priority() -> None:

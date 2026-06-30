@@ -203,6 +203,7 @@ def _insert(
     language: str,
     file_hash: str,
     chapters_raw: list[dict],
+    source_format: SourceFormat = SourceFormat.TXT,
 ) -> ImportResult:
     from datetime import datetime, timezone
 
@@ -229,15 +230,11 @@ def _insert(
                (title, author, language, source_format, file_hash, imported_at,
                 total_chapters, total_sentences)
                VALUES (?, ?, ?, ?, ?, ?, 0, 0)""",
-            (title, author, language, SourceFormat.TXT.value, file_hash, now),
+            (title, author, language, source_format.value, file_hash, now),
         ).lastrowid
-
-        chapter_sentence_start = 0
-
         for ch_idx, ch in enumerate(chapters_raw, start=1):
             ch_sentence_start = global_sentence_idx
             paragraphs = _split_paragraphs(ch["body"])
-            par_sentence_start = global_sentence_idx
 
             chapter_id: int = conn.execute(
                 """INSERT INTO chapters

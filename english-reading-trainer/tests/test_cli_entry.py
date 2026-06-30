@@ -161,6 +161,69 @@ class TestImportTxtCmd:
 
 
 # ---------------------------------------------------------------------------
+# books import md
+# ---------------------------------------------------------------------------
+
+class TestImportMarkdownCmd:
+    def test_successful_import(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        md_path = tmp_path / "notes.md"
+        md_path.write_text(
+            "# Markdown Notes\n\nThis **Markdown** sentence imports cleanly.",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["books", "import", "md", str(md_path)])
+
+        assert result.exit_code == 0
+        assert "notes" in result.output
+        assert "sentences" in result.output
+
+    def test_override_title(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        md_path = tmp_path / "notes.md"
+        md_path.write_text("# Markdown Notes\n\nReadable sentence.", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["books", "import", "md", str(md_path), "--title", "Custom Markdown"],
+        )
+
+        assert result.exit_code == 0
+        assert "Custom Markdown" in result.output
+
+    def test_duplicate_import_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        md_path = tmp_path / "dup.md"
+        md_path.write_text("# Markdown Notes\n\nUnique Markdown sentence.", encoding="utf-8")
+        runner.invoke(app, ["books", "import", "md", str(md_path), "--title", "First"])
+
+        result = runner.invoke(app, ["books", "import", "md", str(md_path), "--title", "Second"])
+
+        assert result.exit_code != 0
+        assert "already imported" in result.output.lower() or "skip" in result.output.lower()
+
+    def test_missing_file_exits_with_error(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["books", "import", "md", str(tmp_path / "no.md")])
+
+        assert result.exit_code != 0
+
+    def test_code_only_file_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        md_path = tmp_path / "code.md"
+        md_path.write_text("```python\nprint('x')\n```", encoding="utf-8")
+
+        result = runner.invoke(app, ["books", "import", "md", str(md_path)])
+
+        assert result.exit_code != 0
+        assert "no usable text" in result.output
+
+
+# ---------------------------------------------------------------------------
 # books import epub
 # ---------------------------------------------------------------------------
 

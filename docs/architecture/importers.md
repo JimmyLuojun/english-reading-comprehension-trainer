@@ -1,10 +1,11 @@
 # 导入器设计
 
-本文件保存已实现导入链路的通用设计。PDF 导入的详细计划见 `docs/features/pdf-import.md`，URL 导入的执行细节见 `docs/features/url-import.md`。
+本文件保存已实现导入链路的通用设计。Markdown 导入的执行细节见 `docs/features/markdown-import.md`，PDF 导入的详细计划见 `docs/features/pdf-import.md`，URL 导入的执行细节见 `docs/features/url-import.md`。
 
 ## 1. 当前导入入口
 
 - TXT：文件上传、粘贴文本和 URL 抽取正文后都复用 `import_text()`，最终写入 `books / chapters / paragraphs / sentences`，`books.source_format='txt'`。
+- Markdown：文件上传和 CLI 走 `import_markdown()` / `import_markdown_bytes()`，清理 front matter、代码块、链接、强调、HTML 标签等常见 Markdown 语法，标题作为章节，最终写入标准句子流，`books.source_format='md'`。
 - EPUB：文件上传走 `import_epub()`，保留可展示媒体资源和 `chapter_blocks`。
 - PDF：文件上传走 `import_pdf()`，归一化为现有阅读模型；图表、公式/代码、编号逻辑证明或规则示例等非 prose 视觉块以 figure/asset 形式保留，避免污染句子训练流。
 - URL：`POST /import/url` 下载远程 HTML/plain-text，抽取可读正文后作为 UTF-8 TXT 字节进入 `import_text_bytes()`，不新增 schema 字段。

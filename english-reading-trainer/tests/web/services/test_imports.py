@@ -340,6 +340,71 @@ def test_import_epub_file_maps_import_errors(monkeypatch, tmp_path: Path) -> Non
     assert outcome.status_code == 400
 
 
+def test_import_markdown_file_returns_book_id(monkeypatch, tmp_path: Path) -> None:
+    md_path = tmp_path / "note.md"
+    md_path.write_text("# Heading\n\nReadable sentence.", encoding="utf-8")
+
+    monkeypatch.setattr(
+        imports,
+        "import_markdown_bytes",
+        lambda *args, **kwargs: SimpleNamespace(book_id=41),
+    )
+
+    outcome = imports.import_markdown_file(
+        object(),
+        md_path,
+        form_title="Markdown Title",
+        author=" Writer ",
+    )
+
+    assert outcome.book_id == 41
+    assert not outcome.is_error
+
+
+def test_import_markdown_file_maps_duplicate_to_existing_book(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    md_path = tmp_path / "dup.md"
+    md_path.write_text("# Heading\n\nReadable sentence.", encoding="utf-8")
+
+    def raise_duplicate(*args, **kwargs):
+        raise imports.DuplicateBookError()
+
+    monkeypatch.setattr(imports, "import_markdown_bytes", raise_duplicate)
+    monkeypatch.setattr(imports, "_lookup_book_id_by_hash", lambda db, file_hash: 88)
+
+    outcome = imports.import_markdown_file(
+        object(),
+        md_path,
+        form_title="",
+        author="",
+    )
+
+    assert outcome.duplicate_book_id == 88
+    assert outcome.status_code == 409
+
+
+def test_import_markdown_file_maps_import_errors(monkeypatch, tmp_path: Path) -> None:
+    md_path = tmp_path / "bad.md"
+    md_path.write_text("```python\nprint('x')\n```", encoding="utf-8")
+
+    def raise_value_error(*args, **kwargs):
+        raise ValueError("bad markdown")
+
+    monkeypatch.setattr(imports, "import_markdown_bytes", raise_value_error)
+
+    outcome = imports.import_markdown_file(
+        object(),
+        md_path,
+        form_title="",
+        author="",
+    )
+
+    assert outcome.error == "bad markdown"
+    assert outcome.status_code == 400
+
+
 def test_import_pdf_file_maps_duplicate_to_existing_book(monkeypatch, tmp_path: Path) -> None:
     pdf_path = tmp_path / "dup.pdf"
     pdf_path.write_bytes(b"%PDF")

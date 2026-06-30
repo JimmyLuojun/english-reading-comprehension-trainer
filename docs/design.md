@@ -9,7 +9,7 @@
 
 **MVP 范围（2026-06-14 初始定义；已实现项以当前系统总览为准）**
 
-- TXT / EPUB 导入（当前实现已扩展到 PDF 文件导入和 URL 页面导入，见 §1）
+- TXT / EPUB 导入（当前实现已扩展到 Markdown、PDF 文件导入和 URL 页面导入，见 §1）
 - 自动拆分 Book → Chapter → Paragraph → Sentence
 - CLI 标记难句 / 生词 / 短语
 - AI 难句结构化分析（带响应缓存）
@@ -44,7 +44,7 @@
 ## 1. 当前系统总览
 
 - 本地 FastAPI Web UI + SQLite 单机存储。
-- 已支持 TXT / EPUB / PDF 文件导入，以及 URL 导入 HTML/plain-text 页面后复用 TXT 阅读链路。
+- 已支持 TXT / Markdown / EPUB / PDF 文件导入，以及 URL 导入 HTML/plain-text 页面后复用 TXT 阅读链路。
 - 已支持阅读页选句选词、词卡/句卡、AI 分析缓存、SM-2 Review、Cards、Review Queue、能力画像和 EPUB/PDF 媒体/非文本块展示。
 - `app/web/fastapi_app.py` 已拆成薄 app factory；Web 代码按 `routers/`、`queries/`、`views/` 和共享 helper 管理。
 - 当前产品化阶段仍是自用稳定化，不引入多用户、OAuth、桌面打包、云端同步或移动原生 App。
@@ -54,7 +54,7 @@
 ## 2. 架构文档
 
 - [数据模型与核心实体](architecture/data-model.md)：SQLite 表、错误枚举、词卡类型、跨书去重。
-- [导入器设计](architecture/importers.md)：TXT/EPUB/PDF/URL 导入入口、Web URL 导入约束、EPUB 重复导入幂等性；PDF 细节见 feature 文档。
+- [导入器设计](architecture/importers.md)：TXT/Markdown/EPUB/PDF/URL 导入入口、Web URL 导入约束、EPUB 重复导入幂等性；PDF 细节见 feature 文档。
 - [AI 分析、缓存与 Prompt](architecture/ai-analysis.md)：AI cache、输出 JSON schema、prompt 版本、用户译文诊断和词汇分析面板。
 - [复习系统与能力画像](architecture/review-system.md)：SM-2、相似提醒、能力画像生成。
 - [Web App 与阅读交互](architecture/web-app.md)：技术栈、阅读 toolbar、阅读视图、诊断面板、词卡提示和浮层状态机。
@@ -67,6 +67,7 @@
 - [语音与发音](features/pronunciation.md)：浏览器 TTS MVP 与未来服务端音频缓存。
 - [Cards 与 Review](features/cards-review.md)：Cards/Review 信息增强、Notes、Reveal、来源跳转和 EPUB 导入接入。
 - [删除导入材料](features/book-deletion.md)：彻底删除书籍/文章、词卡 re-anchor、review log 保留规则。
+- [Markdown 导入执行方案](features/markdown-import.md)：已实现的 Markdown 文件导入，清洗常见 Markdown 语法后进入标准句子流并记录 `source_format='md'`。
 - [URL 导入执行方案](features/url-import.md)：已实现的 Web URL 导入 MVP，远程 HTML/plain-text 抽正文后作为 TXT 内容导入，不改 schema。
 - [外部网页选句分析方案](features/external-web-sentence-analysis.md)：计划中的 Chrome Extension + 本地 FastAPI bridge，第一版按 `s` 选中网页当前句子并在右侧 drawer 显示结合上下文的 AI 分析；后续再做来源管理、词/短语分析和 Review 整合。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。

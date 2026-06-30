@@ -110,6 +110,7 @@ class TestEnumerations:
         assert SourceFormat.TXT.value == "txt"
         assert SourceFormat.EPUB.value == "epub"
         assert SourceFormat.PDF.value == "pdf"
+        assert SourceFormat.MD.value == "md"
 
     def test_lexical_type_values(self) -> None:
         assert LexicalType.WORD.value == "word"

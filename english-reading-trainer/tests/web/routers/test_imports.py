@@ -84,7 +84,7 @@ def test_import_url_route_returns_service_error(monkeypatch) -> None:
     assert "URL failed" in response.text
 
 
-def test_import_empty_epub_and_pdf_return_400() -> None:
+def test_import_empty_epub_pdf_and_markdown_return_400() -> None:
     app = FastAPI()
     imports.register_import_routes(app, lambda: object())
     client = TestClient(app)
@@ -97,8 +97,14 @@ def test_import_empty_epub_and_pdf_return_400() -> None:
         "/import/file",
         files={"file": ("empty.pdf", b"", "application/pdf")},
     )
+    md_response = client.post(
+        "/import/file",
+        files={"file": ("empty.md", b"", "text/markdown")},
+    )
 
     assert epub_response.status_code == 400
     assert pdf_response.status_code == 400
+    assert md_response.status_code == 400
     assert "empty" in epub_response.text.lower()
     assert "empty" in pdf_response.text.lower()
+    assert "empty" in md_response.text.lower()

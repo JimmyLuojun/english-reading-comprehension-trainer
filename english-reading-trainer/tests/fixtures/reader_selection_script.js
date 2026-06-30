@@ -213,6 +213,7 @@
       let activeSentenceId = null;
       let activeSentenceTranslation = "";
       let activeSentenceStructure = "";
+      let lastClickedSentenceId = null;
       let activeWordCardId = null;
       let activeWordCardIds = [];
       let activeCrossSentenceIds = [];
@@ -776,16 +777,29 @@
         return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement || null;
       }
 
+      function sentenceIsInViewport(sentence) {
+        if (!sentence) return false;
+        const rect = sentence.getBoundingClientRect();
+        return rect.bottom >= 0 && rect.top <= window.innerHeight;
+      }
+
       function topVisibleSentence() {
         const sentences = Array.from(reader.querySelectorAll("[data-sentence-id]"));
         for (const sentence of sentences) {
-          const rect = sentence.getBoundingClientRect();
-          if (rect.bottom >= 0 && rect.top <= window.innerHeight) return sentence;
+          if (sentenceIsInViewport(sentence)) return sentence;
         }
         return sentences[0] || null;
       }
 
+      function lastClickedSentence() {
+        if (!lastClickedSentenceId) return null;
+        const sentence = document.getElementById(`sentence-${lastClickedSentenceId}`);
+        return sentenceIsInViewport(sentence) ? sentence : null;
+      }
+
       function sentenceFromSelectionOrViewport() {
+        const clickedSentence = lastClickedSentence();
+        if (clickedSentence) return clickedSentence;
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
@@ -794,6 +808,10 @@
             const sentence = element?.closest?.("[data-sentence-id]");
             if (sentence) return sentence;
           }
+        }
+        if (activeSentenceId) {
+          const activeSentence = document.getElementById(`sentence-${activeSentenceId}`);
+          if (activeSentence) return activeSentence;
         }
         return topVisibleSentence();
       }
@@ -812,6 +830,11 @@
 
       function eventTargetIsTextInput(event) {
         return Boolean(event.target?.closest?.("input, textarea, select, [contenteditable='true']"));
+      }
+
+      function recordClickedSentenceTarget(event) {
+        const sentence = event.target?.closest?.("[data-sentence-id]");
+        lastClickedSentenceId = sentence?.dataset.sentenceId || null;
       }
 
       function handleReaderShortcut(event) {
@@ -4335,6 +4358,7 @@
           showMarkedSentenceToolbar(sentence);
         }
       });
+      reader.addEventListener("pointerdown", recordClickedSentenceTarget);
       reader.addEventListener("dblclick", (event) => {
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan) {

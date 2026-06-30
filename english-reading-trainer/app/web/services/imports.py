@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import DuplicateBookError as EpubDuplicateBookError
 from app.importers.epub_importer import calculate_epub_file_hash, import_epub
+from app.importers.markdown_importer import import_markdown_bytes
 from app.importers.pdf_importer import calculate_pdf_file_hash, import_pdf
 from app.importers.txt_importer import DuplicateBookError, import_text
 from app.web.config import (
@@ -317,6 +318,31 @@ def import_epub_file(
         existing_id = _lookup_book_id_by_hash(db, file_hash)
         return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
     except (ValueError, FileNotFoundError) as exc:
+        return ImportOutcome(error=str(exc), status_code=400)
+    return ImportOutcome(book_id=result.book_id)
+
+
+def import_markdown_file(
+    db: DatabaseConnection,
+    file_path: str | Path,
+    *,
+    form_title: str,
+    author: str,
+) -> ImportOutcome:
+    """Import a Markdown file and return a routing-neutral outcome."""
+    path = Path(file_path)
+    try:
+        raw = path.read_bytes()
+        result = import_markdown_bytes(
+            db,
+            raw,
+            title=form_title.strip() or path.stem,
+            author=author.strip(),
+        )
+    except DuplicateBookError:
+        existing_id = _lookup_book_id_by_hash(db, hashlib.sha256(raw).hexdigest())
+        return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
+    except (ValueError, OSError) as exc:
         return ImportOutcome(error=str(exc), status_code=400)
     return ImportOutcome(book_id=result.book_id)
 

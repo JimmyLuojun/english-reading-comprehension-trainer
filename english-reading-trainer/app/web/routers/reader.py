@@ -29,6 +29,8 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         db = db_factory()
         book = _fetch_book(db, book_id)
         if book is None:
+            if request.query_params.get("restore") == "1":
+                return _stale_restore_page(book_id)
             return _error_page("Book not found", status_code=404)
         chapter_idx = chapter
         if "chapter" not in request.query_params:
@@ -37,6 +39,8 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 chapter_idx = default_idx
         chapter_row = _fetch_chapter_by_idx(db, book_id, chapter_idx)
         if chapter_row is None:
+            if request.query_params.get("restore") == "1":
+                return _stale_chapter_restore_page(book_id)
             return _error_page("Chapter not found", status_code=404)
         adjacent_chapters = _fetch_adjacent_chapters(db, book_id, chapter_idx)
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
@@ -65,3 +69,46 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         )}
         """
         return _html_page("Read", body, active="books", page_class="reader-page")
+
+
+def _stale_restore_page(book_id: int) -> HTMLResponse:
+    body = f"""
+    <section class="band">
+      <h1>Book not found</h1>
+      <p class="muted">The saved reading position points to a book that no longer exists.</p>
+      <p><a class="button primary" href="/books">Open Library</a></p>
+    </section>
+    <script>
+      (() => {{
+        const bookId = "{book_id}";
+        try {{
+          if (window.localStorage.getItem("reader:last-book-id") === bookId) {{
+            window.localStorage.removeItem("reader:last-book-id");
+          }}
+          window.localStorage.removeItem(`reader:progress:book:${{bookId}}`);
+        }} catch (error) {{}}
+        window.location.replace("/books");
+      }})();
+    </script>
+    """
+    return _html_page("Book not found", body, active="library")
+
+
+def _stale_chapter_restore_page(book_id: int) -> HTMLResponse:
+    body = f"""
+    <section class="band">
+      <h1>Chapter not found</h1>
+      <p class="muted">The saved reading position points to a chapter that no longer exists.</p>
+      <p><a class="button primary" href="/read/{book_id}">Open book</a></p>
+    </section>
+    <script>
+      (() => {{
+        const bookId = "{book_id}";
+        try {{
+          window.localStorage.removeItem(`reader:progress:book:${{bookId}}`);
+        }} catch (error) {{}}
+        window.location.replace(`/read/${{encodeURIComponent(bookId)}}`);
+      }})();
+    </script>
+    """
+    return _html_page("Chapter not found", body, active="books")

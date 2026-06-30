@@ -8,6 +8,7 @@ DB path resolution (highest priority first):
 Usage examples:
   trainer books list
   trainer books import txt ./book.txt --title "My Book"
+  trainer books import md ./notes.md --title "My Notes"
   trainer books import epub ./book.epub
   trainer books show 1
   trainer read 1 --chapter 2
@@ -46,6 +47,7 @@ from app.cards.word_card_service import (
 from app.db_connection import DatabaseConnection
 from app.db_models import CardType, LexicalType, ReviewOutcome
 from app.importers.epub_importer import import_epub
+from app.importers.markdown_importer import import_markdown
 from app.importers.pdf_importer import import_pdf
 from app.importers.txt_importer import DuplicateBookError, import_txt
 from app.profile.learner_profile_generator import (
@@ -118,7 +120,7 @@ def books_list() -> None:
         ).fetchall()
 
     if not rows:
-        typer.echo("No books imported yet.  Use: trainer books import txt/epub <path>")
+        typer.echo("No books imported yet.  Use: trainer books import txt/md/epub/pdf <path>")
         return
 
     _print_row(["ID", "Title", "Author", "Format", "Chapters", "Sentences", "Imported"])
@@ -133,7 +135,7 @@ def books_list() -> None:
 
 
 # ---------------------------------------------------------------------------
-# books import txt / epub / pdf
+# books import txt / md / epub / pdf
 # ---------------------------------------------------------------------------
 
 @import_app.command("txt")
@@ -148,6 +150,40 @@ def import_txt_cmd(
     effective_title = title or path.stem
     try:
         result = import_txt(db, path, title=effective_title, author=author, language=language)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except DuplicateBookError as e:
+        typer.echo(f"Skipped (already imported): {e}", err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(
+        f"Imported '{effective_title}' (book id={result.book_id}): "
+        f"{result.chapter_count} chapters, {result.sentence_count} sentences."
+    )
+
+
+@import_app.command("md")
+def import_markdown_cmd(
+    path: Path = typer.Argument(..., help="Path to .md or .markdown file"),
+    title: str = typer.Option("", "--title", "-t", help="Book title (defaults to filename)"),
+    author: str = typer.Option("", "--author", "-a", help="Author name"),
+    language: str = typer.Option("en", "--language", "-l", help="Language code"),
+) -> None:
+    """Import a Markdown (.md/.markdown) book or article."""
+    db = _get_db()
+    effective_title = title or path.stem
+    try:
+        result = import_markdown(
+            db,
+            path,
+            title=effective_title,
+            author=author,
+            language=language,
+        )
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
