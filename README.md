@@ -12,6 +12,7 @@ From the repository root:
 cd english-reading-trainer
 .venv/bin/python -m uvicorn app.web.fastapi_app:app --host 127.0.0.1 --port 8001 --reload
 ```
+
 Then open `http://127.0.0.1:8001`.
 
 The app uses `english-reading-trainer/data/reading_trainer.db` by default and

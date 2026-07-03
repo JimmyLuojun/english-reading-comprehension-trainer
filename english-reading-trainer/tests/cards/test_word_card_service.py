@@ -488,6 +488,121 @@ class TestWordCardSources:
                 selected_text="Mitigate",
             )
 
+    def test_source_offsets_require_both_start_and_end(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-offset-half")
+
+        with pytest.raises(ValueError, match="both start and end"):
+            create_or_update_word_card(
+                db,
+                sid,
+                "sentence",
+                source_start_offset=2,
+            )
+
+    def test_source_offsets_must_be_inside_sentence(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-offset-outside")
+
+        with pytest.raises(ValueError, match="outside"):
+            create_or_update_word_card(
+                db,
+                sid,
+                "sentence",
+                source_start_offset=0,
+                source_end_offset=99,
+            )
+
+    def test_ambiguous_surface_keeps_unlocated_source(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-ambiguous")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE sentences SET text = 'Tie this tie tightly.' WHERE id = ?",
+                (sid,),
+            )
+
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+
+        source = list_word_card_sources(db, card_id)[0]
+        assert source["start_offset"] is None
+        assert source["end_offset"] is None
+        assert source["selected_text"] == ""
+
+    def test_duplicate_unlocated_source_can_be_marked_primary(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-primary-unlocated")
+        card_id, _ = create_or_update_word_card(db, sid, "missing-surface")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE word_card_sources SET is_primary = 0 WHERE card_id = ?",
+                (card_id,),
+            )
+
+        inserted = record_word_card_source(
+            db,
+            card_id,
+            sid,
+            "missing-surface",
+            is_primary=True,
+        )
+
+        assert inserted is False
+        assert list_word_card_sources(db, card_id)[0]["is_primary"] == 1
+
+    def test_new_source_becomes_primary_when_card_has_no_primary(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-no-primary-a")
+        sid2 = _seed_sentence(db, "source-no-primary-b")
+        card_id, _ = create_or_update_word_card(db, sid, "missing-surface")
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE word_card_sources SET is_primary = 0 WHERE card_id = ?",
+                (card_id,),
+            )
+
+        inserted = record_word_card_source(db, card_id, sid2, "missing-surface")
+
+        assert inserted is True
+        sources = list_word_card_sources(db, card_id)
+        assert [source["sentence_id"] for source in sources if source["is_primary"]] == [sid2]
+
+    def test_record_source_rejects_empty_surface(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-empty")
+        card_id, _ = create_or_update_word_card(db, sid, "sentence")
+
+        with pytest.raises(ValueError, match="empty"):
+            record_word_card_source(db, card_id, sid, "   ")
+
+    def test_record_source_missing_card_raises(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "source-missing-card")
+
+        with pytest.raises(WordCardNotFoundError):
+            record_word_card_source(db, 99999, sid, "sentence")
+
+    def test_record_source_invalid_sentence_id_raises(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-invalid-sentence")
+        card_id, _ = create_or_update_word_card(db, sid, "sentence")
+
+        with pytest.raises(ValueError, match="Sentence id=99999 not found"):
+            record_word_card_source(db, card_id, 99999, "sentence")
+
     def test_add_source_increments_occurrence_count(
         self, db: DatabaseConnection
     ) -> None:
@@ -554,6 +669,35 @@ class TestWordCardSources:
 
         with pytest.raises(WordCardSourceNotFoundError):
             set_primary_word_card_source(db, card_id, 99999)
+
+    def test_set_primary_archived_card_raises(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "source-archived-primary")
+        card_id, _ = create_or_update_word_card(db, sid, "mitigate")
+        source_id = list_word_card_sources(db, card_id)[0]["id"]
+        archive_word_card(db, card_id)
+
+        with pytest.raises(WordCardNotFoundError):
+            set_primary_word_card_source(db, card_id, source_id)
+
+    def test_list_sources_missing_card_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(WordCardNotFoundError):
+            list_word_card_sources(db, 99999)
+
+    def test_find_occurrence_candidates_missing_card_raises(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        with pytest.raises(WordCardNotFoundError):
+            find_word_card_occurrence_candidates(db, 99999)
+
+    def test_add_source_missing_card_raises(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "source-add-missing")
+
+        with pytest.raises(WordCardNotFoundError):
+            add_word_card_source(db, 99999, sid)
 
 
 class TestArchiveWordCard:
@@ -797,3 +941,16 @@ class TestRecordWordCardDiagnosis:
             ).fetchone()
         assert row["note_status"] == ""
         assert row["note_correction"] == ""
+
+    def test_valid_code_missing_from_lookup_table_is_skipped(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db, "diag-missing-lookup")
+        card_id, _ = create_or_update_word_card(db, sid, "tie")
+        with db.get_connection() as conn:
+            conn.execute("DELETE FROM error_types WHERE code = 'L01'")
+
+        record_word_card_diagnosis(db, card_id, {"predicted_error_types": ["L01"]})
+
+        assert _error_codes_for_card(db, card_id) == set()

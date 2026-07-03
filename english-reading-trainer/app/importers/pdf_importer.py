@@ -872,9 +872,9 @@ def _has_strong_proof_signal(line: PdfWordLine) -> bool:
         return True
     if _PROOF_RULE_CITATION_RE.search(body):
         return True
-    if _math_symbol_ratio(body) >= 0.12 and _alpha_ratio(body) <= 0.75:
-        return True
     if _code_symbol_ratio(body) >= 0.18 and _alpha_ratio(body) <= 0.75:
+        return True
+    if _math_symbol_ratio(body) >= 0.12 and _alpha_ratio(body) <= 0.75:
         return True
     return bool(_is_nonprose_line(line) and len(body.split()) <= 8)
 

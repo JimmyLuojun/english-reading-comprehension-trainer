@@ -14,10 +14,13 @@ from app.web.queries.books import (
     _fetch_books,
     _fetch_chapter_by_idx,
     _fetch_chapters,
+    _find_reanchor_sentence_id,
     _find_phrase_reanchor_sentence_id,
     _find_word_reanchor_sentence_id,
     _normalize_phrase_text,
+    _phrase_card_terms,
     _sql_placeholders,
+    _word_card_terms,
     _word_tokens,
 )
 
@@ -85,3 +88,44 @@ def test_reanchor_helpers_match_words_and_phrases() -> None:
     assert _word_tokens("Cat's cradle, cat.") == ["cat's", "cradle", "cat"]
     assert _normalize_phrase_text(" long   term ") == "long term"
     assert _sql_placeholders([1, 2, 3]) == "?,?,?"
+
+
+def test_reanchor_helpers_return_none_when_terms_are_empty() -> None:
+    candidates = [{"id": 10, "text": "The black cat sleeps."}]
+
+    assert _find_word_reanchor_sentence_id({"surface_form": "", "lemma": ""}, candidates) is None
+    assert _find_phrase_reanchor_sentence_id({"surface_form": "", "lemma": ""}, candidates) is None
+    assert _find_reanchor_sentence_id(
+        {
+            "surface_form": "black cat",
+            "lemma": "",
+            "lexical_type": LexicalType.PHRASE.value,
+        },
+        candidates,
+    ) == 10
+    assert _word_card_terms({"surface_form": "Cat", "lemma": "feline"}) == {
+        "cat",
+        "feline",
+    }
+    assert _phrase_card_terms({"surface_form": "Long Term", "lemma": "long term"}) == [
+        "long term"
+    ]
+
+
+def test_default_read_idx_falls_back_to_first_section(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    with db.get_connection() as conn:
+        book_id = conn.execute(
+            """INSERT INTO books
+               (title, author, source_format, file_hash, imported_at)
+               VALUES ('Appendix Book', '', 'txt', 'appendix-hash', '2026-01-01')"""
+        ).lastrowid
+        conn.execute(
+            """INSERT INTO chapters
+               (book_id, idx, title, sentence_start, sentence_end, section_kind)
+               VALUES (?, 7, 'Appendix A', 0, 0, 'appendix')""",
+            (book_id,),
+        )
+
+    assert _default_read_idx(db, book_id) == 7
+    assert _default_read_idx(db, 99999) is None

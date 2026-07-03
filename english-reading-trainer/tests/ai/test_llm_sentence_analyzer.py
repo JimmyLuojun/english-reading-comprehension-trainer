@@ -11,12 +11,21 @@ variable rendering, RuntimeError from LLM, missing prompt file.
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA_V5
+from app.ai import llm_sentence_analyzer
+from app.ai.ai_json_schemas import (
+    SENTENCE_ANALYSIS_SCHEMA,
+    SENTENCE_ANALYSIS_SCHEMA_V2,
+    SENTENCE_ANALYSIS_SCHEMA_V3,
+    SENTENCE_ANALYSIS_SCHEMA_V4,
+    SENTENCE_ANALYSIS_SCHEMA_V5,
+)
 from app.ai.llm_sentence_analyzer import (
+    _call_llm,
     _load_prompt,
     _render,
     _sentence_analysis_schema,
@@ -186,8 +195,78 @@ def test_both_sentence_prompt_v5_files_remain_loadable() -> None:
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v5")
 
 
-def test_sentence_analysis_schema_v7_version() -> None:
+def test_missing_sentence_prompt_raises_file_not_found() -> None:
+    with pytest.raises(FileNotFoundError, match="Prompt template not found"):
+        _load_prompt("missing_sentence_prompt", "v0")
+
+
+def test_sentence_analysis_schema_versions() -> None:
+    assert _sentence_analysis_schema("v1") is SENTENCE_ANALYSIS_SCHEMA
     assert _sentence_analysis_schema("v7") is SENTENCE_ANALYSIS_SCHEMA_V5
+    assert _sentence_analysis_schema("v6") is SENTENCE_ANALYSIS_SCHEMA_V4
+    assert _sentence_analysis_schema("v5") is SENTENCE_ANALYSIS_SCHEMA_V3
+    assert _sentence_analysis_schema("v2") is SENTENCE_ANALYSIS_SCHEMA_V2
+    assert _sentence_analysis_schema("future") is SENTENCE_ANALYSIS_SCHEMA_V2
+
+
+def test_call_llm_returns_message_content(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="raw json"))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(
+        llm_sentence_analyzer,
+        "get_ai_provider_settings",
+        lambda _model: SimpleNamespace(
+            api_key="key",
+            base_url="https://example.test",
+            model="provider-model",
+        ),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "openai",
+        SimpleNamespace(OpenAI=FakeOpenAI),
+    )
+
+    assert _call_llm("Prompt", "logical-model") == "raw json"
+    assert captured["client_kwargs"] == {
+        "api_key": "key",
+        "base_url": "https://example.test",
+    }
+    assert captured["model"] == "provider-model"
+    assert captured["messages"] == [{"role": "user", "content": "Prompt"}]
+    assert captured["temperature"] == 0.0
+
+
+def test_call_llm_wraps_provider_errors(monkeypatch) -> None:
+    class FailingOpenAI:
+        def __init__(self, **_kwargs):
+            raise RuntimeError("provider down")
+
+    monkeypatch.setattr(
+        llm_sentence_analyzer,
+        "get_ai_provider_settings",
+        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-model"),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "openai",
+        SimpleNamespace(OpenAI=FailingOpenAI),
+    )
+
+    with pytest.raises(RuntimeError, match="LLM call failed: provider down"):
+        _call_llm("Prompt", "logical-model")
 
 
 def test_analyze_sentence_defaults_to_sentence_model(

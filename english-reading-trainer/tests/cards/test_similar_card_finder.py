@@ -33,6 +33,9 @@ from app.cards.sentence_card_service import save_sentence_translation
 from app.cards.similar_card_finder import (
     SimilarCard,
     SimilarSentenceMistake,
+    _diagnosis_evidence_for_codes,
+    _loads_json,
+    _shared_sentence_codes,
     find_similar_cards_for_word_card,
     find_similar_sentence_mistakes,
     find_similar_word_cards,
@@ -519,6 +522,20 @@ class TestFindSimilarCardsForWordCard:
 # ---------------------------------------------------------------------------
 
 class TestSimilarSentenceMistakes:
+    def test_limit_zero_returns_empty(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(db, tmp_path, "Although it rained, we left.")
+        current_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload("D02", "Current contrast error."),
+        )
+
+        assert find_similar_sentence_mistakes(db, current_card, limit=0) == []
+
     def test_shared_diagnosed_error_tag_finds_active_translated_sentence(
         self,
         db: DatabaseConnection,
@@ -614,6 +631,59 @@ class TestSimilarSentenceMistakes:
         excluded_ids = {archived_card, no_translation_card, predicted_card}
         assert excluded_ids.isdisjoint({result.card_id for result in results})
 
+    def test_sentence_mistakes_return_empty_when_current_has_no_error_tags(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(db, tmp_path, "Although it rained, we left.")
+        current_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload("D02", "Current contrast error."),
+        )
+        with db.get_connection() as conn:
+            conn.execute("DELETE FROM sentence_card_errors WHERE card_id = ?", (current_card,))
+
+        assert find_similar_sentence_mistakes(db, current_card) == []
+
+    def test_sentence_mistakes_skip_candidate_without_evidence(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ):
+        sentence_ids = _seed_sentence_ids(
+            db,
+            tmp_path,
+            "Although it rained, we left. Although she was tired, she kept working.",
+        )
+        current_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[0],
+            _diagnosed_sentence_payload("D02", "Current contrast error."),
+        )
+        candidate_card = _save_sentence_diagnosis(
+            db,
+            sentence_ids[1],
+            _diagnosed_sentence_payload("D02", "Candidate contrast error."),
+        )
+        payload_without_evidence = _diagnosed_sentence_payload(
+            "D02",
+            "Candidate contrast error.",
+        )
+        payload_without_evidence["diagnosis_evidence"] = []
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                "SELECT ai_analysis_id FROM sentence_cards WHERE id = ?",
+                (candidate_card,),
+            ).fetchone()["ai_analysis_id"]
+            conn.execute(
+                "UPDATE ai_cache SET response_json = ? WHERE id = ?",
+                (json.dumps(payload_without_evidence), cache_id),
+            )
+
+        assert find_similar_sentence_mistakes(db, current_card) == []
+
     def test_sentence_mistakes_require_confident_current_and_candidate(
         self,
         db: DatabaseConnection,
@@ -671,3 +741,32 @@ class TestSimilarSentenceMistakes:
     def test_unknown_sentence_card_raises(self, db: DatabaseConnection):
         with pytest.raises(ValueError, match="Sentence card id=999 not found"):
             find_similar_sentence_mistakes(db, 999)
+
+
+class TestSimilarSentenceHelpers:
+    def test_loads_json_returns_empty_dict_for_invalid_json(self):
+        assert _loads_json("{bad json") == {}
+
+    def test_shared_sentence_codes_handles_empty_and_invalid_ids(self):
+        assert _shared_sentence_codes(None, {1: "D02"}) == ()
+        assert _shared_sentence_codes("bad,1", {1: "D02"}) == ("D02",)
+
+    def test_diagnosis_evidence_handles_empty_and_malformed_values(self):
+        assert _diagnosis_evidence_for_codes({"diagnosis_evidence": []}, ()) == ()
+        assert (
+            _diagnosis_evidence_for_codes(
+                {"diagnosis_evidence": "not a list"},
+                ("D02",),
+            )
+            == ()
+        )
+        assert _diagnosis_evidence_for_codes(
+            {
+                "diagnosis_evidence": [
+                    "not a dict",
+                    {"error_type": "L01", "evidence": "wrong layer"},
+                    {"error_type": "D02", "evidence": "missed contrast"},
+                ]
+            },
+            ("D02",),
+        ) == ({"error_type": "D02", "evidence": "missed contrast"},)

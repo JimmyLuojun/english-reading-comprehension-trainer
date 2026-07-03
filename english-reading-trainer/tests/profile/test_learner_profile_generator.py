@@ -19,6 +19,11 @@ from app.profile.learner_profile_generator import (
     ProfileCardPreview,
     ProfileInputError,
     ProfileSnapshot,
+    _format_lapsed_cards,
+    _format_mastered_cards,
+    _load_prompt,
+    _normalize_datetime,
+    _preview,
     build_profile_prompt,
     collect_profile_stats,
     get_latest_profile_snapshot,
@@ -557,3 +562,26 @@ class TestProfilePayload:
 
         assert stat.code == "G01"
         assert card.days_ago == 2
+
+
+class TestProfileFormattingHelpers:
+    def test_formats_lapsed_and_mastered_card_previews(self) -> None:
+        lapsed = _format_lapsed_cards(
+            (ProfileCardPreview(CardType.SENTENCE, "Missed contrast", days_ago=3),)
+        )
+        mastered = _format_mastered_cards(
+            (ProfileCardPreview(CardType.WORD, "mitigate", days_ago=0),)
+        )
+
+        assert "sentence — Missed contrast — lapsed 3 days ago" in lapsed
+        assert "word — mitigate" in mastered
+
+    def test_load_prompt_missing_file_raises(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            _load_prompt("missing-profile-prompt", "v404")
+
+    def test_preview_truncates_long_text_and_normalizes_datetime(self) -> None:
+        assert _preview("word " * 40).endswith("...")
+        naive = datetime(2026, 2, 1, 10, 0)
+
+        assert _normalize_datetime(naive).tzinfo == timezone.utc

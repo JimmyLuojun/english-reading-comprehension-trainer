@@ -16,6 +16,7 @@ from app.db_connection import DatabaseConnection
 from app.db_models import CardType, MasteryState, ReviewOutcome
 from app.review.daily_review_queue import (
     ReviewQueueItem,
+    _normalize_datetime,
     build_daily_review_queue,
     list_due_cards,
 )
@@ -203,6 +204,11 @@ class TestReviewQueueItem:
         )
 
         assert item.is_new is False
+
+    def test_normalize_datetime_assumes_naive_values_are_utc(self) -> None:
+        naive = datetime(2026, 1, 10, 9, 0)
+
+        assert _normalize_datetime(naive) == datetime(2026, 1, 10, 9, 0, tzinfo=timezone.utc)
 
 
 class TestListDueCards:

@@ -22,6 +22,9 @@ def test_register_analysis_routes_adds_analysis_endpoints() -> None:
     assert ("POST", "/analysis/sentence/{sentence_id}") in paths
     assert ("GET", "/analysis/sentence/{sentence_id}/external-prompt") in paths
     assert ("POST", "/analysis/sentence/{sentence_id}/external") in paths
+    assert ("POST", "/analysis/paragraph/{paragraph_id}/logic") in paths
+    assert ("GET", "/analysis/paragraph/{paragraph_id}/logic-prompt") in paths
+    assert ("POST", "/analysis/paragraph/{paragraph_id}/logic-external") in paths
     assert ("GET", "/analysis/word/{card_id}") in paths
     assert ("POST", "/analysis/word/{card_id}") in paths
 
@@ -89,6 +92,85 @@ def test_word_analysis_route_parses_force_refresh(monkeypatch) -> None:
     assert captured["prefer_pro"] is True
 
 
+def test_paragraph_logic_route_parses_force_refresh(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_analyze_paragraph_logic_for_reader(*args, **kwargs):
+        captured.update(kwargs)
+        captured["paragraph_id"] = args[1]
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "analyze_paragraph_logic_for_reader",
+        fake_analyze_paragraph_logic_for_reader,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/paragraph/7/logic",
+        data={"force_refresh": "true", "prefer_pro": "true"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "paragraph_id": 7,
+        "force_refresh": True,
+        "prefer_pro": True,
+    }
+
+
+def test_paragraph_logic_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 502
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "AI response failed validation.", "retry": True}
+
+    monkeypatch.setattr(
+        analysis,
+        "analyze_paragraph_logic_for_reader",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post("/analysis/paragraph/7/logic")
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "ok": False,
+        "error": "AI response failed validation.",
+        "retry": True,
+    }
+
+
+def test_paragraph_logic_prompt_route_returns_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "build_external_paragraph_logic_prompt",
+        lambda db, paragraph_id: f"paragraph prompt for {paragraph_id}",
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/paragraph/5/logic-prompt")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "paragraph_id": 5,
+        "prompt": "paragraph prompt for 5",
+    }
+
+
 def test_external_sentence_prompt_route_returns_prompt(monkeypatch) -> None:
     monkeypatch.setattr(
         analysis,
@@ -105,6 +187,86 @@ def test_external_sentence_prompt_route_returns_prompt(monkeypatch) -> None:
         "ok": True,
         "sentence_id": 5,
         "prompt": "prompt for 5",
+    }
+
+
+def test_external_paragraph_logic_route_passes_pasted_result(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_save_external_paragraph_logic_for_reader(*args, **kwargs):
+        captured.update(kwargs)
+        captured["paragraph_id"] = args[1]
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_paragraph_logic_for_reader",
+        fake_save_external_paragraph_logic_for_reader,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/paragraph/7/logic-external",
+        data={"external_result": "full paragraph reply"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "paragraph_id": 7,
+        "external_result": "full paragraph reply",
+    }
+
+
+def test_external_paragraph_logic_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 400
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "bad paragraph JSON", "retry": False}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_paragraph_logic_for_reader",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/paragraph/7/logic-external",
+        data={"external_result": "not json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "bad paragraph JSON",
+        "retry": False,
+    }
+
+
+def test_external_sentence_prompt_route_maps_value_error(monkeypatch) -> None:
+    def fail_prompt(db, sentence_id):
+        raise ValueError("Sentence id=5 not found.")
+
+    monkeypatch.setattr(analysis, "build_external_sentence_prompt", fail_prompt)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/sentence/5/external-prompt")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Sentence id=5 not found.",
+        "retry": False,
     }
 
 
@@ -143,6 +305,36 @@ def test_external_sentence_analysis_route_passes_pasted_result(monkeypatch) -> N
         "external_result": "full reply",
         "user_translation": "译文",
         "user_structure": "主干：x",
+    }
+
+
+def test_external_sentence_analysis_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 400
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "bad external JSON", "retry": False}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_sentence_analysis_for_reader",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/sentence/7/external",
+        data={"external_result": "not json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "bad external JSON",
+        "retry": False,
     }
 
 

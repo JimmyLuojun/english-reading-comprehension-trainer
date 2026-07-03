@@ -360,11 +360,38 @@ class TestArchiveSentenceCard:
         assert card["archived_at"] is None
         assert card["user_note"] == "keep me"
 
+    def test_recreate_archived_card_with_translation_updates_translation(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        sid = _seed_sentence(db)
+        card_id = create_sentence_card(db, sid, user_note="old note")
+        archive_sentence_card(db, sid)
+
+        restored_id = create_sentence_card(
+            db,
+            sid,
+            user_note="new note",
+            user_translation="新的译文",
+        )
+
+        assert restored_id == card_id
+        card = get_sentence_card(db, card_id)
+        assert card is not None
+        assert card["archived_at"] is None
+        assert card["user_note"] == "new note"
+        assert card["user_translation"] == "新的译文"
+        assert card["translation_created_at"] is not None
+
     def test_archive_missing_active_card_raises(self, db: DatabaseConnection) -> None:
         sid = _seed_sentence(db)
 
         with pytest.raises(SentenceCardNotFoundError):
             archive_sentence_card(db, sid)
+
+    def test_archive_invalid_sentence_id_raises(self, db: DatabaseConnection) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            archive_sentence_card(db, 99999)
 
 
 class TestSaveSentenceTranslation:

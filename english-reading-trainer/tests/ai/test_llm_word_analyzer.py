@@ -7,11 +7,19 @@ LLM calls mocked; cache uses real SQLite.
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.ai.llm_word_analyzer import analyze_word
+from app.ai import llm_word_analyzer
+from app.ai.llm_word_analyzer import (
+    _call_llm,
+    _load_prompt,
+    _render,
+    _strip_frontmatter,
+    analyze_word,
+)
 from app.db_connection import DatabaseConnection
 
 MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
@@ -81,6 +89,71 @@ def db(tmp_path: Path) -> DatabaseConnection:
 def _mock_llm(return_values: list[str]):
     mock = MagicMock(side_effect=return_values)
     return patch("app.ai.llm_word_analyzer._call_llm", mock)
+
+
+def test_word_prompt_helpers_cover_plain_and_missing_templates() -> None:
+    assert _strip_frontmatter("plain prompt") == "plain prompt"
+    assert _strip_frontmatter("---\nmissing close") == "---\nmissing close"
+    assert _render("{{ word }} in {{ sentence }}", {
+        "word": "mitigate",
+        "sentence": "They mitigate harm.",
+    }) == "mitigate in They mitigate harm."
+    assert "{{ surface_form }}" in _load_prompt("word_analysis", "v5")
+    with pytest.raises(FileNotFoundError, match="Prompt template not found"):
+        _load_prompt("missing_word_prompt", "v0")
+
+
+def test_word_call_llm_returns_empty_string_for_empty_message(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=None))]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(
+        llm_word_analyzer,
+        "get_ai_provider_settings",
+        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-word"),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "openai",
+        SimpleNamespace(OpenAI=FakeOpenAI),
+    )
+
+    assert _call_llm("Prompt", "logical-model") == ""
+    assert captured["client_kwargs"] == {"api_key": "key", "base_url": None}
+    assert captured["model"] == "provider-word"
+    assert captured["messages"] == [{"role": "user", "content": "Prompt"}]
+    assert captured["temperature"] == 0.0
+
+
+def test_word_call_llm_wraps_provider_errors(monkeypatch) -> None:
+    class FailingOpenAI:
+        def __init__(self, **_kwargs):
+            raise RuntimeError("provider down")
+
+    monkeypatch.setattr(
+        llm_word_analyzer,
+        "get_ai_provider_settings",
+        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-word"),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "openai",
+        SimpleNamespace(OpenAI=FailingOpenAI),
+    )
+
+    with pytest.raises(RuntimeError, match="LLM call failed: provider down"):
+        _call_llm("Prompt", "logical-model")
 
 
 # ---------------------------------------------------------------------------

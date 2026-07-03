@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from app.web.views.cards import (
     _ai_meaning_cell,
+    _candidate_action,
     _cards_return_script,
     _note_edit_cell,
     _sentence_cards_table,
+    _sentence_source_link,
     _sentence_takeaway_cell,
     _sentence_translation_cell,
+    _set_primary_source_form,
     _word_card_sources_page,
     _word_cards_table,
 )
@@ -91,6 +94,12 @@ def test_sentence_cards_table_escapes_editable_fields_and_full_text() -> None:
     )
 
 
+def test_sentence_source_link_without_href_returns_plain_text() -> None:
+    assert _sentence_source_link({"sentence_text": "<plain>", "source_href": ""}) == (
+        "&lt;plain&gt;"
+    )
+
+
 def test_sentence_translation_and_takeaway_cells_use_pencil_edit_controls() -> None:
     update_cell = _sentence_translation_cell(
         {"sentence_id": 3, "user_translation": "旧译文"}
@@ -144,3 +153,15 @@ def test_word_card_sources_page_renders_sources_candidates_and_forms() -> None:
     assert "Primary" in html
     assert 'action="/cards/word/1/sources"' in html
     assert "Add source" in html
+
+
+def test_word_card_source_and_candidate_actions_render_alternate_states() -> None:
+    assert 'action="/cards/word/1/sources/10/primary"' in _set_primary_source_form(
+        {"id": 10, "card_id": 1}
+    )
+    assert _candidate_action(1, {"is_primary": 1, "is_recorded": 1, "sentence_id": 3}) == (
+        "Primary"
+    )
+    assert _candidate_action(1, {"is_primary": 0, "is_recorded": 1, "sentence_id": 3}) == (
+        "Recorded"
+    )

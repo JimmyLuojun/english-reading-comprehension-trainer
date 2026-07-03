@@ -7,8 +7,16 @@ from pathlib import Path
 import pytest
 
 from app.db_connection import DatabaseConnection
+from app.importers import markdown_importer
 from app.importers.markdown_importer import (
+    _MarkdownImageRegistry,
+    _MarkdownInlineImage,
     _clean_inline_markdown,
+    _clean_markdown_line,
+    _data_image_references,
+    _decode_data_image,
+    _final_inline_image_token,
+    _inline_image_storage_path,
     _markdown_blocks,
     _split_markdown_chapters,
     import_markdown,
@@ -22,6 +30,7 @@ TINY_PNG_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+TINY_JPEG_DATA_URL = "data:image/jpeg;base64,/9j/2Q=="
 
 
 @pytest.fixture()
@@ -167,6 +176,36 @@ def test_import_markdown_preserves_inline_data_images_as_assets(
     assert asset_path.exists()
 
 
+def test_import_markdown_reuses_duplicate_inline_data_image_tokens() -> None:
+    registry = _MarkdownImageRegistry()
+
+    first = registry.token_for(TINY_PNG_DATA_URL, "first")
+    second = registry.token_for(f" {TINY_PNG_DATA_URL} ", "second")
+
+    assert first == second
+    assert len(registry.images) == 1
+
+
+def test_import_markdown_rolls_back_book_when_inline_image_storage_fails(
+    db: DatabaseConnection,
+    monkeypatch,
+) -> None:
+    def fail_store(db_arg, book_id, images):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(markdown_importer, "_store_inline_images", fail_store)
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        import_markdown_bytes(
+            db,
+            f"If ![]({TINY_PNG_DATA_URL}) is true, continue.".encode("utf-8"),
+            title="Rollback",
+        )
+
+    with db.get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM books").fetchone()[0] == 0
+
+
 def test_markdown_blocks_preserve_headings_paragraphs_and_lists() -> None:
     blocks = _markdown_blocks(
         """# Title
@@ -195,6 +234,40 @@ across lines.
     assert '"ordered": true' in blocks[2].payload_json
     assert '"level": 2' in blocks[4].payload_json
     assert '"ordered": false' in blocks[5].payload_json
+
+
+def test_markdown_blocks_register_reference_data_images() -> None:
+    registry = _MarkdownImageRegistry()
+
+    blocks = _markdown_blocks(
+        f"Text before ![formula][img].\n\n[img]: {TINY_PNG_DATA_URL}",
+        image_registry=registry,
+    )
+
+    assert len(registry.images) == 1
+    assert "[[md-image-token:0]]" in blocks[0].text
+
+
+def test_markdown_blocks_update_heading_inline_image_tokens(
+    db: DatabaseConnection,
+) -> None:
+    result = import_markdown_bytes(
+        db,
+        f"# Formula ![]({TINY_PNG_DATA_URL})\n\nReadable sentence.".encode("utf-8"),
+        title="Heading Image",
+    )
+
+    with db.get_connection() as conn:
+        asset_id = conn.execute(
+            "SELECT id FROM book_assets WHERE book_id = ?",
+            (result.book_id,),
+        ).fetchone()["id"]
+        heading = conn.execute(
+            "SELECT text FROM chapter_blocks WHERE book_id = ? AND kind = 'heading'",
+            (result.book_id,),
+        ).fetchone()["text"]
+
+    assert heading == f"Formula [[md-image:{asset_id}]]"
 
 
 def test_import_markdown_deduplicates_on_original_bytes(
@@ -310,10 +383,57 @@ Intro sentence stays readable.
     assert "***" not in text
 
 
+def test_clean_markdown_line_handles_empty_reference_table_and_rule() -> None:
+    assert _clean_markdown_line("   ") == ""
+    assert _clean_markdown_line("[ref]: https://example.com") is None
+    assert _clean_markdown_line("| --- | --- |") is None
+    assert _clean_markdown_line("***") == ""
+
+
 def test_clean_inline_markdown_handles_images_links_html_and_escapes() -> None:
     assert (
         _clean_inline_markdown(
             r"![Alt text](image.png) <span>**bold**</span> [link](https://x.test) \*literal\*"
         )
         == "Alt text bold link *literal*"
+    )
+
+
+def test_clean_inline_markdown_falls_back_to_alt_for_invalid_data_image() -> None:
+    registry = _MarkdownImageRegistry()
+
+    assert (
+        _clean_inline_markdown(
+            "![Alt text](data:image/png;base64,not-valid)",
+            image_registry=registry,
+        )
+        == "Alt text"
+    )
+    assert registry.images == []
+
+
+def test_data_image_helpers_validate_payloads_and_storage_paths(monkeypatch) -> None:
+    assert _data_image_references([f"[img]: {TINY_PNG_DATA_URL}"]) == {
+        "img": TINY_PNG_DATA_URL
+    }
+    with pytest.raises(ValueError, match="Unsupported"):
+        _decode_data_image("https://example.com/image.png")
+    with pytest.raises(ValueError, match="Invalid"):
+        _decode_data_image("data:image/png;base64,abcd=")
+    with pytest.raises(ValueError, match="Unsupported"):
+        _decode_data_image("data:image/png;base64,")
+    assert _final_inline_image_token({0: 42}, 0) == "[[md-image:42]]"
+    assert _final_inline_image_token({}, 0) == ""
+
+    monkeypatch.setattr(markdown_importer.mimetypes, "guess_extension", lambda media_type: ".jpe")
+    image = _MarkdownInlineImage(
+        token_index=3,
+        data_url=TINY_JPEG_DATA_URL,
+        media_type="image/jpeg",
+        content=b"jpeg",
+        alt_text="Alt",
+    )
+
+    assert _inline_image_storage_path(9, image, "abcdef1234567890").endswith(
+        "markdown-inline-3-abcdef123456.jpg"
     )

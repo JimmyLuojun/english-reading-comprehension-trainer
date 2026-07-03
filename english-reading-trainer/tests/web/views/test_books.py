@@ -48,6 +48,9 @@ def test_chapter_labels_and_primary_read_idx() -> None:
 
     assert _section_label(chapter) == "Chapter 2: Methods"
     assert _section_label(appendix) == "Appendix A: Data"
+    assert _section_label({"idx": 4, "title": "Extra Data", "section_kind": "appendix"}) == (
+        "Appendix: Extra Data"
+    )
     assert _strip_section_ordinal("Chapter 10 - Title") == "Title"
     assert _strip_section_ordinal("Chapter 1") == ""
     assert _strip_section_ordinal("Chapter One: A New Way") == "A New Way"
@@ -74,6 +77,8 @@ def test_chapter_labels_and_primary_read_idx() -> None:
 
 
 def test_chapters_table_renders_read_links() -> None:
+    assert _chapters_table(7, []) == '<p class="empty">No chapters found.</p>'
+
     html = _chapters_table(
         7,
         [

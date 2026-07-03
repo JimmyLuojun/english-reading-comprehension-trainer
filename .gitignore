@@ -113,4 +113,5 @@ coverage/
 
 # Python
 .coverage
+coverage.json
 htmlcov/
