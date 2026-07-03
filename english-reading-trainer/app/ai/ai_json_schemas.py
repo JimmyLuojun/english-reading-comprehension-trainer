@@ -10,6 +10,7 @@ SENTENCE_ANALYSIS_SCHEMA_V2 — v2 prompt, adds blocking point and takeaway sugg
 SENTENCE_ANALYSIS_SCHEMA_V3 — v5 prompt, adds optional structure feedback
 SENTENCE_ANALYSIS_SCHEMA_V4 — v6 prompt, adds positive correct-path highlights
 SENTENCE_ANALYSIS_SCHEMA_V5 — v7 prompt, adds local argument role metadata
+PARAGRAPH_LOGIC_LENS_SCHEMA — paragraph-level argument flow analysis
 WORD_ANALYSIS_SCHEMA        — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
@@ -278,6 +279,51 @@ SENTENCE_ANALYSIS_SCHEMA_V5: dict = {
         },
         "argument_role_reason": {"type": "string", "minLength": 1},
         "argument_role_check": {"type": "string", "minLength": 1},
+    },
+}
+
+
+PARAGRAPH_LOGIC_LENS_SCHEMA: dict = {
+    "type": "object",
+    "required": [
+        "paragraph_main_claim",
+        "argument_flow",
+        "evidence",
+        "concession_or_counterpoint",
+        "hidden_assumption",
+        "author_stance",
+        "possible_misreading",
+        "reading_check",
+        "takeaway_suggestion",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "paragraph_main_claim": {"type": "string", "minLength": 1},
+        "argument_flow": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["sentence_id", "sentence_text", "role", "reason"],
+                "additionalProperties": False,
+                "properties": {
+                    "sentence_id": {"type": "integer"},
+                    "sentence_text": {"type": "string", "minLength": 1},
+                    "role": {"type": "string", "enum": ARGUMENT_ROLE_VALUES},
+                    "reason": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+        "evidence": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+        },
+        "concession_or_counterpoint": {"type": "string"},
+        "hidden_assumption": {"type": "string"},
+        "author_stance": {"type": "string", "minLength": 1},
+        "possible_misreading": {"type": "string", "minLength": 1},
+        "reading_check": {"type": "string", "minLength": 1},
+        "takeaway_suggestion": {"type": "string", "minLength": 1},
     },
 }
 

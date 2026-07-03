@@ -22,6 +22,8 @@ def test_selection_script_contains_reader_toolbar_contracts() -> None:
     script = _selection_script()
 
     assert "selection-toolbar" in script
+    assert "paragraph-toolbar" in script
+    assert "paragraph-analyze" in script
     assert "toolbar-analysis-word-form" in script
     assert "restoreProgress" in script
     assert "analysisHistory" in script
@@ -29,6 +31,68 @@ def test_selection_script_contains_reader_toolbar_contracts() -> None:
     assert "function openPanelPlaceholder()" in script
     assert 'panelTab.addEventListener("click", openPanelPlaceholder);' in script
     assert "Select a sentence or marked word, then choose AI analysis." in script
+
+
+def test_paragraph_shortcut_and_toolbar_contracts() -> None:
+    script = _selection_script()
+    shortcut = script[script.index("function handleReaderShortcut") :]
+    shortcut = shortcut[: shortcut.index("function captureReadingAnchor")]
+    paragraph_copy = script[script.index("async function copyParagraphPrompt") :]
+    paragraph_copy = paragraph_copy[: paragraph_copy.index("async function loadSavedParagraphAnalysis")]
+    paragraph_load = script[script.index("async function loadSavedParagraphAnalysis") :]
+    paragraph_load = paragraph_load[: paragraph_load.index("async function requestParagraphAnalysis")]
+    paragraph_request = script[script.index("async function requestParagraphAnalysis") :]
+    paragraph_request = paragraph_request[: paragraph_request.index("async function saveExternalSentenceAnalysis")]
+    paragraph_external = script[script.index("async function saveExternalParagraphAnalysis") :]
+    paragraph_external = paragraph_external[: paragraph_external.index("function updateSentenceAnalysisState")]
+    paragraph_marker = script[script.index("function markParagraphAnalysisState") :]
+    paragraph_marker = paragraph_marker[: paragraph_marker.index("function clearParagraphSelection")]
+    paragraph_render = script[script.index("function renderParagraphAnalysis") :]
+    paragraph_render = paragraph_render[: paragraph_render.index("function toggleAnalysisSection")]
+    paragraph_copy_text = script[script.index("function buildParagraphAnalysisCopyText") :]
+    paragraph_copy_text = paragraph_copy_text[: paragraph_copy_text.index("function buildParagraphCopyText")]
+    paragraph_flow = script[script.index("function renderParagraphFlow") :]
+    paragraph_flow = paragraph_flow[: paragraph_flow.index("function renderParagraphAnalysis")]
+    retry = script[script.index('panelRetry.addEventListener("click"') :]
+    retry = retry[: retry.index("async function saveWordDetailEdits")]
+
+    assert 'document.getElementById("paragraph-toolbar")' in script
+    assert "function showParagraphToolbar(paragraph)" in script
+    assert "function paragraphAnalysisButtonLabel(paragraph)" in script
+    assert 'return "Analyze argument";' in script
+    assert '"Open stale analysis"' in script
+    assert '"Open analysis panel"' in script
+    assert "paragraphAnalyze.textContent = paragraphAnalysisButtonLabel(paragraph);" in script
+    assert 'const isParagraph = event.code === "KeyP";' in shortcut
+    assert "paragraphShortcutIsBlocked(event)" in shortcut
+    assert "showParagraphToolbar(paragraph);" in shortcut
+    assert "hideToolbar();" in script[script.index("function showParagraphToolbar") :]
+    assert 'fetch(`/analysis/paragraph/${paragraphId}/logic`)' in paragraph_load
+    assert "renderParagraphAnalysis(payload);" in paragraph_load
+    assert 'fetch(`/analysis/paragraph/${paragraphId}/logic`' in paragraph_request
+    assert 'method: "POST"' in paragraph_request
+    assert 'fetch(`/analysis/paragraph/${paragraphId}/logic-prompt`)' in script
+    assert "function prepareExternalParagraphResultBox(paragraphId, status = \"\")" in script
+    assert "prepareExternalParagraphResultBox(paragraphId, \"Copying prompt...\");" in paragraph_copy
+    assert (
+        "prepareExternalParagraphResultBox(paragraphId, \"Prompt copied. Paste external result here.\");"
+        in paragraph_copy
+    )
+    assert "analysisExternalResult?.focus()" in paragraph_copy
+    assert 'fetch(`/analysis/paragraph/${paragraphId}/logic-external`' in paragraph_external
+    assert "saveExternalParagraphAnalysis();" in script
+    assert "renderParagraphAnalysis(payload);" in paragraph_request
+    assert "renderParagraphAnalysis(payload);" in paragraph_external
+    assert "function paragraphElementById(paragraphId)" in script
+    assert "paragraph.dataset.paragraphAnalysisId = String(payload.cache_id || \"\");" in paragraph_marker
+    assert "paragraph.classList.add(payload.is_stale ? \"logic-analyzed-stale\" : \"logic-analyzed\");" in paragraph_marker
+    assert "markParagraphAnalysisState(payload);" in paragraph_render
+    assert "function sentenceTextFromPayload(payload, sentenceId)" in script
+    assert "item.sentence_text || sentenceTextFromPayload(payload, item.sentence_id)" in paragraph_copy_text
+    assert "const sourceText = item.sentence_text" in paragraph_flow
+    assert 'requestParagraphAnalysis(activeAnalysisParagraphId, { forceRefresh: true });' in retry
+    assert "loadSavedParagraphAnalysis(activeParagraphId);" in script
+    assert "requestParagraphAnalysis(activeParagraphId);" in script
 
 
 def test_analysis_panel_opens_at_top_without_progress_scroll_restore() -> None:
@@ -327,10 +391,9 @@ def test_external_sentence_analysis_prompt_and_paste_flow() -> None:
     assert "await flushPendingToolbarEdits();" in boot
     assert "refreshActiveSentenceSnapshot(sentenceId);" in boot
     assert "copyExternalSentencePrompt(sentenceId);" in boot
-    assert (
-        'analysisExternalSave.addEventListener("click", saveExternalSentenceAnalysis);'
-        in panel_buttons
-    )
+    assert 'analysisExternalSave.addEventListener("click", () =>' in panel_buttons
+    assert "saveExternalSentenceAnalysis();" in panel_buttons
+    assert "saveExternalParagraphAnalysis();" in panel_buttons
     assert (
         'analysisExternalClear.addEventListener("click", clearExternalResultBox);'
         in panel_buttons

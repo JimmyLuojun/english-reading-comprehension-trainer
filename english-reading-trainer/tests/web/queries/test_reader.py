@@ -87,6 +87,59 @@ def test_reader_query_preserves_archived_translation_without_active_card(
     assert sentences[0]["has_analysis"] == 0
 
 
+def test_reader_query_marks_paragraph_with_saved_logic_analysis(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    source = tmp_path / "book.txt"
+    source.write_text(
+        "Previous context.\n\nTarget claim. Target support.\n\nNext context.",
+        encoding="utf-8",
+    )
+    book = import_txt(db, source, title="Book", author="")
+    with db.get_connection() as conn:
+        chapter_id = conn.execute(
+            "SELECT id FROM chapters WHERE book_id = ?",
+            (book.book_id,),
+        ).fetchone()["id"]
+        target = conn.execute(
+            """SELECT p.id AS paragraph_id
+                 FROM paragraphs p
+                WHERE p.chapter_id = ?
+                ORDER BY p.idx
+                LIMIT 1 OFFSET 1""",
+            (chapter_id,),
+        ).fetchone()
+        content_hash = compute_content_hash(
+            "Target claim. Target support.",
+            "Previous paragraph: Previous context.\n\nNext paragraph: Next context.",
+        )
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, 'paragraph_logic_lens.v3', 'external-ai', '{}', 1,
+                       '2026-06-19T00:00:00+00:00')""",
+            (content_hash,),
+        ).lastrowid
+
+    sentences = _fetch_chapter_sentences(db, chapter_id)
+    target_rows = [
+        row for row in sentences if row["paragraph_id"] == target["paragraph_id"]
+    ]
+    other_rows = [
+        row for row in sentences if row["paragraph_id"] != target["paragraph_id"]
+    ]
+
+    assert [row["paragraph_has_analysis"] for row in target_rows] == [1, 1]
+    assert [row["paragraph_ai_analysis_id"] for row in target_rows] == [
+        cache_id,
+        cache_id,
+    ]
+    assert [row["paragraph_analysis_is_stale"] for row in target_rows] == [0, 0]
+    assert all(row["paragraph_has_analysis"] == 0 for row in other_rows)
+
+
 def test_reader_query_marks_analysis_stale_when_translation_changes(
     tmp_path: Path,
 ) -> None:
@@ -176,3 +229,16 @@ def test_asset_storage_path_stays_under_assets_root(tmp_path: Path) -> None:
         _asset_storage_path(db, "../escape.png")
     with pytest.raises(ValueError):
         _asset_storage_path(db, str(tmp_path / "absolute.png"))
+
+
+def test_asset_storage_path_rejects_symlink_escape(tmp_path: Path) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    assets_dir = tmp_path / "assets"
+    outside_dir = tmp_path / "outside"
+    assets_dir.mkdir()
+    outside_dir.mkdir()
+    (assets_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="escapes asset root"):
+        _asset_storage_path(db, "escape/image.png")

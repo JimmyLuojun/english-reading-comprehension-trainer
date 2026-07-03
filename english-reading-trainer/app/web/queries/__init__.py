@@ -33,6 +33,8 @@ from app.web.queries.reader import (
 )
 
 from app.web.queries.analysis import (
+    _fetch_paragraph_for_logic,
+    _fetch_paragraph_logic_payload,
     _fetch_sentence_for_analysis,
     _fetch_sentence_analysis_payload,
     _fetch_word_analysis_payload,
@@ -64,6 +66,8 @@ __all__ = [
     "_fetch_chapters",
     "_fetch_adjacent_chapters",
     "_fetch_reanchor_candidate_sentences",
+    "_fetch_paragraph_for_logic",
+    "_fetch_paragraph_logic_payload",
     "_fetch_sentence_analysis_payload",
     "_fetch_sentence_for_analysis",
     "_fetch_word_analysis_payload",

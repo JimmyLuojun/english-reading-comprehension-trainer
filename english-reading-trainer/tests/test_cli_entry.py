@@ -7,12 +7,15 @@ All tests use real SQLite — no mocking.
 """
 
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
+from app import cli_entry
 from app.cli_entry import app
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import import_epub
@@ -106,8 +109,8 @@ class TestBooksList:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 20
-        assert active_count == 4
+        assert count == 23
+        assert active_count == 5
 
     def test_shows_imported_book(self, db: DatabaseConnection, tmp_path: Path) -> None:
         _seed_book_and_sentence(db, tmp_path)
@@ -245,6 +248,37 @@ class TestImportEpubCmd:
     def test_missing_file_exits_with_error(self, db: DatabaseConnection, tmp_path: Path) -> None:
         result = runner.invoke(app, ["books", "import", "epub", str(tmp_path / "no.epub")])
         assert result.exit_code != 0
+
+    def test_duplicate_import_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        ep = make_epub(tmp_path, "dup.epub", title="Duplicate EPUB")
+        runner.invoke(app, ["books", "import", "epub", str(ep)])
+
+        result = runner.invoke(app, ["books", "import", "epub", str(ep)])
+
+        assert result.exit_code != 0
+        assert "already imported" in result.output.lower() or "skip" in result.output.lower()
+
+    def test_invalid_epub_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        ep = make_epub(tmp_path, "bad.epub")
+
+        def fail_import(*args, **kwargs):
+            raise ValueError("invalid epub")
+
+        monkeypatch.setattr(cli_entry, "import_epub", fail_import)
+
+        result = runner.invoke(app, ["books", "import", "epub", str(ep)])
+
+        assert result.exit_code != 0
+        assert "invalid epub" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +431,20 @@ class TestReadCmd:
         result = runner.invoke(app, ["read", str(book_id)])
         assert "[*]" in result.output
 
+    def test_separates_paragraphs_with_blank_line(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        source = _write_txt(tmp_path, "First paragraph sentence.\n\nSecond paragraph sentence.")
+        imported = import_txt(db, source, title="Two Paragraphs")
+
+        result = runner.invoke(app, ["read", str(imported.book_id)])
+
+        assert result.exit_code == 0
+        assert "First paragraph sentence" in result.output
+        assert "Second paragraph sentence" in result.output
+
 
 # ---------------------------------------------------------------------------
 # mark sentence
@@ -458,6 +506,45 @@ class TestMarkSentence:
         assert row["user_translation"] == "猫坐在垫子上。"
         assert row["translation_created_at"] is not None
 
+    def test_translation_save_value_error_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+
+        def fail_save(*args, **kwargs):
+            raise ValueError("translation failed")
+
+        monkeypatch.setattr(cli_entry, "save_sentence_translation", fail_save)
+
+        result = runner.invoke(
+            app,
+            ["mark", "sentence", str(sid), "--translation", "译文"],
+        )
+
+        assert result.exit_code != 0
+        assert "translation failed" in result.output
+
+    def test_create_sentence_value_error_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+
+        def fail_create(*args, **kwargs):
+            raise ValueError("create failed")
+
+        monkeypatch.setattr(cli_entry, "create_sentence_card", fail_create)
+
+        result = runner.invoke(app, ["mark", "sentence", str(sid)])
+
+        assert result.exit_code != 0
+        assert "create failed" in result.output
+
 
 # ---------------------------------------------------------------------------
 # mark word
@@ -507,6 +594,24 @@ class TestMarkWord:
     def test_missing_sentence_exits_with_error(self, db: DatabaseConnection) -> None:
         result = runner.invoke(app, ["mark", "word", "9999", "word"])
         assert result.exit_code != 0
+
+    def test_create_word_value_error_exits_with_error(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+
+        def fail_create(*args, **kwargs):
+            raise ValueError("word failed")
+
+        monkeypatch.setattr(cli_entry, "create_or_update_word_card", fail_create)
+
+        result = runner.invoke(app, ["mark", "word", str(sid), "cat"])
+
+        assert result.exit_code != 0
+        assert "word failed" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -737,6 +842,33 @@ class TestProfileCommands:
         assert "due" in result.output
         assert "review_count" in result.output
 
+    def test_profile_status_shows_last_snapshot(
+        self,
+        db: DatabaseConnection,
+    ) -> None:
+        runner.invoke(app, ["profile", "save"], input="## Summary\nSnapshot text.")
+
+        result = runner.invoke(app, ["profile", "status"])
+
+        assert result.exit_code == 0
+        assert "Last snapshot:" in result.output
+        assert "Days since snapshot:" in result.output
+
+    def test_profile_status_input_error_exits_nonzero(
+        self,
+        db: DatabaseConnection,
+        monkeypatch,
+    ) -> None:
+        def fail_status(db_arg):
+            raise cli_entry.ProfileInputError("status failed")
+
+        monkeypatch.setattr(cli_entry, "get_profile_trigger_status", fail_status)
+
+        result = runner.invoke(app, ["profile", "status"])
+
+        assert result.exit_code != 0
+        assert "status failed" in result.output
+
     def test_profile_prompt_prints_rendered_prompt(
         self, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -787,6 +919,38 @@ class TestProfileCommands:
 
         assert result.exit_code != 0
         assert "No input" in result.output
+
+    def test_profile_save_handles_stdin_interrupt(
+        self,
+        db: DatabaseConnection,
+        monkeypatch,
+    ) -> None:
+        class InterruptingStdin:
+            @staticmethod
+            def read():
+                raise EOFError
+
+        monkeypatch.setattr(sys, "stdin", InterruptingStdin())
+
+        with pytest.raises(typer.Exit) as exc:
+            cli_entry.profile_save()
+
+        assert exc.value.exit_code == 1
+
+    def test_profile_save_input_error_exits_nonzero(
+        self,
+        db: DatabaseConnection,
+        monkeypatch,
+    ) -> None:
+        def fail_collect(*args, **kwargs):
+            raise cli_entry.ProfileInputError("save failed")
+
+        monkeypatch.setattr(cli_entry, "collect_profile_stats", fail_collect)
+
+        result = runner.invoke(app, ["profile", "save"], input="## Summary")
+
+        assert result.exit_code != 0
+        assert "save failed" in result.output
 
     def test_profile_latest_empty_message(self, db: DatabaseConnection) -> None:
         result = runner.invoke(app, ["profile", "latest"])
@@ -961,6 +1125,23 @@ class TestAiSaveSentence:
         result = runner.invoke(app, ["ai", "save-sentence", str(sid)], input="")
         assert result.exit_code != 0
 
+    def test_stdin_interrupt_exits_nonzero(
+        self,
+        db: DatabaseConnection,
+        monkeypatch,
+    ) -> None:
+        class InterruptingStdin:
+            @staticmethod
+            def read():
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(sys, "stdin", InterruptingStdin())
+
+        with pytest.raises(typer.Exit) as exc:
+            cli_entry.ai_save_sentence(1)
+
+        assert exc.value.exit_code == 1
+
     def test_invalid_json_exits_nonzero(
         self, db: DatabaseConnection, tmp_path: Path
     ) -> None:
@@ -1049,6 +1230,23 @@ class TestAiSaveWord:
             app, ["ai", "save-word", str(sid), "cat"], input=""
         )
         assert result.exit_code != 0
+
+    def test_stdin_interrupt_exits_nonzero(
+        self,
+        db: DatabaseConnection,
+        monkeypatch,
+    ) -> None:
+        class InterruptingStdin:
+            @staticmethod
+            def read():
+                raise EOFError
+
+        monkeypatch.setattr(sys, "stdin", InterruptingStdin())
+
+        with pytest.raises(typer.Exit) as exc:
+            cli_entry.ai_save_word(1, "cat")
+
+        assert exc.value.exit_code == 1
 
     def test_invalid_json_exits_nonzero(
         self, db: DatabaseConnection, tmp_path: Path

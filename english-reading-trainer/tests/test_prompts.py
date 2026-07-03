@@ -25,6 +25,7 @@ PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 PROMPT_FILES = {
     "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v7.md",
     "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v7.md",
+    "paragraph_logic_lens":       PROMPTS_DIR / "paragraph_logic_lens.v3.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
@@ -45,6 +46,8 @@ SENTENCE_ANALYSIS_DIAGNOSE_V7 = PROMPTS_DIR / "sentence_analysis_diagnose.v7.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
+PARAGRAPH_LOGIC_LENS_V1 = PROMPTS_DIR / "paragraph_logic_lens.v1.md"
+PARAGRAPH_LOGIC_LENS_V2 = PROMPTS_DIR / "paragraph_logic_lens.v2.md"
 
 # Required template variables per prompt
 REQUIRED_VARS = {
@@ -54,6 +57,7 @@ REQUIRED_VARS = {
     "sentence_analysis_diagnose": ["sentence", "user_translation", "context",
                                    "chapter_title", "related_cards",
                                    "learner_profile", "user_structure"],
+    "paragraph_logic_lens": ["paragraph", "sentence_lines", "context"],
     "word_analysis": ["surface_form", "sentence", "context",
                       "related_cards", "learner_note", "learner_profile"],
     "profile_summary": ["lookback_days", "total_reviews",
@@ -139,6 +143,14 @@ class TestPromptFilesExist:
         assert WORD_ANALYSIS_V3.exists()
         assert WORD_ANALYSIS_V3.stat().st_size <= MAX_PROMPT_BYTES
 
+    def test_historical_paragraph_prompt_v1_exists(self) -> None:
+        assert PARAGRAPH_LOGIC_LENS_V1.exists()
+        assert PARAGRAPH_LOGIC_LENS_V1.stat().st_size <= MAX_PROMPT_BYTES
+
+    def test_historical_paragraph_prompt_v2_exists(self) -> None:
+        assert PARAGRAPH_LOGIC_LENS_V2.exists()
+        assert PARAGRAPH_LOGIC_LENS_V2.stat().st_size <= MAX_PROMPT_BYTES
+
 
 # ---------------------------------------------------------------------------
 # Frontmatter
@@ -171,6 +183,7 @@ class TestFrontmatter:
     @pytest.mark.parametrize("name,expected_version", [
         ("sentence_analysis_predict", "v7"),
         ("sentence_analysis_diagnose", "v7"),
+        ("paragraph_logic_lens", "v3"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])

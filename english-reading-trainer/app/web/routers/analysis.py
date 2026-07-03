@@ -11,13 +11,17 @@ from app.web.http_utils import (
     _read_form,
 )
 from app.web.queries import (
+    _fetch_paragraph_logic_payload,
     _fetch_sentence_analysis_payload,
     _fetch_word_analysis_payload,
 )
 from app.web.services.analysis import (
+    analyze_paragraph_logic_for_reader,
     analyze_sentence_for_reader,
     analyze_word_card_for_reader,
+    build_external_paragraph_logic_prompt,
     build_external_sentence_prompt,
+    save_external_paragraph_logic_for_reader,
     save_external_sentence_analysis_for_reader,
 )
 
@@ -55,6 +59,74 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             user_structure=form.get("user_structure"),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
             force_refresh=_truthy_form_value(form.get("force_refresh")),
+        )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
+
+    @web_app.get("/analysis/paragraph/{paragraph_id}/logic")
+    def get_paragraph_logic_endpoint(paragraph_id: int) -> JSONResponse:
+        try:
+            payload = _fetch_paragraph_logic_payload(db_factory(), paragraph_id)
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        if payload is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "No saved analysis for this paragraph.",
+                    "retry": True,
+                },
+                status_code=404,
+            )
+        return JSONResponse(payload)
+
+    @web_app.post("/analysis/paragraph/{paragraph_id}/logic")
+    async def analyze_paragraph_logic_endpoint(
+        paragraph_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        outcome = await run_in_threadpool(
+            analyze_paragraph_logic_for_reader,
+            db_factory(),
+            paragraph_id,
+            prefer_pro=_truthy_form_value(form.get("prefer_pro")),
+            force_refresh=_truthy_form_value(form.get("force_refresh")),
+        )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
+
+    @web_app.get("/analysis/paragraph/{paragraph_id}/logic-prompt")
+    async def paragraph_logic_prompt_endpoint(paragraph_id: int) -> JSONResponse:
+        try:
+            prompt = await run_in_threadpool(
+                build_external_paragraph_logic_prompt,
+                db_factory(),
+                paragraph_id,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        return JSONResponse({"ok": True, "paragraph_id": paragraph_id, "prompt": prompt})
+
+    @web_app.post("/analysis/paragraph/{paragraph_id}/logic-external")
+    async def external_paragraph_logic_endpoint(
+        paragraph_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        outcome = await run_in_threadpool(
+            save_external_paragraph_logic_for_reader,
+            db_factory(),
+            paragraph_id,
+            external_result=form.get("external_result", ""),
         )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)

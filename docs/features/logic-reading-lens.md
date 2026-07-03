@@ -1,10 +1,23 @@
 # Logic Reading Lens / 文章逻辑视角
 
-Status: proposal, not implemented.
+Status: implemented.
 
 This feature is split into two deployable parts. Feature 1 adds sentence-level
 argument role metadata to the existing sentence analysis. Feature 2 adds an
 explicit paragraph selection workflow and paragraph-level argument analysis.
+
+Implemented state:
+
+- Feature 1 is live in sentence analysis prompt/schema v7 and the Reader panel.
+- Feature 2 is live in the Reader: click a normal paragraph, press bare `p`,
+  use the separate paragraph toolbar, then run or copy paragraph argument
+  analysis.
+- Paragraph analysis uses `paragraph_logic_lens.v3`, validates against
+  `PARAGRAPH_LOGIC_LENS_SCHEMA`, caches in `ai_cache`, and is not attached to
+  sentence cards, Review, or `sentence_card_errors`.
+- `paragraph_logic_lens.v3` keeps original sentence text beside stable internal
+  ids and defines the role taxonomy for claim/evidence/example/counterargument/
+  concession/conclusion/background/qualification/transition/unclear.
 
 The boundary is intentional:
 
@@ -219,16 +232,19 @@ Add a new paragraph logic schema, separate from sentence analysis:
   "argument_flow": [
     {
       "sentence_id": 123,
+      "sentence_text": "The policy was introduced to solve the shortage.",
       "role": "background",
       "reason": "This sentence establishes the policy context."
     },
     {
       "sentence_id": 124,
+      "sentence_text": "Yet it failed because local incentives did not change.",
       "role": "claim",
       "reason": "This sentence states the paragraph's main judgment."
     },
     {
       "sentence_id": 125,
+      "sentence_text": "Local behavior therefore remained unchanged.",
       "role": "evidence",
       "reason": "This sentence provides the concrete result supporting the claim."
     }
@@ -290,11 +306,11 @@ a paragraph content hash and writing valid JSON to `ai_cache`.
    - include previous/next paragraph text as context when available;
    - preserve original sentence order.
 5. AI pipeline:
-   - add prompt `english-reading-trainer/prompts/paragraph_logic_lens.v1.md`;
+   - add prompt `english-reading-trainer/prompts/paragraph_logic_lens.v3.md`;
    - add a `PARAGRAPH_LOGIC_LENS_SCHEMA`;
    - add a small service such as `analyze_paragraph_logic_for_reader`;
    - use `ai_cache` with a distinct prompt version such as
-     `paragraph_logic_lens.v1`;
+     `paragraph_logic_lens.v3`;
    - do not attach paragraph analysis to `sentence_cards.ai_analysis_id`.
 6. Routes:
    - `POST /analysis/paragraph/{paragraph_id}/logic` analyzes and returns the

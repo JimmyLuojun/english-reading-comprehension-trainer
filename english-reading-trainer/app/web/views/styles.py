@@ -270,6 +270,29 @@ def _css() -> str:
       font-size: 20px;
       line-height: 1.8;
     }
+    .reader-para.logic-selected {
+      border-radius: var(--radius-sm);
+      background: rgba(15, 143, 131, 0.10);
+      box-shadow: 0 0 0 3px rgba(15, 143, 131, 0.12);
+    }
+    .reader-para.logic-analyzed,
+    .reader-para.logic-analyzed-stale {
+      border-radius: var(--radius-sm);
+      box-shadow: -6px 0 0 -3px #2563eb;
+    }
+    .reader-para.logic-analyzed-stale {
+      box-shadow: -6px 0 0 -3px #94a3b8;
+    }
+    .reader-para.logic-selected.logic-analyzed {
+      box-shadow:
+        -6px 0 0 -3px #2563eb,
+        0 0 0 3px rgba(15, 143, 131, 0.12);
+    }
+    .reader-para.logic-selected.logic-analyzed-stale {
+      box-shadow:
+        -6px 0 0 -3px #94a3b8,
+        0 0 0 3px rgba(15, 143, 131, 0.12);
+    }
     .reader-md-heading {
       margin: 1.65em 0 0.65em;
       color: var(--text-dim);
@@ -421,7 +444,8 @@ def _css() -> str:
       background: linear-gradient(transparent 42%, rgba(249, 115, 22, 0.44) 42%);
       text-decoration-color: #9a3412;
     }
-    .selection-toolbar {
+    .selection-toolbar,
+    .paragraph-toolbar {
       position: absolute;
       z-index: 20;
       display: flex;
@@ -436,7 +460,8 @@ def _css() -> str:
       color: #f9fafb;
       box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
     }
-    .selection-toolbar[hidden] { display: none; }
+    .selection-toolbar[hidden],
+    .paragraph-toolbar[hidden] { display: none; }
     .toolbar-group {
       display: flex;
       gap: 6px;
@@ -448,7 +473,8 @@ def _css() -> str:
       flex-wrap: nowrap;
     }
     .toolbar-group[hidden] { display: none; }
-    .selection-toolbar button {
+    .selection-toolbar button,
+    .paragraph-toolbar button {
       border-color: #374151;
       background: #f9fafb;
       color: #111827;
@@ -459,17 +485,20 @@ def _css() -> str:
       flex: 0 0 auto;
       white-space: nowrap;
     }
-    .selection-toolbar button.danger {
+    .selection-toolbar button.danger,
+    .paragraph-toolbar button.danger {
       border-color: #fecaca;
       color: #991b1b;
     }
-    .selection-toolbar button:disabled {
+    .selection-toolbar button:disabled,
+    .paragraph-toolbar button:disabled {
       border-color: #d1d5db;
       background: #e5e7eb;
       color: #9ca3af;
       cursor: not-allowed;
     }
-    .selection-toolbar button.danger:disabled {
+    .selection-toolbar button.danger:disabled,
+    .paragraph-toolbar button.danger:disabled {
       border-color: #d1d5db;
       color: #9ca3af;
     }

@@ -7,9 +7,11 @@ from typing import Any
 
 from app.ai.ai_response_cache import compute_content_hash
 from app.db_connection import DatabaseConnection
+from app.web.config import _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 from app.web.queries.analysis import _active_sentence_prompt_version
 
 _CONTEXT_WINDOW = 2
+_PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 
 
 def _fetch_chapter_sentences(
@@ -42,12 +44,14 @@ def _fetch_chapter_sentences(
         ).fetchall()
     result = [dict(row) for row in rows]
     contexts_by_sentence = _sentence_contexts_for_rows(result)
+    paragraph_states = _paragraph_analysis_states_for_rows(db, result)
     for row in result:
         has_analysis = bool(row.get("ai_analysis_id") and row.get("analysis_is_valid"))
         active_version = _active_sentence_prompt_version(
             db,
             row.get("user_translation") or None,
         )
+        paragraph_state = paragraph_states.get(int(row["paragraph_id"]), {})
         current_content_hash = compute_content_hash(
             row.get("text") or "",
             contexts_by_sentence.get(int(row["id"]), ""),
@@ -64,7 +68,88 @@ def _fetch_chapter_sentences(
             )
             else 0
         )
+        row["paragraph_has_analysis"] = 1 if paragraph_state else 0
+        row["paragraph_ai_analysis_id"] = paragraph_state.get("cache_id")
+        row["paragraph_analysis_is_stale"] = (
+            1 if paragraph_state.get("is_stale") else 0
+        )
     return result
+
+
+def _paragraph_analysis_states_for_rows(
+    db: DatabaseConnection,
+    rows: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    paragraphs = _paragraph_groups_for_rows(rows)
+    if not paragraphs:
+        return {}
+
+    paragraph_hashes: dict[int, str] = {}
+    for index, (paragraph_id, paragraph_rows) in enumerate(paragraphs):
+        text = " ".join(
+            str(row.get("text") or "").strip() for row in paragraph_rows
+        ).strip()
+        context_parts = []
+        if index > 0:
+            previous_text = " ".join(
+                str(row.get("text") or "").strip() for row in paragraphs[index - 1][1]
+            ).strip()
+            if previous_text:
+                context_parts.append(f"Previous paragraph: {previous_text}")
+        if index + 1 < len(paragraphs):
+            next_text = " ".join(
+                str(row.get("text") or "").strip() for row in paragraphs[index + 1][1]
+            ).strip()
+            if next_text:
+                context_parts.append(f"Next paragraph: {next_text}")
+        paragraph_hashes[paragraph_id] = compute_content_hash(
+            text,
+            "\n\n".join(context_parts),
+        )
+
+    unique_hashes = sorted(set(paragraph_hashes.values()))
+    placeholders = ",".join("?" for _ in unique_hashes)
+    with db.get_connection() as conn:
+        cache_rows = conn.execute(
+            f"""SELECT id, content_hash, prompt_version
+                  FROM ai_cache
+                 WHERE content_hash IN ({placeholders})
+                   AND prompt_version LIKE 'paragraph_logic_lens.%'
+                   AND is_valid = 1
+                 ORDER BY CASE WHEN prompt_version = ? THEN 0 ELSE 1 END,
+                          id DESC""",
+            (*unique_hashes, _PARAGRAPH_LOGIC_PROMPT_VERSION),
+        ).fetchall()
+
+    cache_by_hash: dict[str, dict[str, Any]] = {}
+    for row in cache_rows:
+        content_hash = row["content_hash"]
+        if content_hash in cache_by_hash:
+            continue
+        cache_by_hash[content_hash] = {
+            "cache_id": row["id"],
+            "is_stale": row["prompt_version"] != _PARAGRAPH_LOGIC_PROMPT_VERSION,
+        }
+
+    return {
+        paragraph_id: cache_by_hash[content_hash]
+        for paragraph_id, content_hash in paragraph_hashes.items()
+        if content_hash in cache_by_hash
+    }
+
+
+def _paragraph_groups_for_rows(
+    rows: list[dict[str, Any]],
+) -> list[tuple[int, list[dict[str, Any]]]]:
+    paragraphs: list[tuple[int, list[dict[str, Any]]]] = []
+    current_id: int | None = None
+    for row in rows:
+        paragraph_id = int(row["paragraph_id"])
+        if paragraph_id != current_id:
+            paragraphs.append((paragraph_id, []))
+            current_id = paragraph_id
+        paragraphs[-1][1].append(row)
+    return paragraphs
 
 
 def _sentence_contexts_for_rows(rows: list[dict[str, Any]]) -> dict[int, str]:

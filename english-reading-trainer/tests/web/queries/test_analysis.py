@@ -22,11 +22,15 @@ from app.web.queries.analysis import (
     _active_sentence_prompt_version,
     _active_word_prompt_version,
     _fetch_cache_metadata,
+    _fetch_paragraph_for_logic,
+    _fetch_paragraph_logic_payload,
     _fetch_sentence_analysis_payload,
     _fetch_sentence_for_analysis,
     _fetch_word_analysis_payload,
+    _sentence_context_text,
     _update_word_card_analysis_id,
 )
+from app.web.queries import analysis as analysis_queries
 
 MIGRATIONS_DIR = Path(__file__).parents[3] / "migrations"
 
@@ -108,6 +112,133 @@ def test_fetch_sentence_for_analysis_and_missing_error(tmp_path: Path) -> None:
     assert _fetch_sentence_for_analysis(db, sentence_id)["text"] == "The cat sat."
     with pytest.raises(ValueError):
         _fetch_sentence_for_analysis(db, 999)
+
+
+def test_fetch_paragraph_for_logic_returns_text_sentences_and_context(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    source = tmp_path / "book.txt"
+    source.write_text(
+        "Previous setup.\n\nFirst claim. Second evidence.\n\nNext turn.",
+        encoding="utf-8",
+    )
+    book = import_txt(db, source, title="Book", author="")
+    with db.get_connection() as conn:
+        paragraph_id = conn.execute(
+            """SELECT p.id
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE s.text = ?
+                LIMIT 1""",
+            ("First claim.",),
+        ).fetchone()["id"]
+
+    paragraph = _fetch_paragraph_for_logic(db, paragraph_id)
+
+    assert paragraph["book_id"] == book.book_id
+    assert paragraph["text"] == "First claim. Second evidence."
+    assert [row["text"] for row in paragraph["sentences"]] == [
+        "First claim.",
+        "Second evidence.",
+    ]
+    assert "Previous paragraph: Previous setup." in paragraph["context"]
+    assert "Next paragraph: Next turn." in paragraph["context"]
+
+
+def test_fetch_paragraph_for_logic_missing_error(tmp_path: Path) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+
+    with pytest.raises(ValueError, match="Paragraph id=999 not found"):
+        _fetch_paragraph_for_logic(db, 999)
+
+
+def test_fetch_paragraph_logic_payload_returns_saved_cache(tmp_path: Path) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    source = tmp_path / "book.txt"
+    source.write_text(
+        "Previous setup.\n\nFirst claim. Second evidence.\n\nNext turn.",
+        encoding="utf-8",
+    )
+    import_txt(db, source, title="Book", author="")
+    analysis = {
+        "paragraph_main_claim": "First claim.",
+        "argument_flow": [
+            {
+                "sentence_id": 1,
+                "sentence_text": "First claim.",
+                "role": "claim",
+                "reason": "States the point.",
+            }
+        ],
+    }
+    with db.get_connection() as conn:
+        paragraph_id = conn.execute(
+            """SELECT p.id
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE s.text = ?
+                LIMIT 1""",
+            ("First claim.",),
+        ).fetchone()["id"]
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, 'paragraph_logic_lens.v3', 'external-ai', ?, 1,
+                       '2026-06-19T00:00:00+00:00')""",
+            (
+                compute_content_hash(
+                    "First claim. Second evidence.",
+                    "Previous paragraph: Previous setup.\n\nNext paragraph: Next turn.",
+                ),
+                json.dumps(analysis),
+            ),
+        ).lastrowid
+
+    payload = _fetch_paragraph_logic_payload(db, paragraph_id)
+
+    assert payload is not None
+    assert payload["ok"] is True
+    assert payload["paragraph_id"] == paragraph_id
+    assert payload["cache_id"] == cache_id
+    assert payload["prompt_version"] == "paragraph_logic_lens.v3"
+    assert payload["active_prompt_version"] == "paragraph_logic_lens.v3"
+    assert payload["from_cache"] is True
+    assert payload["is_stale"] is False
+    assert payload["paragraph_text"] == "First claim. Second evidence."
+    assert [row["text"] for row in payload["sentences"]] == [
+        "First claim.",
+        "Second evidence.",
+    ]
+    assert payload["analysis"] == analysis
+
+
+def test_fetch_paragraph_logic_payload_returns_none_without_cache(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    source = tmp_path / "book.txt"
+    source.write_text("First claim. Second evidence.", encoding="utf-8")
+    import_txt(db, source, title="Book", author="")
+    with db.get_connection() as conn:
+        paragraph_id = conn.execute("SELECT id FROM paragraphs LIMIT 1").fetchone()["id"]
+
+    assert _fetch_paragraph_logic_payload(db, paragraph_id) is None
+
+
+def test_sentence_context_text_returns_empty_when_context_builder_fails(
+    monkeypatch,
+) -> None:
+    def fail_context(db, sentence_id):
+        raise RuntimeError("context unavailable")
+
+    monkeypatch.setattr(analysis_queries, "get_sentence_info", fail_context)
+
+    assert _sentence_context_text(object(), 1) == ""
 
 
 def test_fetch_sentence_for_analysis_uses_archived_translation(

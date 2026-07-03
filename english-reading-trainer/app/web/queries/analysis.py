@@ -13,12 +13,15 @@ from app.cards.similar_card_finder import (
 )
 from app.db_connection import DatabaseConnection
 from app.web.config import (
+    _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION,
     _DEFAULT_SENTENCE_PROMPT_VERSION,
     _DEFAULT_WORD_PROMPT_VERSION,
     _DIAGNOSE_SENTENCE_PROMPT,
     _PREDICT_SENTENCE_PROMPT,
     _WORD_ANALYSIS_PROMPT,
 )
+
+_PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 
 
 def _fetch_sentence_for_analysis(
@@ -40,6 +43,68 @@ def _fetch_sentence_for_analysis(
     if row is None:
         raise ValueError(f"Sentence id={sentence_id} not found.")
     return dict(row)
+
+
+def _fetch_paragraph_for_logic(
+    db: DatabaseConnection,
+    paragraph_id: int,
+) -> dict[str, Any]:
+    """Return paragraph text, ordered sentence ids, and local paragraph context."""
+    with db.get_connection() as conn:
+        paragraph = conn.execute(
+            """SELECT p.id, p.chapter_id, p.idx, c.book_id
+                 FROM paragraphs p
+                 JOIN chapters c ON c.id = p.chapter_id
+                WHERE p.id = ?""",
+            (paragraph_id,),
+        ).fetchone()
+        if paragraph is None:
+            raise ValueError(f"Paragraph id={paragraph_id} not found.")
+
+        sentence_rows = conn.execute(
+            """SELECT id, idx, text
+                 FROM sentences
+                WHERE paragraph_id = ?
+                ORDER BY idx""",
+            (paragraph_id,),
+        ).fetchall()
+        previous_rows = conn.execute(
+            """SELECT s.text
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE p.chapter_id = ? AND p.idx = ?
+                ORDER BY s.idx""",
+            (paragraph["chapter_id"], paragraph["idx"] - 1),
+        ).fetchall()
+        next_rows = conn.execute(
+            """SELECT s.text
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE p.chapter_id = ? AND p.idx = ?
+                ORDER BY s.idx""",
+            (paragraph["chapter_id"], paragraph["idx"] + 1),
+        ).fetchall()
+
+    sentences = [dict(row) for row in sentence_rows]
+    paragraph_text = " ".join(str(row["text"] or "").strip() for row in sentences).strip()
+    previous_text = " ".join(str(row["text"] or "").strip() for row in previous_rows).strip()
+    next_text = " ".join(str(row["text"] or "").strip() for row in next_rows).strip()
+    context_parts = []
+    if previous_text:
+        context_parts.append(f"Previous paragraph: {previous_text}")
+    if next_text:
+        context_parts.append(f"Next paragraph: {next_text}")
+    return {
+        "paragraph_id": paragraph["id"],
+        "chapter_id": paragraph["chapter_id"],
+        "book_id": paragraph["book_id"],
+        "idx": paragraph["idx"],
+        "text": paragraph_text,
+        "sentences": sentences,
+        "previous_text": previous_text,
+        "next_text": next_text,
+        "context": "\n\n".join(context_parts),
+    }
 
 
 def _fetch_sentence_analysis_payload(
@@ -100,6 +165,43 @@ def _fetch_sentence_analysis_payload(
         "from_cache": True,
         "analysis": analysis,
         "similar_mistakes": similar_mistakes,
+    }
+
+
+def _fetch_paragraph_logic_payload(
+    db: DatabaseConnection,
+    paragraph_id: int,
+) -> dict[str, Any] | None:
+    paragraph = _fetch_paragraph_for_logic(db, paragraph_id)
+    current_content_hash = compute_content_hash(paragraph["text"], paragraph["context"])
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT id, prompt_version, model, response_json, created_at
+                 FROM ai_cache
+                WHERE content_hash = ?
+                  AND prompt_version LIKE 'paragraph_logic_lens.%'
+                  AND is_valid = 1
+                ORDER BY CASE WHEN prompt_version = ? THEN 0 ELSE 1 END,
+                         id DESC
+                LIMIT 1""",
+            (current_content_hash, _PARAGRAPH_LOGIC_PROMPT_VERSION),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "ok": True,
+        "paragraph_id": paragraph_id,
+        "cache_id": row["id"],
+        "prompt_version": row["prompt_version"],
+        "active_prompt_version": _PARAGRAPH_LOGIC_PROMPT_VERSION,
+        "model": row["model"],
+        "created_at": row["created_at"],
+        "is_stale": row["prompt_version"] != _PARAGRAPH_LOGIC_PROMPT_VERSION,
+        "from_cache": True,
+        "paragraph_text": paragraph["text"],
+        "sentences": paragraph["sentences"],
+        "context": paragraph["context"],
+        "analysis": json.loads(row["response_json"]),
     }
 
 

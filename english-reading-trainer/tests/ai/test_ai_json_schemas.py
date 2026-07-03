@@ -10,6 +10,7 @@ import jsonschema
 
 from app.ai.ai_json_schemas import (
     ARGUMENT_ROLE_VALUES,
+    PARAGRAPH_LOGIC_LENS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
@@ -117,6 +118,31 @@ VALID_SENTENCE_V5 = {
 VALID_SENTENCE_V5_WITH_STRUCTURE = {
     **VALID_SENTENCE_V4,
     **VALID_ARGUMENT_ROLE_FIELDS,
+}
+
+VALID_PARAGRAPH_LOGIC = {
+    "paragraph_main_claim": "The policy failed because it ignored local incentives.",
+    "argument_flow": [
+        {
+            "sentence_id": 123,
+            "sentence_text": "The policy was introduced to solve the shortage.",
+            "role": "background",
+            "reason": "This sentence establishes the policy context.",
+        },
+        {
+            "sentence_id": 124,
+            "sentence_text": "Yet it failed because local incentives did not change.",
+            "role": "claim",
+            "reason": "This sentence states the paragraph's main judgment.",
+        },
+    ],
+    "evidence": ["The paragraph cites unchanged local behavior."],
+    "concession_or_counterpoint": "",
+    "hidden_assumption": "Formal rules do not work unless incentives change.",
+    "author_stance": "Skeptical of the policy's effectiveness.",
+    "possible_misreading": "A reader may treat the background as the main claim.",
+    "reading_check": "Find the sentence that states the point before weighing evidence.",
+    "takeaway_suggestion": "遇到先铺背景再下判断，先找作者真正评价的那一句。",
 }
 
 VALID_WORD = {
@@ -799,3 +825,48 @@ class TestWordSchemaV5InvalidInstances:
     def test_v4_word_rejected_by_v5_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate(VALID_WORD_V4, WORD_ANALYSIS_SCHEMA_V5)
+
+
+# ---------------------------------------------------------------------------
+# PARAGRAPH_LOGIC_LENS_SCHEMA
+# ---------------------------------------------------------------------------
+
+class TestParagraphLogicLensSchema:
+    def test_valid_paragraph_logic_passes(self) -> None:
+        _validate(VALID_PARAGRAPH_LOGIC, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
+    def test_invalid_argument_role_rejected(self) -> None:
+        bad = {
+            **VALID_PARAGRAPH_LOGIC,
+            "argument_flow": [
+                {
+                    "sentence_id": 123,
+                    "sentence_text": "The policy was introduced to solve the shortage.",
+                    "role": "premise",
+                    "reason": "Not in the closed enum.",
+                }
+            ],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
+    def test_extra_top_level_field_rejected(self) -> None:
+        bad = {**VALID_PARAGRAPH_LOGIC, "formal_logic": "modus ponens"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
+    def test_extra_argument_flow_field_rejected(self) -> None:
+        bad = {
+            **VALID_PARAGRAPH_LOGIC,
+            "argument_flow": [
+                {
+                    "sentence_id": 123,
+                    "sentence_text": "The policy was introduced to solve the shortage.",
+                    "role": "claim",
+                    "reason": "States the point.",
+                    "confidence": 0.9,
+                }
+            ],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, PARAGRAPH_LOGIC_LENS_SCHEMA)

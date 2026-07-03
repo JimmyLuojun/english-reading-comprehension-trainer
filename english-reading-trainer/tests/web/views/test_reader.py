@@ -6,6 +6,7 @@ from app.web.views.reader import (
     _analysis_panel,
     _group_sentence_paragraphs,
     _highlight_word_cards,
+    _paragraph_toolbar,
     _reader_content_blocks,
     _reader_boundary_link,
     _reader_media_block,
@@ -22,13 +23,19 @@ def test_group_sentence_paragraphs_and_word_card_index() -> None:
         {"id": 2, "paragraph_id": 10},
         {"id": 3, "paragraph_id": 11},
     ]
-    cards = [{"id": 7, "source_sentence_id": 1}, {"id": 8, "source_sentence_id": 1}]
+    cards = [
+        {"id": 7, "source_sentence_id": 1},
+        {"id": 8, "source_sentence_id": 1},
+        {"id": 9},
+    ]
 
     assert [[row["id"] for row in group] for group in _group_sentence_paragraphs(rows)] == [
         [1, 2],
         [3],
     ]
-    assert [card["id"] for card in _word_cards_by_sentence(cards)[1]] == [7, 8]
+    grouped = _word_cards_by_sentence(cards)
+    assert [card["id"] for card in grouped[1]] == [7, 8]
+    assert 9 not in grouped
 
 
 def test_highlight_word_cards_uses_exact_source_offsets() -> None:
@@ -64,6 +71,40 @@ def test_highlight_word_cards_ignores_sources_without_offsets() -> None:
 
     assert 'data-word-card="1"' not in html
     assert html == "long term memory"
+
+
+def test_highlight_word_cards_ignores_invalid_and_overlapping_offsets() -> None:
+    html = _highlight_word_cards(
+        "abcdef",
+        [
+            {
+                "id": 1,
+                "source_id": 11,
+                "start_offset": -1,
+                "end_offset": 2,
+                "lexical_type": "word",
+            },
+            {
+                "id": 2,
+                "source_id": 12,
+                "start_offset": 1,
+                "end_offset": 4,
+                "lexical_type": "word",
+            },
+            {
+                "id": 3,
+                "source_id": 13,
+                "start_offset": 2,
+                "end_offset": 5,
+                "lexical_type": "word",
+            },
+        ],
+        7,
+    )
+
+    assert 'data-word-card="1"' not in html
+    assert 'data-word-card="2"' in html
+    assert 'data-word-card="3"' not in html
 
 
 def test_reader_sentence_span_marks_state_and_escapes_translation() -> None:
@@ -168,6 +209,71 @@ def test_reader_sentence_span_renders_markdown_inline_image_tokens() -> None:
 
     assert "[[md-image" not in html
     assert '<img class="reader-inline-image" src="/assets/books/7/42" alt="">' in html
+
+
+def test_reader_paragraph_includes_paragraph_id() -> None:
+    html = _reader_content_blocks(
+        rows=[
+            {
+                "id": 1,
+                "idx": 0,
+                "text": "The cat sat.",
+                "paragraph_id": 77,
+                "has_card": 0,
+                "has_analysis": 0,
+                "analysis_is_stale": 0,
+                "user_translation": "",
+                "ai_analysis_id": None,
+            }
+        ],
+        blocks=[],
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert '<p class="reader-para" data-paragraph-id="77">' in html
+
+
+def test_reader_paragraph_marks_saved_logic_analysis() -> None:
+    html = _reader_content_blocks(
+        rows=[
+            {
+                "id": 1,
+                "idx": 0,
+                "text": "The cat sat.",
+                "paragraph_id": 77,
+                "has_card": 0,
+                "has_analysis": 0,
+                "analysis_is_stale": 0,
+                "user_translation": "",
+                "ai_analysis_id": None,
+                "paragraph_has_analysis": 1,
+                "paragraph_ai_analysis_id": 42,
+                "paragraph_analysis_is_stale": 0,
+            }
+        ],
+        blocks=[],
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert 'class="reader-para logic-analyzed"' in html
+    assert 'data-paragraph-analysis-id="42"' in html
+    assert 'data-paragraph-analysis-state="current"' in html
+    assert 'title="Paragraph AI analysis saved"' in html
+
+
+def test_paragraph_toolbar_is_separate_from_selection_toolbar() -> None:
+    html = _paragraph_toolbar()
+
+    assert 'id="paragraph-toolbar"' in html
+    assert 'id="paragraph-analyze"' in html
+    assert 'id="paragraph-copy-prompt"' in html
+    assert "Analyze argument" in html
+    assert "Copy prompt" in html
+    assert 'id="selection-toolbar"' not in html
 
 
 def test_selection_toolbar_contains_translation_editor_without_delete_action() -> None:
@@ -317,8 +423,90 @@ def test_reader_content_blocks_render_markdown_headings_and_lists() -> None:
     assert html.count('<li class="reader-md-list-item">') == 2
     assert 'data-sentence-id="1"' in html
     assert 'data-sentence-id="2"' in html
-    assert '<p class="reader-para">' in html
+    assert '<p class="reader-para" data-paragraph-id="12">' in html
     assert 'data-sentence-id="3"' in html
+
+
+def test_reader_content_blocks_flushes_when_list_mode_changes() -> None:
+    rows = [
+        {
+            "id": 1,
+            "idx": 0,
+            "text": "Ordered item.",
+            "paragraph_id": 10,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+        {
+            "id": 2,
+            "idx": 1,
+            "text": "Unordered item.",
+            "paragraph_id": 11,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        },
+    ]
+    blocks = [
+        {"kind": "list_item", "paragraph_id": 10, "payload_json": '{"ordered": true}'},
+        {"kind": "list_item", "paragraph_id": 11, "payload_json": '{"ordered": false}'},
+    ]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert '<ol class="reader-md-list">' in html
+    assert '<ul class="reader-md-list">' in html
+
+
+def test_reader_content_blocks_treats_malformed_payload_as_unordered() -> None:
+    rows = [
+        {
+            "id": 1,
+            "idx": 0,
+            "text": "Malformed list payload.",
+            "paragraph_id": 10,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        }
+    ]
+    blocks = [{"kind": "list_item", "paragraph_id": 10, "payload_json": "{bad json"}]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert '<ul class="reader-md-list">' in html
+
+
+def test_reader_content_blocks_uses_default_heading_payload_on_malformed_json() -> None:
+    html = _reader_content_blocks(
+        rows=[],
+        blocks=[{"kind": "heading", "text": "Broken heading", "payload_json": "{bad"}],
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert '<h4 class="reader-md-heading reader-md-heading-level-2">' in html
+    assert "Broken heading" in html
 
 
 def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
@@ -333,6 +521,13 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert "Initial translation analyzed" in html
     assert "Changes since this analysis" in html
     assert "Your translation" in html
+    assert 'id="analysis-paragraph-sections"' in html
+    assert 'id="analysis-paragraph-main-claim"' in html
+    assert 'id="analysis-paragraph-flow"' in html
+    assert 'id="analysis-paragraph-evidence"' in html
+    assert "Paragraph main claim" in html
+    assert "Argument flow" in html
+    assert "Hidden assumption" in html
     assert 'id="sentence-panel-structure"' in html
     assert 'id="sentence-panel-analyzed-structure-section"' in html
     assert 'id="sentence-panel-analyzed-structure"' in html
@@ -427,3 +622,4 @@ def test_reader_media_and_boundary_links() -> None:
         },
         5,
     )
+    assert _reader_media_block({"kind": "image", "asset_id": None, "text": ""}, 5) == ""

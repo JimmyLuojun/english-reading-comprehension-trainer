@@ -75,6 +75,25 @@ _VALID_WORD_ANALYSIS = {
     "confidence": 0.9,
 }
 
+_VALID_PARAGRAPH_LOGIC_ANALYSIS = {
+    "paragraph_main_claim": "The paragraph sets a simple scene.",
+    "argument_flow": [
+        {
+            "sentence_id": 1,
+            "sentence_text": "The cat sat on the mat.",
+            "role": "background",
+            "reason": "It introduces the scene.",
+        }
+    ],
+    "evidence": [],
+    "concession_or_counterpoint": "",
+    "hidden_assumption": "",
+    "author_stance": "Narrative and descriptive.",
+    "possible_misreading": "Treating background as an argument.",
+    "reading_check": "Check whether the sentence supports a claim or sets context.",
+    "takeaway_suggestion": "Separate scene-setting from claims.",
+}
+
 _VALID_DIAGNOSED_ANALYSIS = {
     "subject_skeleton": "The cat sat",
     "clauses": [{"type": "main", "text": "The cat sat", "role": "statement"}],
@@ -240,6 +259,63 @@ def _attach_sentence_analysis(
     return cache_id
 
 
+def _attach_paragraph_logic_analysis(
+    db: DatabaseConnection,
+    paragraph_id: int,
+    *,
+    prompt_version: str = "paragraph_logic_lens.v3",
+) -> int:
+    with db.get_connection() as conn:
+        paragraph = conn.execute(
+            """SELECT p.chapter_id, p.idx
+                 FROM paragraphs p
+                WHERE p.id = ?""",
+            (paragraph_id,),
+        ).fetchone()
+        sentences = conn.execute(
+            """SELECT text
+                 FROM sentences
+                WHERE paragraph_id = ?
+                ORDER BY idx""",
+            (paragraph_id,),
+        ).fetchall()
+        previous_rows = conn.execute(
+            """SELECT s.text
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE p.chapter_id = ? AND p.idx = ?
+                ORDER BY s.idx""",
+            (paragraph["chapter_id"], paragraph["idx"] - 1),
+        ).fetchall()
+        next_rows = conn.execute(
+            """SELECT s.text
+                 FROM paragraphs p
+                 JOIN sentences s ON s.paragraph_id = p.id
+                WHERE p.chapter_id = ? AND p.idx = ?
+                ORDER BY s.idx""",
+            (paragraph["chapter_id"], paragraph["idx"] + 1),
+        ).fetchall()
+        paragraph_text = " ".join(row["text"].strip() for row in sentences)
+        context_parts = []
+        previous_text = " ".join(row["text"].strip() for row in previous_rows).strip()
+        next_text = " ".join(row["text"].strip() for row in next_rows).strip()
+        if previous_text:
+            context_parts.append(f"Previous paragraph: {previous_text}")
+        if next_text:
+            context_parts.append(f"Next paragraph: {next_text}")
+        return conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, ?, 'manual', ?, 1, ?)""",
+            (
+                compute_content_hash(paragraph_text.strip(), "\n\n".join(context_parts)),
+                prompt_version,
+                json.dumps(_VALID_PARAGRAPH_LOGIC_ANALYSIS),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        ).lastrowid
+
+
 def _sentence_error_codes(db: DatabaseConnection, sentence_id: int) -> set[str]:
     with db.get_connection() as conn:
         rows = conn.execute(
@@ -276,8 +352,8 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 20
-        assert active_count == 4
+        assert count == 23
+        assert active_count == 5
 
     def test_dashboard_empty(self, client: TestClient) -> None:
         response = client.get("/")
@@ -772,7 +848,7 @@ class TestReadingAndMarking:
         assert "The cat sat" in response.text
         assert '<article class="reader"' in response.text
         assert '<h1 class="reader-title">Test Book</h1>' in response.text
-        assert response.text.count('<p class="reader-para">') == 2
+        assert response.text.count('class="reader-para" data-paragraph-id=') == 2
         assert 'class="reader-text"' not in response.text
         assert f'data-sentence-id="{sentence_ids[0]}"' in response.text
         assert f'id="sentence-{sentence_ids[0]}"' in response.text
@@ -1246,6 +1322,83 @@ class TestReadingAndMarking:
 
         assert response.status_code == 404
         assert response.json()["retry"] is True
+
+    def test_get_paragraph_logic_returns_saved_payload(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _sentence_ids = _seed_book(db, tmp_path)
+        with db.get_connection() as conn:
+            paragraph_id = conn.execute(
+                """SELECT p.id
+                     FROM paragraphs p
+                     JOIN chapters c ON c.id = p.chapter_id
+                    WHERE c.book_id = ?
+                    ORDER BY p.idx
+                    LIMIT 1""",
+                (book_id,),
+            ).fetchone()["id"]
+        cache_id = _attach_paragraph_logic_analysis(db, paragraph_id)
+
+        response = client.get(f"/analysis/paragraph/{paragraph_id}/logic")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["cache_id"] == cache_id
+        assert payload["from_cache"] is True
+        assert payload["prompt_version"] == "paragraph_logic_lens.v3"
+        assert payload["active_prompt_version"] == "paragraph_logic_lens.v3"
+        assert payload["analysis"]["paragraph_main_claim"] == (
+            "The paragraph sets a simple scene."
+        )
+
+    def test_get_paragraph_logic_missing_returns_404(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _sentence_ids = _seed_book(db, tmp_path)
+        with db.get_connection() as conn:
+            paragraph_id = conn.execute(
+                """SELECT p.id
+                     FROM paragraphs p
+                     JOIN chapters c ON c.id = p.chapter_id
+                    WHERE c.book_id = ?
+                    ORDER BY p.idx
+                    LIMIT 1""",
+                (book_id,),
+            ).fetchone()["id"]
+
+        response = client.get(f"/analysis/paragraph/{paragraph_id}/logic")
+
+        assert response.status_code == 404
+        assert response.json() == {
+            "ok": False,
+            "error": "No saved analysis for this paragraph.",
+            "retry": True,
+        }
+
+    def test_get_paragraph_logic_unknown_paragraph_returns_400(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/analysis/paragraph/99999/logic")
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "ok": False,
+            "error": "Paragraph id=99999 not found.",
+            "retry": False,
+        }
+
+    def test_paragraph_logic_prompt_unknown_paragraph_returns_400(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/analysis/paragraph/99999/logic-prompt")
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "ok": False,
+            "error": "Paragraph id=99999 not found.",
+            "retry": False,
+        }
 
     def test_analyze_sentence_endpoint_returns_retryable_error(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

@@ -9,6 +9,11 @@ def _fragment_refs_and_state() -> str:
       if (!reader || !toolbar) return;
 
       const returnTo = reader.dataset.returnTo || window.location.pathname;
+      const paragraphToolbar = document.getElementById("paragraph-toolbar");
+      const paragraphAnalyze = document.getElementById("paragraph-analyze");
+      const paragraphCopyPrompt = document.getElementById("paragraph-copy-prompt");
+      const paragraphDismiss = document.getElementById("paragraph-dismiss");
+      const paragraphToolbarStatus = document.getElementById("paragraph-toolbar-status");
       const wordIndexElement = document.getElementById("word-card-index");
       const wordCards = JSON.parse(wordIndexElement?.textContent || "{}");
       const glossaryEntries = [];
@@ -77,6 +82,16 @@ def _fragment_refs_and_state() -> str:
       const copyStatus = document.getElementById("analysis-copy-status");
       const wordPronunciation = document.getElementById("analysis-word-pronunciation");
       const sentenceSections = document.getElementById("analysis-sentence-sections");
+      const paragraphSections = document.getElementById("analysis-paragraph-sections");
+      const paragraphMainClaim = document.getElementById("analysis-paragraph-main-claim");
+      const paragraphFlow = document.getElementById("analysis-paragraph-flow");
+      const paragraphEvidence = document.getElementById("analysis-paragraph-evidence");
+      const paragraphConcession = document.getElementById("analysis-paragraph-concession");
+      const paragraphAssumption = document.getElementById("analysis-paragraph-assumption");
+      const paragraphStance = document.getElementById("analysis-paragraph-stance");
+      const paragraphMisreading = document.getElementById("analysis-paragraph-misreading");
+      const paragraphReadingCheck = document.getElementById("analysis-paragraph-reading-check");
+      const paragraphTakeaway = document.getElementById("analysis-paragraph-takeaway");
       const wordSections = document.getElementById("analysis-word-sections");
       const simplified = document.getElementById("analysis-simplified");
       const gloss = document.getElementById("analysis-gloss");
@@ -229,11 +244,15 @@ def _fragment_refs_and_state() -> str:
       let activeAnalysisSentenceId = null;
       let activeAnalysisSourceSentenceId = null;
       let activeAnalysisWordCardId = null;
+      let activeAnalysisParagraphId = null;
       let activeExternalPromptSentenceId = null;
+      let activeExternalPromptParagraphId = null;
       let activeAnalysisPayload = null;
       let activeAnalysisLabel = "";
       let analysisHistory = [];
       let activeWordDetailFromAnalysis = false;
+      let activeParagraphId = null;
+      let activeParagraphElement = null;
       let panelMode = "sentence";
       let translationEditorOpen = false;
       let structureEditorOpen = false;
@@ -670,6 +689,99 @@ def _fragment_toolbar_selection() -> str:
         element.hidden = !visible;
       }
 
+      function setActiveParagraph(paragraph) {
+        activeParagraphElement = paragraph || null;
+        activeParagraphId = paragraph?.dataset.paragraphId || null;
+      }
+
+      function paragraphElementById(paragraphId) {
+        if (!paragraphId) return null;
+        return Array.from(reader.querySelectorAll(".reader-para[data-paragraph-id]"))
+          .find((node) => String(node.dataset.paragraphId) === String(paragraphId))
+          || null;
+      }
+
+      function markParagraphAnalysisState(payload) {
+        const paragraph = paragraphElementById(payload?.paragraph_id);
+        if (!paragraph) return;
+        paragraph.dataset.paragraphAnalysisId = String(payload.cache_id || "");
+        paragraph.dataset.paragraphAnalysisState = payload.is_stale ? "stale" : "current";
+        paragraph.classList.remove("logic-analyzed", "logic-analyzed-stale");
+        paragraph.classList.add(payload.is_stale ? "logic-analyzed-stale" : "logic-analyzed");
+        paragraph.title = payload.is_stale
+          ? "Paragraph AI analysis may be stale"
+          : "Paragraph AI analysis saved";
+        if (String(activeParagraphId || "") === String(payload.paragraph_id || "")) {
+          setActiveParagraph(paragraph);
+        }
+      }
+
+      function paragraphAnalysisButtonLabel(paragraph) {
+        if (!paragraph?.dataset.paragraphAnalysisId) return "Analyze argument";
+        return paragraph.dataset.paragraphAnalysisState === "stale"
+          ? "Open stale analysis"
+          : "Open analysis panel";
+      }
+
+      function clearParagraphSelection() {
+        reader.querySelectorAll(".reader-para.logic-selected").forEach((node) => {
+          node.classList.remove("logic-selected");
+        });
+      }
+
+      function hideParagraphToolbar(clearSelection = false) {
+        if (paragraphToolbar) paragraphToolbar.hidden = true;
+        if (paragraphToolbarStatus) paragraphToolbarStatus.textContent = "";
+        if (clearSelection) {
+          clearParagraphSelection();
+          setActiveParagraph(null);
+        }
+      }
+
+      function positionParagraphToolbar(anchor) {
+        if (!paragraphToolbar) return;
+        paragraphToolbar.hidden = false;
+        requestAnimationFrame(() => {
+          const toolbarRect = paragraphToolbar.getBoundingClientRect();
+          const viewportPadding = 8;
+          const gap = 10;
+          const top = window.scrollY + Math.max(
+            viewportPadding,
+            anchor.top - toolbarRect.height - gap,
+          );
+          const centeredLeft = window.scrollX + anchor.left + (anchor.width / 2) - (toolbarRect.width / 2);
+          const maxLeft = window.scrollX + window.innerWidth - toolbarRect.width - viewportPadding;
+          const left = Math.max(window.scrollX + viewportPadding, Math.min(centeredLeft, maxLeft));
+          paragraphToolbar.style.top = `${top}px`;
+          paragraphToolbar.style.left = `${left}px`;
+        });
+      }
+
+      function showParagraphToolbar(paragraph) {
+        if (!paragraph?.dataset.paragraphId) return;
+        hideToolbar();
+        clearParagraphSelection();
+        setActiveParagraph(paragraph);
+        if (paragraphAnalyze) {
+          paragraphAnalyze.textContent = paragraphAnalysisButtonLabel(paragraph);
+          paragraphAnalyze.title = paragraph.dataset.paragraphAnalysisId
+            ? "Open the saved paragraph analysis without calling AI."
+            : "Run paragraph analysis with the configured AI provider.";
+        }
+        paragraph.classList.add("logic-selected");
+        positionParagraphToolbar(paragraph.getBoundingClientRect());
+      }
+
+      function eventTargetIsTextInput(event) {
+        return Boolean(event.target?.closest?.("input, textarea, select, [contenteditable='true']"));
+      }
+
+      function paragraphShortcutIsBlocked(event) {
+        if (event.altKey || event.ctrlKey || event.metaKey) return true;
+        if (event.isComposing || eventTargetIsTextInput(event)) return true;
+        return translationEditorOpen || structureEditorOpen;
+      }
+
       function setEditingTarget(sentenceEl) {
         reader.querySelectorAll(".reader-sentence.editing-target").forEach((el) => {
           el.classList.remove("editing-target");
@@ -867,11 +979,9 @@ def _fragment_toolbar_selection() -> str:
         return true;
       }
 
-      function eventTargetIsTextInput(event) {
-        return Boolean(event.target?.closest?.("input, textarea, select, [contenteditable='true']"));
-      }
-
       function recordClickedSentenceTarget(event) {
+        const paragraph = event.target?.closest?.(".reader-para[data-paragraph-id]");
+        if (paragraph) setActiveParagraph(paragraph);
         const sentence = event.target?.closest?.("[data-sentence-id]");
         lastClickedSentenceId = sentence?.dataset.sentenceId || null;
       }
@@ -884,8 +994,17 @@ def _fragment_toolbar_selection() -> str:
         // The reader text is non-editable, so plain S/T never collide with typing here.
         const isSelect = event.code === "KeyS";
         const isTranslate = event.code === "KeyT";
-        if (!isSelect && !isTranslate) return;
+        const isParagraph = event.code === "KeyP";
+        if (!isSelect && !isTranslate && !isParagraph) return;
         event.preventDefault();
+        if (isParagraph) {
+          if (paragraphShortcutIsBlocked(event)) return;
+          const paragraph = activeParagraphElement?.isConnected
+            ? activeParagraphElement
+            : null;
+          if (paragraph) showParagraphToolbar(paragraph);
+          return;
+        }
         const sentence = sentenceFromSelectionOrViewport();
         if (!sentence || !selectWholeSentence(sentence)) return;
         if (isTranslate) {
@@ -1076,6 +1195,7 @@ def _fragment_toolbar_selection() -> str:
       }
 
       function positionToolbar(anchor) {
+        hideParagraphToolbar(true);
         clearScheduledToolbarHide();
         toolbar.hidden = false;
         toolbarInteractionSeq += 1;
@@ -1196,6 +1316,13 @@ def _fragment_toolbar_selection() -> str:
 
       function sentenceTextForId(sentenceId) {
         return normalizeText(document.getElementById(`sentence-${sentenceId}`)?.textContent || "");
+      }
+
+      function sentenceTextFromPayload(payload, sentenceId) {
+        return (payload?.sentences || [])
+          .find((sentence) => String(sentence.id) === String(sentenceId))
+          ?.text
+          || sentenceTextForId(sentenceId);
       }
 
       function appendCopyLine(lines, label, value) {
@@ -1345,6 +1472,42 @@ def _fragment_toolbar_selection() -> str:
         return source.concat(analysis);
       }
 
+      function buildParagraphSourceCopyText(payload) {
+        const lines = [];
+        appendCopyLine(lines, "Paragraph", payload.paragraph_text);
+        appendCopyItems(lines, "Sentences", payload.sentences || [], (item) => {
+          return `${item.id}: ${item.text || ""}`.trim();
+        });
+        appendCopyLine(lines, "Context", payload.context);
+        return lines;
+      }
+
+      function buildParagraphAnalysisCopyText(payload) {
+        const analysis = payload.analysis || {};
+        const lines = [];
+        appendCopyLine(lines, "Paragraph main claim", analysis.paragraph_main_claim);
+        appendCopyItems(lines, "Argument flow", analysis.argument_flow || [], (item) => {
+          const sentence = item.sentence_text || sentenceTextFromPayload(payload, item.sentence_id);
+          return `${sentence || `sentence ${item.sentence_id || ""}`} · ${item.role || "unclear"}: ${item.reason || ""}`.trim();
+        });
+        appendCopyLine(lines, "Evidence", analysis.evidence);
+        appendCopyLine(lines, "Concession or counterpoint", analysis.concession_or_counterpoint);
+        appendCopyLine(lines, "Hidden assumption", analysis.hidden_assumption);
+        appendCopyLine(lines, "Author stance", analysis.author_stance);
+        appendCopyLine(lines, "Possible misreading", analysis.possible_misreading);
+        appendCopyLine(lines, "Reading check", analysis.reading_check);
+        appendCopyLine(lines, "Takeaway suggestion", analysis.takeaway_suggestion);
+        return lines;
+      }
+
+      function buildParagraphCopyText(payload, kind) {
+        const source = buildParagraphSourceCopyText(payload);
+        const analysis = buildParagraphAnalysisCopyText(payload);
+        if (kind === "source") return source;
+        if (kind === "analysis") return analysis;
+        return source.concat(analysis);
+      }
+
       function setCopyStatus(message) {
         if (!copyStatus) return;
         copyStatus.textContent = message;
@@ -1382,8 +1545,13 @@ def _fragment_toolbar_selection() -> str:
           setCopyStatus("Nothing to copy");
           return;
         }
-        const isWord = panelMode === "word" || (activeAnalysisLabel && activeAnalysisLabel !== "sentence");
-        const parts = isWord
+        const isParagraph = panelMode === "paragraph" || activeAnalysisLabel === "paragraph";
+        const isWord = panelMode === "word" || (
+          activeAnalysisLabel && !["sentence", "paragraph"].includes(activeAnalysisLabel)
+        );
+        const parts = isParagraph
+          ? buildParagraphCopyText(activeAnalysisPayload, kind)
+          : isWord
           ? buildWordCopyText(activeAnalysisPayload, kind)
           : buildSentenceCopyText(activeAnalysisPayload, kind);
         writeClipboard(parts.filter(Boolean).join("\n"));
@@ -1813,6 +1981,8 @@ def _fragment_reader_progress_and_actions() -> str:
         if (panelMode === "word" && activeAnalysisWordCardId) {
           state.card_id = activeAnalysisWordCardId;
           state.source_sentence_id = activeAnalysisSourceSentenceId || "";
+        } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
+          state.paragraph_id = activeAnalysisParagraphId;
         } else if (activeAnalysisSentenceId) {
           state.sentence_id = activeAnalysisSentenceId;
         }
@@ -2211,8 +2381,24 @@ def _fragment_analysis_panel_rendering() -> str:
         }
         if (analysisExternalSection) analysisExternalSection.hidden = false;
         if (sentenceSections) sentenceSections.hidden = false;
+        if (paragraphSections) paragraphSections.hidden = true;
         if (wordSections) wordSections.hidden = true;
         if (panelUnmark) panelUnmark.hidden = false;
+      }
+
+      function setParagraphMode() {
+        panelMode = "paragraph";
+        if (panelKicker) panelKicker.textContent = "Paragraph logic";
+        if (panelTitle) panelTitle.textContent = "Paragraph Logic";
+        if (wordPronunciation) {
+          wordPronunciation.hidden = true;
+          wordPronunciation.dataset.speakText = "";
+        }
+        if (analysisExternalSection) analysisExternalSection.hidden = true;
+        if (sentenceSections) sentenceSections.hidden = true;
+        if (paragraphSections) paragraphSections.hidden = false;
+        if (wordSections) wordSections.hidden = true;
+        if (panelUnmark) panelUnmark.hidden = true;
       }
 
       function setWordMode() {
@@ -2221,6 +2407,7 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelTitle) panelTitle.textContent = "Word Analysis";
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         if (sentenceSections) sentenceSections.hidden = true;
+        if (paragraphSections) paragraphSections.hidden = true;
         if (wordSections) wordSections.hidden = false;
         if (panelUnmark) panelUnmark.hidden = true;
       }
@@ -2232,6 +2419,22 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function prepareExternalResultBox(sentenceId, status = "") {
         activeExternalPromptSentenceId = sentenceId || activeAnalysisSentenceId || null;
+        activeExternalPromptParagraphId = null;
+        if (analysisExternalResult) {
+          analysisExternalResult.placeholder = "Paste the full external AI reply here";
+        }
+        if (analysisExternalSave) analysisExternalSave.textContent = "Save analysis";
+        if (analysisExternalSection) analysisExternalSection.hidden = false;
+        if (analysisExternalStatus) analysisExternalStatus.textContent = status;
+      }
+
+      function prepareExternalParagraphResultBox(paragraphId, status = "") {
+        activeExternalPromptParagraphId = paragraphId || activeAnalysisParagraphId || null;
+        activeExternalPromptSentenceId = null;
+        if (analysisExternalResult) {
+          analysisExternalResult.placeholder = "Paste the full external paragraph analysis reply here";
+        }
+        if (analysisExternalSave) analysisExternalSave.textContent = "Save paragraph analysis";
         if (analysisExternalSection) analysisExternalSection.hidden = false;
         if (analysisExternalStatus) analysisExternalStatus.textContent = status;
       }
@@ -2255,7 +2458,7 @@ def _fragment_analysis_panel_rendering() -> str:
         return {
           mode: panelMode,
           payload: activeAnalysisPayload,
-          label: activeAnalysisLabel || (panelMode === "word" ? "previous word" : "sentence"),
+          label: activeAnalysisLabel || (panelMode === "word" ? "previous word" : panelMode),
           scrollTop: panel.scrollTop,
         };
       }
@@ -2272,6 +2475,8 @@ def _fragment_analysis_panel_rendering() -> str:
         if (!previous) return;
         if (previous.mode === "word") {
           renderWordAnalysis(previous.payload);
+        } else if (previous.mode === "paragraph") {
+          renderParagraphAnalysis(previous.payload);
         } else {
           renderAnalysisPayload(previous.payload);
         }
@@ -2350,7 +2555,9 @@ def _fragment_analysis_panel_rendering() -> str:
         document.body.classList.remove("analysis-open");
         if (panelUnmark) panelUnmark.hidden = true;
         activeAnalysisSourceSentenceId = null;
+        activeAnalysisParagraphId = null;
         activeExternalPromptSentenceId = null;
+        activeExternalPromptParagraphId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
@@ -2365,6 +2572,8 @@ def _fragment_analysis_panel_rendering() -> str:
         setSentenceMode();
         activeAnalysisSentenceId = null;
         activeAnalysisSourceSentenceId = null;
+        activeAnalysisParagraphId = null;
+        activeExternalPromptParagraphId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
@@ -2375,6 +2584,7 @@ def _fragment_analysis_panel_rendering() -> str:
         panelRetry.hidden = true;
         if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
+        activeExternalPromptParagraphId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
         simplified.textContent = "";
@@ -2403,6 +2613,7 @@ def _fragment_analysis_panel_rendering() -> str:
         panelRetry.hidden = true;
         if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
+        activeExternalPromptParagraphId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
         simplified.textContent = "";
@@ -2448,6 +2659,32 @@ def _fragment_analysis_panel_rendering() -> str:
         }
       }
 
+      function clearParagraphAnalysis() {
+        if (paragraphMainClaim) paragraphMainClaim.textContent = "";
+        if (paragraphFlow) paragraphFlow.replaceChildren();
+        if (paragraphEvidence) paragraphEvidence.replaceChildren();
+        if (paragraphConcession) paragraphConcession.textContent = "";
+        if (paragraphAssumption) paragraphAssumption.textContent = "";
+        if (paragraphStance) paragraphStance.textContent = "";
+        if (paragraphMisreading) paragraphMisreading.textContent = "";
+        if (paragraphReadingCheck) paragraphReadingCheck.textContent = "";
+        if (paragraphTakeaway) paragraphTakeaway.textContent = "";
+      }
+
+      function setPanelLoadingParagraph(message) {
+        setParagraphMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = message;
+        panelMeta.textContent = "";
+        panelRetry.hidden = true;
+        if (panelRetryPro) panelRetryPro.hidden = true;
+        activeExternalPromptSentenceId = null;
+        activeExternalPromptParagraphId = null;
+        clearExternalResultBox();
+        clearParagraphAnalysis();
+      }
+
       function renderAnalysisError(message, retryable) {
         setSentenceMode();
         openPanel();
@@ -2464,6 +2701,15 @@ def _fragment_analysis_panel_rendering() -> str:
         panelStatus.textContent = message;
         panelRetry.hidden = !retryable;
         if (panelRetryPro) panelRetryPro.hidden = !retryable;
+      }
+
+      function renderParagraphAnalysisError(message, retryable) {
+        setParagraphMode();
+        openPanel();
+        panelStatus.className = "analysis-status error";
+        panelStatus.textContent = message;
+        panelRetry.hidden = !retryable || !activeAnalysisParagraphId;
+        if (panelRetryPro) panelRetryPro.hidden = !retryable || !activeAnalysisParagraphId;
       }
 
       function truncateDiffText(text, max = INPUT_DIFF_PREVIEW_MAX) {
@@ -3278,6 +3524,84 @@ def _fragment_analysis_panel_rendering() -> str:
         }
       }
 
+      function renderParagraphFlow(items) {
+        if (!paragraphFlow) return;
+        paragraphFlow.replaceChildren();
+        if (!items?.length) {
+          const empty = document.createElement("p");
+          empty.className = "analysis-text muted";
+          empty.textContent = "—";
+          paragraphFlow.append(empty);
+          return;
+        }
+        for (const item of items) {
+          const block = document.createElement("article");
+          block.className = "similar-mistake-comparison";
+          const role = document.createElement("p");
+          role.className = "analysis-codes";
+          role.textContent = item.role || "unclear";
+          const sourceText = item.sentence_text
+            || (activeAnalysisPayload?.sentences || [])
+              .find((sentence) => String(sentence.id) === String(item.sentence_id))
+              ?.text
+            || "";
+          if (sourceText) block.append(comparisonLine("Sentence", sourceText));
+          const sentenceId = item.sentence_id ? `sentence ${item.sentence_id}` : "";
+          const idLine = [sentenceId, sourceText ? "" : "original sentence not found"]
+            .filter(Boolean)
+            .join(" · ");
+          if (idLine) block.append(comparisonLine("Reference", idLine));
+          block.append(role, comparisonLine("Why", item.reason || ""));
+          paragraphFlow.append(block);
+        }
+        applyGlossaryHighlights(paragraphFlow);
+      }
+
+      function renderParagraphAnalysis(payload) {
+        const analysis = payload.analysis || {};
+        activeAnalysisPayload = payload;
+        activeAnalysisLabel = "paragraph";
+        activeAnalysisParagraphId = String(payload.paragraph_id || activeAnalysisParagraphId || "");
+        activeAnalysisSentenceId = null;
+        activeAnalysisSourceSentenceId = null;
+        activeExternalPromptParagraphId = null;
+        activeExternalPromptSentenceId = null;
+        markParagraphAnalysisState(payload);
+        setParagraphMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
+        panelRetry.hidden = false;
+        if (panelRetryPro) panelRetryPro.hidden = false;
+        panelMeta.textContent = [
+          `prompt ${payload.prompt_version || "unknown"}`,
+          payload.model || "model unknown",
+          payload.is_stale ? "stale" : "current",
+          payload.from_cache ? "cache" : "fresh",
+        ].join(" · ");
+        if (paragraphMainClaim) paragraphMainClaim.textContent = analysis.paragraph_main_claim || "";
+        renderParagraphFlow(analysis.argument_flow || []);
+        appendAnalysisList(paragraphEvidence, analysis.evidence || [], (item) => item);
+        if (paragraphConcession) paragraphConcession.textContent = analysis.concession_or_counterpoint || "—";
+        if (paragraphAssumption) paragraphAssumption.textContent = analysis.hidden_assumption || "—";
+        if (paragraphStance) paragraphStance.textContent = analysis.author_stance || "";
+        if (paragraphMisreading) paragraphMisreading.textContent = analysis.possible_misreading || "";
+        if (paragraphReadingCheck) paragraphReadingCheck.textContent = analysis.reading_check || "";
+        if (paragraphTakeaway) paragraphTakeaway.textContent = analysis.takeaway_suggestion || "";
+        [
+          paragraphMainClaim,
+          paragraphConcession,
+          paragraphAssumption,
+          paragraphStance,
+          paragraphMisreading,
+          paragraphReadingCheck,
+          paragraphTakeaway,
+        ].forEach((element) => {
+          if (element) applyGlossaryHighlights(element);
+        });
+        scrollAnalysisPanelToTop();
+      }
+
       function toggleAnalysisSection(section, items) {
         if (!section) return;
         section.hidden = !items.length;
@@ -3408,6 +3732,8 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisLabel = "sentence";
         activeAnalysisSentenceId = String(payload.sentence_id || activeAnalysisSentenceId || "");
         activeAnalysisSourceSentenceId = activeAnalysisSentenceId;
+        activeAnalysisParagraphId = null;
+        activeExternalPromptParagraphId = null;
         setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status";
@@ -3579,6 +3905,91 @@ def _fragment_analysis_requests_and_evidence() -> str:
         }
       }
 
+      async function copyParagraphPrompt(paragraphId) {
+        if (!paragraphId) return;
+        activeAnalysisParagraphId = paragraphId;
+        clearAnalysisHistory();
+        setParagraphMode();
+        openPanel();
+        panelStatus.className = "analysis-status";
+        panelStatus.textContent = "Waiting for external paragraph result.";
+        panelMeta.textContent = "";
+        panelRetry.hidden = true;
+        if (panelRetryPro) panelRetryPro.hidden = true;
+        clearParagraphAnalysis();
+        prepareExternalParagraphResultBox(paragraphId, "Copying prompt...");
+        if (paragraphToolbarStatus) paragraphToolbarStatus.textContent = "Copying...";
+        try {
+          const response = await fetch(`/analysis/paragraph/${paragraphId}/logic-prompt`);
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (paragraphToolbarStatus) {
+              paragraphToolbarStatus.textContent = payload.error || "Prompt copy failed.";
+            }
+            return;
+          }
+          await writeClipboard(payload.prompt || "");
+          if (paragraphToolbarStatus) paragraphToolbarStatus.textContent = "Prompt copied";
+          prepareExternalParagraphResultBox(paragraphId, "Prompt copied. Paste external result here.");
+          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+        } catch (error) {
+          if (paragraphToolbarStatus) paragraphToolbarStatus.textContent = `Prompt copy failed: ${error}`;
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
+          }
+        }
+      }
+
+      async function loadSavedParagraphAnalysis(paragraphId) {
+        activeAnalysisParagraphId = paragraphId;
+        clearAnalysisHistory();
+        const mySeq = (analysisSeq += 1);
+        setPanelLoadingParagraph("Loading saved paragraph analysis...");
+        try {
+          const response = await fetch(`/analysis/paragraph/${paragraphId}/logic`);
+          const payload = await response.json();
+          if (mySeq !== analysisSeq) return;
+          if (!response.ok || !payload.ok) {
+            renderParagraphAnalysisError(
+              payload.error || "No saved paragraph analysis found.",
+              Boolean(payload.retry),
+            );
+            return;
+          }
+          renderParagraphAnalysis(payload);
+        } catch (error) {
+          if (mySeq !== analysisSeq) return;
+          renderParagraphAnalysisError(`Could not load paragraph analysis: ${error}`, true);
+        }
+      }
+
+      async function requestParagraphAnalysis(paragraphId, options = {}) {
+        activeAnalysisParagraphId = paragraphId;
+        clearAnalysisHistory();
+        const mySeq = (analysisSeq += 1);
+        setPanelLoadingParagraph(options.preferPro ? "Analyzing paragraph with Pro..." : "Analyzing paragraph...");
+        const params = new URLSearchParams();
+        if (options.preferPro) params.set("prefer_pro", "1");
+        if (options.forceRefresh) params.set("force_refresh", "1");
+        try {
+          const response = await fetch(`/analysis/paragraph/${paragraphId}/logic`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: params.toString(),
+          });
+          const payload = await response.json();
+          if (mySeq !== analysisSeq) return;
+          if (!response.ok || !payload.ok) {
+            renderParagraphAnalysisError(payload.error || "Paragraph analysis failed.", Boolean(payload.retry));
+            return;
+          }
+          renderParagraphAnalysis(payload);
+        } catch (error) {
+          if (mySeq !== analysisSeq) return;
+          renderParagraphAnalysisError(`Paragraph analysis failed: ${error}`, true);
+        }
+      }
+
       async function saveExternalSentenceAnalysis() {
         const sentenceId = activeAnalysisSentenceId || activeExternalPromptSentenceId;
         const externalResult = (analysisExternalResult?.value || "").trim();
@@ -3614,6 +4025,43 @@ def _fragment_analysis_requests_and_evidence() -> str:
           renderAnalysisPayload(payload);
           clearExternalResultBox();
           prepareExternalResultBox(sentenceId, "Saved");
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Save failed: ${error}`;
+          }
+        }
+      }
+
+      async function saveExternalParagraphAnalysis() {
+        const paragraphId = activeAnalysisParagraphId || activeExternalPromptParagraphId;
+        const externalResult = (analysisExternalResult?.value || "").trim();
+        if (!paragraphId) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Select a paragraph first.";
+          return;
+        }
+        if (!externalResult) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Paste external result first.";
+          return;
+        }
+        if (analysisExternalStatus) analysisExternalStatus.textContent = "Saving...";
+        const body = new URLSearchParams();
+        body.set("external_result", externalResult);
+        try {
+          const response = await fetch(`/analysis/paragraph/${paragraphId}/logic-external`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "External paragraph analysis failed.";
+            }
+            return;
+          }
+          renderParagraphAnalysis(payload);
+          clearExternalResultBox();
+          prepareExternalParagraphResultBox(paragraphId, "Saved");
         } catch (error) {
           if (analysisExternalStatus) {
             analysisExternalStatus.textContent = `Save failed: ${error}`;
@@ -4280,6 +4728,30 @@ def _fragment_bootstrap() -> str:
         window.getSelection()?.removeAllRanges();
         hideToolbar();
       });
+      if (paragraphAnalyze) {
+        paragraphAnalyze.addEventListener("click", () => {
+          if (!activeParagraphId) return;
+          const paragraph = activeParagraphElement?.isConnected
+            ? activeParagraphElement
+            : paragraphElementById(activeParagraphId);
+          hideParagraphToolbar(false);
+          if (paragraph?.dataset.paragraphAnalysisId) {
+            loadSavedParagraphAnalysis(activeParagraphId);
+          } else {
+            requestParagraphAnalysis(activeParagraphId);
+          }
+        });
+      }
+      if (paragraphCopyPrompt) {
+        paragraphCopyPrompt.addEventListener("click", () => {
+          if (activeParagraphId) copyParagraphPrompt(activeParagraphId);
+        });
+      }
+      if (paragraphDismiss) {
+        paragraphDismiss.addEventListener("click", () => {
+          hideParagraphToolbar(true);
+        });
+      }
       panelClose.addEventListener("click", closePanel);
       panelReturn.addEventListener("click", closePanel);
       if (panelTab) {
@@ -4289,7 +4761,13 @@ def _fragment_bootstrap() -> str:
       if (copySource) copySource.addEventListener("click", () => copyAnalysisPayload("source"));
       if (copyAnalysis) copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"));
       if (analysisExternalSave) {
-        analysisExternalSave.addEventListener("click", saveExternalSentenceAnalysis);
+        analysisExternalSave.addEventListener("click", () => {
+          if (panelMode === "paragraph" || activeExternalPromptParagraphId) {
+            saveExternalParagraphAnalysis();
+          } else {
+            saveExternalSentenceAnalysis();
+          }
+        });
       }
       if (analysisExternalClear) {
         analysisExternalClear.addEventListener("click", clearExternalResultBox);
@@ -4420,6 +4898,8 @@ def _fragment_bootstrap() -> str:
       panelRetry.addEventListener("click", () => {
         if (panelMode === "word" && activeAnalysisWordCardId) {
           requestWordAnalysis(activeAnalysisWordCardId, { forceRefresh: true });
+        } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
+          requestParagraphAnalysis(activeAnalysisParagraphId, { forceRefresh: true });
         } else if (activeAnalysisSentenceId) {
           requestAnalysis(
             activeAnalysisSentenceId,
@@ -4436,6 +4916,11 @@ def _fragment_bootstrap() -> str:
           if (panelMode === "word" && activeAnalysisWordCardId) {
             requestWordAnalysis(
               activeAnalysisWordCardId,
+              { preferPro: true, forceRefresh: true },
+            );
+          } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
+            requestParagraphAnalysis(
+              activeAnalysisParagraphId,
               { preferPro: true, forceRefresh: true },
             );
           } else if (activeAnalysisSentenceId) {
@@ -4561,6 +5046,7 @@ def _fragment_bootstrap() -> str:
       }
       window.addEventListener("scroll", () => {
         if (!translationEditorOpen && !structureEditorOpen) hideToolbar();
+        hideParagraphToolbar(false);
         scheduleProgressSave();
       }, { passive: true });
       if (window.visualViewport) {

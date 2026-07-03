@@ -64,6 +64,7 @@ def _reader_view(
       {_reader_boundary_link(book_id, next_chapter, "next")}
     </article>
     {_analysis_panel()}
+    {_paragraph_toolbar()}
     {_selection_toolbar(return_to, word_cards)}
     """
 
@@ -194,6 +195,8 @@ def _reader_paragraph(
     cards_by_sentence: dict[int, list[dict[str, Any]]],
     book_id: int,
 ) -> str:
+    paragraph_id = rows[0]["paragraph_id"] if rows else ""
+    analysis_attrs = _paragraph_analysis_attrs(rows[0] if rows else {})
     sentence_spans = " ".join(
         _reader_sentence_span(
             row,
@@ -203,7 +206,30 @@ def _reader_paragraph(
         )
         for row in rows
     )
-    return f'<p class="reader-para">{sentence_spans}</p>'
+    return (
+        f'<p class="{analysis_attrs["class_name"]}" data-paragraph-id="{paragraph_id}"'
+        f'{analysis_attrs["attrs"]}>{sentence_spans}</p>'
+    )
+
+
+def _paragraph_analysis_attrs(row: dict[str, Any]) -> dict[str, str]:
+    if not row.get("paragraph_has_analysis"):
+        return {"class_name": "reader-para", "attrs": ""}
+    stale = bool(row.get("paragraph_analysis_is_stale"))
+    class_name = "reader-para logic-analyzed-stale" if stale else "reader-para logic-analyzed"
+    state = "stale" if stale else "current"
+    cache_id = _escape(row.get("paragraph_ai_analysis_id") or "")
+    title = "Paragraph AI analysis saved"
+    if stale:
+        title = "Paragraph AI analysis may be stale"
+    return {
+        "class_name": class_name,
+        "attrs": (
+            f' data-paragraph-analysis-id="{cache_id}"'
+            f' data-paragraph-analysis-state="{state}"'
+            f' title="{_escape(title)}"'
+        ),
+    }
 
 
 def _reader_list_item(
@@ -460,6 +486,20 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
     <script>{_selection_script()}</script>
     """
 
+
+def _paragraph_toolbar() -> str:
+    return """
+    <div id="paragraph-toolbar" class="paragraph-toolbar" hidden>
+      <div class="toolbar-group">
+        <button id="paragraph-analyze" type="button">Analyze argument</button>
+        <button id="paragraph-copy-prompt" type="button">Copy prompt</button>
+        <button id="paragraph-dismiss" type="button">Dismiss</button>
+        <span id="paragraph-toolbar-status" class="toolbar-status" aria-live="polite"></span>
+      </div>
+    </div>
+    """
+
+
 def _analysis_panel() -> str:
     return """
     <button id="analysis-panel-tab" class="analysis-panel-tab" type="button" aria-controls="analysis-panel">
@@ -608,6 +648,44 @@ def _analysis_panel() -> str:
             <button id="sentence-panel-note-save" type="button">Save takeaway</button>
             <span id="sentence-panel-note-status" class="toolbar-status" aria-live="polite"></span>
           </div>
+        </section>
+      </div>
+      <div id="analysis-paragraph-sections" hidden>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">段落主张</span><span class="section-label-en">Paragraph main claim</span></h3>
+          <p id="analysis-paragraph-main-claim" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">论证流</span><span class="section-label-en">Argument flow</span></h3>
+          <div id="analysis-paragraph-flow"></div>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">证据</span><span class="section-label-en">Evidence</span></h3>
+          <div id="analysis-paragraph-evidence"></div>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">让步或反驳</span><span class="section-label-en">Concession or counterpoint</span></h3>
+          <p id="analysis-paragraph-concession" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">隐藏前提</span><span class="section-label-en">Hidden assumption</span></h3>
+          <p id="analysis-paragraph-assumption" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">作者立场</span><span class="section-label-en">Author stance</span></h3>
+          <p id="analysis-paragraph-stance" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">可能误读</span><span class="section-label-en">Possible misreading</span></h3>
+          <p id="analysis-paragraph-misreading" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">阅读检查</span><span class="section-label-en">Reading check</span></h3>
+          <p id="analysis-paragraph-reading-check" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
+          <h3><span class="section-label-zh">收获</span><span class="section-label-en">Takeaway suggestion</span></h3>
+          <p id="analysis-paragraph-takeaway" class="analysis-text"></p>
         </section>
       </div>
       <div id="analysis-word-sections" hidden>
