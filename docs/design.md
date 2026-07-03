@@ -71,6 +71,7 @@
 - [URL 导入执行方案](features/url-import.md)：已实现的 Web URL 导入 MVP，远程 HTML/plain-text 抽正文后作为 TXT 内容导入，不改 schema。
 - [外部网页选句分析方案](features/external-web-sentence-analysis.md)：计划中的 Chrome Extension + 本地 FastAPI bridge，第一版按 `s` 选中网页当前句子并在右侧 drawer 显示结合上下文的 AI 分析；后续再做来源管理、词/短语分析和 Review 整合。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。
+- [Logic Reading Lens / 文章逻辑视角](features/logic-reading-lens.md)：计划中，分两步部署——先在现有句子分析 v7 中加入 `argument_role` / reason / check，再做裸键 `p` 选择段落、独立段落浮层和右侧段落 argument-flow 分析；不复制正式逻辑训练项目，不新增第二套 Review。
 - [PDF 导入执行方案](features/pdf-import.md)：已实现的 PDF 导入归一化方案。
 - [推理错误层执行方案](features/inference-error-layer.md)：计划中的 `inference` 错误层（I01/I02），补全"词法语法全懂但没读懂意思"的诊断盲区。
 - [阅读护眼主题执行方案](features/reading-eye-comfort-theme.md)：已实现的米黄/sepia 护眼主题与头部开关，纯 CSS 变量覆盖，反转 §0 的"主题切换"排除项。
