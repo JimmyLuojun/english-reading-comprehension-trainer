@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from app.ai.ai_response_cache import compute_content_hash
+from app.ai.context_builder import get_sentence_info
 from app.cards.similar_card_finder import (
     SimilarSentenceMistake,
     find_similar_sentence_mistakes,
@@ -70,7 +71,7 @@ def _fetch_sentence_analysis_payload(
     )
     current_content_hash = compute_content_hash(
         row["text"] or "",
-        "",
+        _sentence_context_text(db, sentence_id),
         row["user_translation"] or None,
         row["user_structure"] or None,
     )
@@ -173,6 +174,12 @@ def _fetch_cache_metadata(
             (cache_id,),
         ).fetchone()
     return dict(row) if row else {}
+
+def _sentence_context_text(db: DatabaseConnection, sentence_id: int) -> str:
+    try:
+        return str(get_sentence_info(db, sentence_id).get("context") or "")
+    except Exception:
+        return ""
 
 def _active_sentence_prompt_version(
     db: DatabaseConnection,

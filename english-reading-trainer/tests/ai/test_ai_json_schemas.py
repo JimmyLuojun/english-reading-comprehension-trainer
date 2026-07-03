@@ -9,10 +9,12 @@ import pytest
 import jsonschema
 
 from app.ai.ai_json_schemas import (
+    ARGUMENT_ROLE_VALUES,
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
     SENTENCE_ANALYSIS_SCHEMA_V4,
+    SENTENCE_ANALYSIS_SCHEMA_V5,
     STRUCTURE_SKILL_CODES,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
@@ -99,6 +101,22 @@ VALID_STRUCTURE_FEEDBACK_V4 = {
 VALID_SENTENCE_V4 = {
     **VALID_SENTENCE_V2,
     "structure_feedback": VALID_STRUCTURE_FEEDBACK_V4,
+}
+
+VALID_ARGUMENT_ROLE_FIELDS = {
+    "argument_role": "evidence",
+    "argument_role_reason": "This sentence gives a concrete result supporting the previous claim.",
+    "argument_role_check": "Do not treat supporting evidence as the author's final conclusion.",
+}
+
+VALID_SENTENCE_V5 = {
+    **VALID_SENTENCE_V2,
+    **VALID_ARGUMENT_ROLE_FIELDS,
+}
+
+VALID_SENTENCE_V5_WITH_STRUCTURE = {
+    **VALID_SENTENCE_V4,
+    **VALID_ARGUMENT_ROLE_FIELDS,
 }
 
 VALID_WORD = {
@@ -540,6 +558,54 @@ class TestSentenceSchemaV4InvalidInstances:
                 {**VALID_SENTENCE_V2, "structure_feedback": bad_feedback},
                 SENTENCE_ANALYSIS_SCHEMA_V4,
             )
+
+
+# ---------------------------------------------------------------------------
+# SENTENCE_ANALYSIS_SCHEMA_V5
+# ---------------------------------------------------------------------------
+
+class TestSentenceSchemaV5Structure:
+    def test_v5_schema_is_dict(self) -> None:
+        assert isinstance(SENTENCE_ANALYSIS_SCHEMA_V5, dict)
+
+    def test_v5_requires_argument_role_fields(self) -> None:
+        required = SENTENCE_ANALYSIS_SCHEMA_V5["required"]
+        for field in [
+            "argument_role",
+            "argument_role_reason",
+            "argument_role_check",
+        ]:
+            assert field in required
+            assert field in SENTENCE_ANALYSIS_SCHEMA_V5["properties"]
+
+    def test_v5_argument_role_enum(self) -> None:
+        enum = set(SENTENCE_ANALYSIS_SCHEMA_V5["properties"]["argument_role"]["enum"])
+        assert enum == set(ARGUMENT_ROLE_VALUES)
+
+
+class TestSentenceSchemaV5ValidInstances:
+    def test_v5_accepts_valid_argument_role_output(self) -> None:
+        _validate(VALID_SENTENCE_V5, SENTENCE_ANALYSIS_SCHEMA_V5)
+
+    def test_v5_accepts_structure_feedback(self) -> None:
+        _validate(VALID_SENTENCE_V5_WITH_STRUCTURE, SENTENCE_ANALYSIS_SCHEMA_V5)
+
+
+class TestSentenceSchemaV5InvalidInstances:
+    def test_v6_compatible_output_rejected_by_v5_schema(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_SENTENCE_V2, SENTENCE_ANALYSIS_SCHEMA_V5)
+
+    @pytest.mark.parametrize("field", ["argument_role_reason", "argument_role_check"])
+    def test_missing_argument_text_rejected(self, field: str) -> None:
+        bad = {k: v for k, v in VALID_SENTENCE_V5.items() if k != field}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, SENTENCE_ANALYSIS_SCHEMA_V5)
+
+    def test_invalid_argument_role_rejected(self) -> None:
+        bad = {**VALID_SENTENCE_V5, "argument_role": "thesis"}
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, SENTENCE_ANALYSIS_SCHEMA_V5)
 
 
 # ---------------------------------------------------------------------------

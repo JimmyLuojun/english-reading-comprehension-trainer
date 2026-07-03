@@ -218,6 +218,9 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert 'document.getElementById("analysis-logic-markers-section")' in script
     assert 'document.getElementById("analysis-anaphora-section")' in script
     assert 'document.getElementById("analysis-back-to-whole")' in script
+    assert 'document.getElementById("analysis-argument-role")' in script
+    assert 'document.getElementById("analysis-argument-role-reason")' in script
+    assert 'document.getElementById("analysis-argument-role-check")' in script
     assert 'document.getElementById("sentence-panel-note-suggestion")' in script
     assert 'document.getElementById("sentence-panel-note-accept")' in script
     assert 'document.getElementById("sentence-panel-note")' in script
@@ -227,6 +230,9 @@ def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> N
     assert '"Reference structure"' in script
     assert '"Corrected structure"' in script
     assert "analysis.blocking_point || \"\"" in render_payload
+    assert "analysis.argument_role || \"\"" in render_payload
+    assert "analysis.argument_role_reason || \"\"" in render_payload
+    assert "analysis.argument_role_check || \"\"" in render_payload
     assert "analysis.simplified_en || \"\"" in render_payload
     assert "setSentenceStudyFields(payload);" in render_payload
     assert "const INPUT_DIFF_PREVIEW_MAX = 34;" in script
@@ -1127,6 +1133,9 @@ def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> Non
     assert "buildSentenceCopyText(activeAnalysisPayload, kind)" in copy_helper
     assert "analysis.simplified_en" in sentence_builder
     assert "analysis.chinese_gloss" in sentence_builder
+    assert "analysis.argument_role" in sentence_builder
+    assert "analysis.argument_role_reason" in sentence_builder
+    assert "analysis.argument_role_check" in sentence_builder
     assert "analysis.diagnosis_evidence" in sentence_builder
     assert "analysis.meaning_in_context" in word_builder
     assert "analysis.learner_note_check" in word_builder

@@ -15,9 +15,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA_V5
 from app.ai.llm_sentence_analyzer import (
     _load_prompt,
     _render,
+    _sentence_analysis_schema,
     _strip_frontmatter,
     analyze_sentence,
 )
@@ -49,6 +51,9 @@ _VALID_RESPONSE = json.dumps({
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "blocking_point": "The main verb is simple, but the prepositional phrase can be missed.",
+    "argument_role": "background",
+    "argument_role_reason": "The sentence supplies simple scene-setting information.",
+    "argument_role_check": "Do not read background setup as the author's main conclusion.",
     "predicted_error_types": ["G01"],
     "diagnosis_basis": "predicted",
     "diagnosed_error_types": [],
@@ -66,6 +71,9 @@ _VALID_DIAGNOSED_RESPONSE = json.dumps({
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "blocking_point": "The translation misses the modifier attached to the main clause.",
+    "argument_role": "background",
+    "argument_role_reason": "The sentence supplies simple scene-setting information.",
+    "argument_role_check": "Do not read background setup as the author's main conclusion.",
     "predicted_error_types": [],
     "diagnosis_basis": "user_translation",
     "diagnosed_error_types": ["G02"],
@@ -159,7 +167,14 @@ class TestRender:
         assert _render(template, {}) == template
 
 
-def test_both_sentence_prompt_v6_files_load() -> None:
+def test_both_sentence_prompt_v7_files_load() -> None:
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v7")
+    assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v7")
+    assert "argument_role" in _load_prompt("sentence_analysis_predict", "v7")
+    assert "argument_role_check" in _load_prompt("sentence_analysis_diagnose", "v7")
+
+
+def test_both_sentence_prompt_v6_files_remain_loadable() -> None:
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v6")
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v6")
     assert "correct_highlights" in _load_prompt("sentence_analysis_predict", "v6")
@@ -169,6 +184,10 @@ def test_both_sentence_prompt_v6_files_load() -> None:
 def test_both_sentence_prompt_v5_files_remain_loadable() -> None:
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_predict", "v5")
     assert "USER STRUCTURE ATTEMPT" in _load_prompt("sentence_analysis_diagnose", "v5")
+
+
+def test_sentence_analysis_schema_v7_version() -> None:
+    assert _sentence_analysis_schema("v7") is SENTENCE_ANALYSIS_SCHEMA_V5
 
 
 def test_analyze_sentence_defaults_to_sentence_model(
@@ -289,6 +308,7 @@ class TestAnalyzeSentenceLLMSuccess:
             )
 
         assert result.data["diagnosis_basis"] == "user_translation"
+        assert result.data["argument_role"] == "background"
         assert "USER TRANSLATION" in mock.call_args.args[0]
 
     def test_user_structure_without_translation_uses_predict_prompt(
@@ -303,6 +323,7 @@ class TestAnalyzeSentenceLLMSuccess:
             )
 
         assert result.data["diagnosis_basis"] == "predicted"
+        assert result.data["argument_role_check"]
         assert result.data["structure_feedback"]["missed_or_wrong"][0]["error_code"] == "G02"
         prompt = mock.call_args.args[0]
         assert "USER STRUCTURE ATTEMPT" in prompt

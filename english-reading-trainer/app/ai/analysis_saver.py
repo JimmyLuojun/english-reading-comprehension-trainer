@@ -14,6 +14,7 @@ from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
     SENTENCE_ANALYSIS_SCHEMA_V4,
+    SENTENCE_ANALYSIS_SCHEMA_V5,
     WORD_ANALYSIS_SCHEMA,
     WORD_ANALYSIS_SCHEMA_V2,
     WORD_ANALYSIS_SCHEMA_V3,
@@ -57,6 +58,7 @@ def save_sentence_analysis(
     raw_json: str,
     model: str = "manual",
     prompt_version: str = "v1",
+    context: str = "",
 ) -> SaveResult:
     """
     Validate *raw_json* against the sentence analysis schema and save to DB.
@@ -94,7 +96,7 @@ def save_sentence_analysis(
         error = str(exc)
         response_json = raw_json
 
-    content_hash = compute_content_hash(sent_text, "", user_translation, user_structure)
+    content_hash = compute_content_hash(sent_text, context, user_translation, user_structure)
     cache_id = save_to_cache(
         db,
         content_hash,
@@ -324,6 +326,8 @@ def _word_analysis_schema(prompt_version: str) -> dict:
 def _sentence_analysis_schema(prompt_version: str) -> dict:
     if prompt_version == "v1":
         return SENTENCE_ANALYSIS_SCHEMA
+    if prompt_version == "v7":
+        return SENTENCE_ANALYSIS_SCHEMA_V5
     if prompt_version == "v6":
         return SENTENCE_ANALYSIS_SCHEMA_V4
     if prompt_version == "v5":

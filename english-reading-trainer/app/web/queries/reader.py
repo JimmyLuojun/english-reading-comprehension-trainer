@@ -9,6 +9,8 @@ from app.ai.ai_response_cache import compute_content_hash
 from app.db_connection import DatabaseConnection
 from app.web.queries.analysis import _active_sentence_prompt_version
 
+_CONTEXT_WINDOW = 2
+
 
 def _fetch_chapter_sentences(
     db: DatabaseConnection,
@@ -39,6 +41,7 @@ def _fetch_chapter_sentences(
             (chapter_id,),
         ).fetchall()
     result = [dict(row) for row in rows]
+    contexts_by_sentence = _sentence_contexts_for_rows(result)
     for row in result:
         has_analysis = bool(row.get("ai_analysis_id") and row.get("analysis_is_valid"))
         active_version = _active_sentence_prompt_version(
@@ -47,7 +50,7 @@ def _fetch_chapter_sentences(
         )
         current_content_hash = compute_content_hash(
             row.get("text") or "",
-            "",
+            contexts_by_sentence.get(int(row["id"]), ""),
             row.get("user_translation") or None,
             row.get("user_structure") or None,
         )
@@ -62,6 +65,22 @@ def _fetch_chapter_sentences(
             else 0
         )
     return result
+
+
+def _sentence_contexts_for_rows(rows: list[dict[str, Any]]) -> dict[int, str]:
+    contexts: dict[int, str] = {}
+    for index, row in enumerate(rows):
+        start = max(0, index - _CONTEXT_WINDOW)
+        end = min(len(rows), index + _CONTEXT_WINDOW + 1)
+        parts: list[str] = []
+        for item in rows[start:end]:
+            text = str(item.get("text") or "")
+            if item["id"] == row["id"]:
+                parts.append(f">>> {text} <<<")
+            else:
+                parts.append(text)
+        contexts[int(row["id"])] = " ".join(parts)
+    return contexts
 
 
 def _fetch_chapter_blocks(

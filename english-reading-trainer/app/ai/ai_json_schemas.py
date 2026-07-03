@@ -9,6 +9,7 @@ SENTENCE_ANALYSIS_SCHEMA    — v1 sentence prompt fields
 SENTENCE_ANALYSIS_SCHEMA_V2 — v2 prompt, adds blocking point and takeaway suggestion
 SENTENCE_ANALYSIS_SCHEMA_V3 — v5 prompt, adds optional structure feedback
 SENTENCE_ANALYSIS_SCHEMA_V4 — v6 prompt, adds positive correct-path highlights
+SENTENCE_ANALYSIS_SCHEMA_V5 — v7 prompt, adds local argument role metadata
 WORD_ANALYSIS_SCHEMA        — v1 prompt, dictionary-view fields
 WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
@@ -27,6 +28,18 @@ STRUCTURE_SKILL_CODES = sorted(
     if entry["layer"] == ErrorLayer.GRAMMAR
     or entry["code"] in {"D01", "D04", "D05"}
 )
+ARGUMENT_ROLE_VALUES = [
+    "claim",
+    "evidence",
+    "example",
+    "counterargument",
+    "concession",
+    "conclusion",
+    "background",
+    "qualification",
+    "transition",
+    "unclear",
+]
 
 # ---------------------------------------------------------------------------
 # Sentence analysis schema  (§9.1)
@@ -246,6 +259,25 @@ SENTENCE_ANALYSIS_SCHEMA_V4: dict = {
                 },
             },
         },
+    },
+}
+
+SENTENCE_ANALYSIS_SCHEMA_V5: dict = {
+    **SENTENCE_ANALYSIS_SCHEMA_V4,
+    "required": [
+        *SENTENCE_ANALYSIS_SCHEMA_V4["required"],
+        "argument_role",
+        "argument_role_reason",
+        "argument_role_check",
+    ],
+    "properties": {
+        **SENTENCE_ANALYSIS_SCHEMA_V4["properties"],
+        "argument_role": {
+            "type": "string",
+            "enum": ARGUMENT_ROLE_VALUES,
+        },
+        "argument_role_reason": {"type": "string", "minLength": 1},
+        "argument_role_check": {"type": "string", "minLength": 1},
     },
 }
 

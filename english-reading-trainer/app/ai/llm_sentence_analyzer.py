@@ -26,6 +26,7 @@ from app.ai.ai_json_schemas import (
     SENTENCE_ANALYSIS_SCHEMA_V2,
     SENTENCE_ANALYSIS_SCHEMA_V3,
     SENTENCE_ANALYSIS_SCHEMA_V4,
+    SENTENCE_ANALYSIS_SCHEMA_V5,
 )
 from app.ai.ai_provider_config import get_ai_provider_settings, get_sentence_analysis_model
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
@@ -35,7 +36,7 @@ from app.db_connection import DatabaseConnection
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PREDICT_PROMPT_NAME = "sentence_analysis_predict"
 _DIAGNOSE_PROMPT_NAME = "sentence_analysis_diagnose"
-_PROMPT_VERSION = "v6"
+_PROMPT_VERSION = "v7"
 
 # Correction suffix appended on retry to guide the LLM back on track
 _RETRY_SUFFIX = (
@@ -166,6 +167,8 @@ def _prompt_name_for_translation(user_translation: str | None) -> str:
 def _sentence_analysis_schema(prompt_version: str) -> dict:
     if prompt_version == "v1":
         return SENTENCE_ANALYSIS_SCHEMA
+    if prompt_version == "v7":
+        return SENTENCE_ANALYSIS_SCHEMA_V5
     if prompt_version == "v6":
         return SENTENCE_ANALYSIS_SCHEMA_V4
     if prompt_version == "v5":

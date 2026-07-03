@@ -345,6 +345,12 @@ def test_analysis_panel_contains_translation_and_takeaway_editors() -> None:
     assert "Your structure attempt" in html
     assert "Structure feedback" in html
     assert 'id="analysis-blocking-point"' in html
+    assert 'id="analysis-argument-role"' in html
+    assert 'id="analysis-argument-role-reason"' in html
+    assert 'id="analysis-argument-role-check"' in html
+    assert "Argument role" in html
+    assert "Why this role" in html
+    assert "Reading check" in html
     assert 'id="analysis-clauses"' in html
     assert 'id="analysis-back-to-whole"' in html
     assert 'id="sentence-panel-note"' in html

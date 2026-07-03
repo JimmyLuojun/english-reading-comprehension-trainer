@@ -515,6 +515,14 @@ def _analysis_panel() -> str:
           <p id="analysis-blocking-point" class="analysis-text"></p>
         </section>
         <section class="analysis-section">
+          <h3><span class="section-label-zh">论证角色</span><span class="section-label-en">Argument role</span></h3>
+          <p id="analysis-argument-role" class="analysis-text analysis-codes"></p>
+          <h4><span class="section-label-zh">为什么</span><span class="section-label-en">Why this role</span></h4>
+          <p id="analysis-argument-role-reason" class="analysis-text"></p>
+          <h4><span class="section-label-zh">阅读提醒</span><span class="section-label-en">Reading check</span></h4>
+          <p id="analysis-argument-role-check" class="analysis-text"></p>
+        </section>
+        <section class="analysis-section">
           <h3><span class="section-label-zh">句子结构</span><span class="section-label-en">Structure</span></h3>
           <h4><span class="section-label-zh">主干骨架</span><span class="section-label-en">Subject skeleton</span></h4>
           <p id="analysis-skeleton" class="analysis-text"></p>

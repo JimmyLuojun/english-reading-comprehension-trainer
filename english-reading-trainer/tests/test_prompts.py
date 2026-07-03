@@ -23,8 +23,8 @@ from app.db_models import VALID_ERROR_CODES
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 PROMPT_FILES = {
-    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v6.md",
-    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v6.md",
+    "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v7.md",
+    "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v7.md",
     "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
@@ -40,6 +40,8 @@ SENTENCE_ANALYSIS_PREDICT_V5 = PROMPTS_DIR / "sentence_analysis_predict.v5.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V5 = PROMPTS_DIR / "sentence_analysis_diagnose.v5.md"
 SENTENCE_ANALYSIS_PREDICT_V6 = PROMPTS_DIR / "sentence_analysis_predict.v6.md"
 SENTENCE_ANALYSIS_DIAGNOSE_V6 = PROMPTS_DIR / "sentence_analysis_diagnose.v6.md"
+SENTENCE_ANALYSIS_PREDICT_V7 = PROMPTS_DIR / "sentence_analysis_predict.v7.md"
+SENTENCE_ANALYSIS_DIAGNOSE_V7 = PROMPTS_DIR / "sentence_analysis_diagnose.v7.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
@@ -167,8 +169,8 @@ class TestFrontmatter:
         )
 
     @pytest.mark.parametrize("name,expected_version", [
-        ("sentence_analysis_predict", "v6"),
-        ("sentence_analysis_diagnose", "v6"),
+        ("sentence_analysis_predict", "v7"),
+        ("sentence_analysis_diagnose", "v7"),
         ("word_analysis", "v5"),
         ("profile_summary", "v1"),
     ])
@@ -246,7 +248,8 @@ class TestJSONSchemaFieldsInPrompts:
         "diagnosed_error_types", "diagnosis_evidence",
         "takeaway_suggestion", "structure_feedback", "error_code",
         "correct_highlights", "corrected_structure", "why_it_matters_for_translation",
-        "next_check", "confidence",
+        "next_check", "argument_role", "argument_role_reason", "argument_role_check",
+        "confidence",
     ]
     WORD_FIELDS = [
         "lemma", "lexical_type", "pos", "meaning_in_context",
@@ -320,6 +323,30 @@ class TestJSONSchemaFieldsInPrompts:
             assert "correct_highlights" in text
             assert "这次你做对了" in text
             assert "reusable self-check question" in text
+
+    def test_current_sentence_prompt_v7_contains_argument_role(self) -> None:
+        role_values = [
+            "claim",
+            "evidence",
+            "example",
+            "counterargument",
+            "concession",
+            "conclusion",
+            "background",
+            "qualification",
+            "transition",
+            "unclear",
+        ]
+        for path in [SENTENCE_ANALYSIS_PREDICT_V7, SENTENCE_ANALYSIS_DIAGNOSE_V7]:
+            text = path.read_text(encoding="utf-8")
+            assert "version: v7" in text
+            assert "argument_role" in text
+            assert "argument_role_reason" in text
+            assert "argument_role_check" in text
+            assert "Use CONTEXT to decide the local argument role" in text
+            assert "Use `unclear`" in text
+            for role in role_values:
+                assert role in text
 
 
 # ---------------------------------------------------------------------------

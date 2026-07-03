@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai.ai_response_cache import compute_content_hash
+from app.ai.context_builder import get_sentence_info
 from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
 from app.db_connection import DatabaseConnection
 from app.importers.epub_importer import import_epub
@@ -41,6 +42,9 @@ _VALID_SENTENCE_ANALYSIS = {
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "blocking_point": "The prepositional phrase can be missed.",
+    "argument_role": "background",
+    "argument_role_reason": "The sentence sets up a simple scene for the local passage.",
+    "argument_role_check": "Do not treat background setup as the author's main conclusion.",
     "predicted_error_types": ["G01"],
     "diagnosis_basis": "predicted",
     "diagnosed_error_types": [],
@@ -80,6 +84,9 @@ _VALID_DIAGNOSED_ANALYSIS = {
     "simplified_en": "The cat sat.",
     "chinese_gloss": "猫坐着。",
     "blocking_point": "The translation misses the prepositional phrase.",
+    "argument_role": "background",
+    "argument_role_reason": "The sentence sets up a simple scene for the local passage.",
+    "argument_role_check": "Do not treat background setup as the author's main conclusion.",
     "predicted_error_types": [],
     "diagnosis_basis": "user_translation",
     "diagnosed_error_types": ["G02"],
@@ -195,11 +202,12 @@ def _attach_sentence_analysis(
     db: DatabaseConnection,
     sentence_id: int,
     *,
-    prompt_version: str = "v6",
+    prompt_version: str = "v7",
 ) -> int:
     with db.get_connection() as conn:
         sentence = conn.execute(
-            """SELECT s.text, COALESCE(sc.user_translation, '') AS user_translation
+            """SELECT s.text, COALESCE(sc.user_translation, '') AS user_translation,
+                      COALESCE(sc.user_structure, '') AS user_structure
                  FROM sentences s
                  LEFT JOIN sentence_cards sc ON sc.sentence_id = s.id
                 WHERE s.id = ?""",
@@ -212,8 +220,9 @@ def _attach_sentence_analysis(
             (
                 compute_content_hash(
                     sentence["text"],
-                    "",
+                    get_sentence_info(db, sentence_id)["context"],
                     sentence["user_translation"] or None,
+                    sentence["user_structure"] or None,
                 ),
                 prompt_version,
                 json.dumps(_VALID_SENTENCE_ANALYSIS),
@@ -267,7 +276,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 18
+        assert count == 20
         assert active_count == 4
 
     def test_dashboard_empty(self, client: TestClient) -> None:

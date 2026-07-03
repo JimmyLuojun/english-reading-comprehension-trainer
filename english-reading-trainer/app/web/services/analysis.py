@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.ai.context_builder import build_sentence_prompt
+from app.ai.context_builder import build_sentence_prompt, get_sentence_info
 from app.ai.ai_provider_config import get_ai_provider_settings, get_pro_analysis_model
 from app.ai.analysis_saver import save_sentence_analysis
 from app.cards.sentence_card_service import (
@@ -73,9 +73,11 @@ def analyze_sentence_for_reader(
             save_sentence_structure(db, sentence_id, user_structure)
 
         sentence = _fetch_sentence_for_analysis(db, sentence_id)
+        context_text = _sentence_context_text(db, sentence_id)
         result = fastapi_app.analyze_sentence(
             db,
             sentence["text"],
+            context=context_text,
             user_translation=sentence.get("user_translation") or None,
             user_structure=sentence.get("user_structure") or None,
             model=get_pro_analysis_model() if prefer_pro else None,
@@ -99,6 +101,7 @@ def analyze_sentence_for_reader(
                 db,
                 sentence.get("user_translation") or None,
             ),
+            context=context_text,
         )
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
@@ -169,6 +172,7 @@ def save_external_sentence_analysis_for_reader(
             save_sentence_structure(db, sentence_id, user_structure)
 
         sentence = _fetch_sentence_for_analysis(db, sentence_id)
+        context_text = _sentence_context_text(db, sentence_id)
         result = save_sentence_analysis(
             db,
             sentence_id,
@@ -178,6 +182,7 @@ def save_external_sentence_analysis_for_reader(
                 db,
                 sentence.get("user_translation") or None,
             ),
+            context=context_text,
         )
         if not result.is_valid:
             return AnalysisOutcome(
@@ -205,6 +210,13 @@ def extract_external_json_block(external_result: str) -> str:
     if text.startswith("{") and text.endswith("}"):
         return text
     raise ValueError("Paste an external AI reply ending with a ```json code block```.")
+
+
+def _sentence_context_text(db: DatabaseConnection, sentence_id: int) -> str:
+    try:
+        return str(get_sentence_info(db, sentence_id).get("context") or "")
+    except Exception:
+        return ""
 
 
 def _fallback_word_analysis_payload(

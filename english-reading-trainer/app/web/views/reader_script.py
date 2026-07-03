@@ -81,6 +81,9 @@ def _fragment_refs_and_state() -> str:
       const simplified = document.getElementById("analysis-simplified");
       const gloss = document.getElementById("analysis-gloss");
       const blockingPoint = document.getElementById("analysis-blocking-point");
+      const argumentRole = document.getElementById("analysis-argument-role");
+      const argumentRoleReason = document.getElementById("analysis-argument-role-reason");
+      const argumentRoleCheck = document.getElementById("analysis-argument-role-check");
       const skeleton = document.getElementById("analysis-skeleton");
       const clauses = document.getElementById("analysis-clauses");
       const modifiersSection = document.getElementById("analysis-modifiers-section");
@@ -1221,6 +1224,9 @@ def _fragment_toolbar_selection() -> str:
         appendCopyLine(lines, "Simplified English", analysis.simplified_en);
         appendCopyLine(lines, "Chinese meaning", analysis.chinese_gloss);
         appendCopyLine(lines, "Blocking point", analysis.blocking_point);
+        appendCopyLine(lines, "Argument role", analysis.argument_role);
+        appendCopyLine(lines, "Why this role", analysis.argument_role_reason);
+        appendCopyLine(lines, "Reading check", analysis.argument_role_check);
         appendCopyLine(lines, "Subject skeleton", analysis.subject_skeleton);
         appendCopyItems(lines, "Clauses", analysis.clauses, (item) => {
           const type = item.type ? `${item.type}: ` : "";
@@ -3378,6 +3384,10 @@ def _fragment_analysis_panel_rendering() -> str:
         if (panelRetryPro) panelRetryPro.hidden = !sentenceId;
         simplified.textContent = "";
         gloss.textContent = "";
+        if (blockingPoint) blockingPoint.textContent = "";
+        if (argumentRole) argumentRole.textContent = "";
+        if (argumentRoleReason) argumentRoleReason.textContent = "";
+        if (argumentRoleCheck) argumentRoleCheck.textContent = "";
         skeleton.textContent = "";
         clearSentenceStructure();
         diagnosis.replaceChildren();
@@ -3414,11 +3424,16 @@ def _fragment_analysis_panel_rendering() -> str:
         simplified.textContent = analysis.simplified_en || "";
         gloss.textContent = analysis.chinese_gloss || "";
         if (blockingPoint) blockingPoint.textContent = analysis.blocking_point || "";
+        if (argumentRole) argumentRole.textContent = analysis.argument_role || "";
+        if (argumentRoleReason) argumentRoleReason.textContent = analysis.argument_role_reason || "";
+        if (argumentRoleCheck) argumentRoleCheck.textContent = analysis.argument_role_check || "";
         skeleton.textContent = analysis.subject_skeleton || "";
         if (backToWhole) backToWhole.textContent = analysis.simplified_en || "";
         applyGlossaryHighlights(simplified);
         applyGlossaryHighlights(gloss);
         if (blockingPoint) applyGlossaryHighlights(blockingPoint);
+        if (argumentRoleReason) applyGlossaryHighlights(argumentRoleReason);
+        if (argumentRoleCheck) applyGlossaryHighlights(argumentRoleCheck);
         applyGlossaryHighlights(skeleton);
         if (backToWhole) applyGlossaryHighlights(backToWhole);
         renderSentenceStructure(analysis);

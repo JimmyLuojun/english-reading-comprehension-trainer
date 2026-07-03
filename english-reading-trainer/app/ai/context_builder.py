@@ -23,7 +23,7 @@ _MIGRATIONS   = _PROJECT_ROOT / "migrations"
 
 _CONTEXT_WINDOW = 2   # sentences before/after to include as context
 _MAX_RELATED    = 5   # max related cards to include in prompt
-_SENTENCE_PROMPT_VERSION = "v6"
+_SENTENCE_PROMPT_VERSION = "v7"
 _WORD_PROMPT_VERSION = "v5"
 
 

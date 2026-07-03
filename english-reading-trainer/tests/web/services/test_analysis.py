@@ -134,12 +134,20 @@ def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -
         fake_active_sentence_prompt_version,
     )
 
-    def fake_save_sentence_analysis(db, sentence_id, raw_json, model, prompt_version):
+    def fake_save_sentence_analysis(
+        db,
+        sentence_id,
+        raw_json,
+        model,
+        prompt_version,
+        context="",
+    ):
         captured.update(
             sentence_id=sentence_id,
             raw_json=raw_json,
             model=model,
             prompt_version=prompt_version,
+            context=context,
         )
         return SimpleNamespace(is_valid=True, error="")
 
@@ -173,6 +181,7 @@ def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -
         "raw_json": '{"subject_skeleton":"cat sat"}',
         "model": "external-ai",
         "prompt_version": "v6",
+        "context": "",
     }
 
 
@@ -258,7 +267,12 @@ def test_analyze_sentence_for_reader_passes_force_refresh(monkeypatch) -> None:
     )
     monkeypatch.setattr(analysis, "_fetch_cache_metadata", lambda db, cache_id: {})
     monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v1")
-    monkeypatch.setattr(analysis, "save_sentence_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(analysis, "_sentence_context_text", lambda db, sentence_id: "Before. >>> The cat sat. <<< After.")
+
+    def fake_save_sentence_analysis(*args, **kwargs):
+        captured["saved_context"] = kwargs.get("context")
+
+    monkeypatch.setattr(analysis, "save_sentence_analysis", fake_save_sentence_analysis)
     monkeypatch.setattr(
         analysis,
         "_fetch_sentence_analysis_payload",
@@ -286,6 +300,8 @@ def test_analyze_sentence_for_reader_passes_force_refresh(monkeypatch) -> None:
 
     assert outcome.is_error is False
     assert captured["force_refresh"] is True
+    assert captured["context"] == "Before. >>> The cat sat. <<< After."
+    assert captured["saved_context"] == "Before. >>> The cat sat. <<< After."
 
 
 def test_analyze_sentence_for_reader_saves_and_passes_user_structure(monkeypatch) -> None:
