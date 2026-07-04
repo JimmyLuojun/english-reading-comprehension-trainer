@@ -37,6 +37,7 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     css = _css()
 
     assert ".reader-sentence" in css
+    assert "::highlight(active-reader-word-selection)" in css
     assert ".reader-inline-image" in css
     assert "vertical-align: -0.18em;" in css
     assert ".reader-md-heading" in css

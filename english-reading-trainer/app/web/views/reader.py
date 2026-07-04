@@ -444,9 +444,9 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <input id="toolbar-word-surface-form" type="hidden" name="surface_form">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
         <div class="word-toolbar-segment" role="group" aria-label="Lexical type">
-          <button type="submit" name="lexical_type" value="word" data-word-lexical="word">Word</button>
-          <button type="submit" name="lexical_type" value="phrase" data-word-lexical="phrase">Phrase</button>
-          <button type="submit" name="lexical_type" value="collocation" data-word-lexical="collocation">Collocation</button>
+          <button type="button" name="lexical_type" value="word" data-word-lexical="word">Word</button>
+          <button type="button" name="lexical_type" value="phrase" data-word-lexical="phrase">Phrase</button>
+          <button type="button" name="lexical_type" value="collocation" data-word-lexical="collocation">Collocation</button>
         </div>
         <button id="toolbar-word-copy-prompt" type="button" class="primary">Copy prompt</button>
         <button id="toolbar-word-analyze" type="button">AI analysis</button>

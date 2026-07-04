@@ -54,6 +54,10 @@ def _css() -> str:
       background: var(--accent);
       color: #fff;
     }
+    ::highlight(active-reader-word-selection) {
+      background: rgba(15, 143, 131, 0.86);
+      color: #fff;
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;

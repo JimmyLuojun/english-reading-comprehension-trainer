@@ -608,14 +608,22 @@ def test_copy_external_prompt_flushes_pending_translation_and_structure(
     assert row["user_structure"] == structure
 
 
-def test_mark_word_keeps_reader_scroll_position(
+def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
     browser: Browser,
     reader_url: str,
-    db: DatabaseConnection,
 ) -> None:
     for page in _new_page(browser, reader_url):
         page.evaluate(
             """() => {
+              window.__copiedText = "";
+              Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: {
+                  writeText: async (text) => {
+                    window.__copiedText = text;
+                  },
+                },
+              });
               document.querySelector(".reader").style.paddingTop = "1000px";
               window.scrollTo(0, 880);
             }"""
@@ -632,20 +640,24 @@ def test_mark_word_keeps_reader_scroll_position(
             }"""
         )
 
-        page.locator('#toolbar-word-form button[value="word"]').click()
+        page.locator('#toolbar-word-form button[value="phrase"]').click()
         page.wait_for_function(
-            """() => Array.from(document.querySelectorAll("[data-word-card]"))
-              .some((node) => node.textContent === "bright")"""
+            """() => {
+              const toolbar = document.getElementById("selection-toolbar");
+              const wordCard = Array.from(document.querySelectorAll("[data-word-card]"))
+                .find((node) => node.textContent === "bright");
+              const phrase = document.querySelector('#toolbar-word-form button[value="phrase"]');
+              return !toolbar.hidden
+                && !wordCard
+                && phrase.classList.contains("active")
+                && phrase.getAttribute("aria-pressed") === "true"
+                && document.getElementById("toolbar-word-status").textContent === "Using phrase";
+            }"""
         )
         after = page.evaluate(
             """() => {
               const sentence = document.querySelectorAll("[data-sentence-id]")[1];
-              const bright = Array.from(document.querySelectorAll("[data-word-card]"))
-                .find((node) => node.textContent === "bright");
               return {
-                brightMarked: Boolean(bright),
-                sourceStart: bright?.dataset.sourceStart,
-                sourceEnd: bright?.dataset.sourceEnd,
                 sentenceTop: sentence.getBoundingClientRect().top,
                 scrollY: window.scrollY,
                 toolbarHidden: document.getElementById("selection-toolbar").hidden,
@@ -653,29 +665,22 @@ def test_mark_word_keeps_reader_scroll_position(
               };
             }"""
         )
-
-    with db.get_connection() as conn:
-        row = conn.execute(
-            """SELECT wc.lexical_type, wcs.start_offset, wcs.end_offset, wcs.selected_text
-                 FROM word_cards wc
-                 JOIN word_card_sources wcs ON wcs.card_id = wc.id
-                WHERE wc.lemma = ? AND wc.archived_at IS NULL""",
-            ("bright",),
-        ).fetchone()
+        page.locator("#toolbar-word-copy-prompt").click()
+        page.wait_for_function(
+            """() => {
+              const copied = window.__copiedText || "";
+              return copied.includes("目标项：bright（phrase）")
+                && copied.includes("lexical_type 必须优先使用：phrase");
+            }"""
+        )
+        copied_text = page.evaluate("window.__copiedText")
 
     assert before["scrollY"] > 0
     assert after["url"] == before["url"]
     assert abs(after["sentenceTop"] - before["sentenceTop"]) <= 1
     assert after["scrollY"] > 0
-    assert after["toolbarHidden"] is True
-    assert after["brightMarked"] is True
-    assert after["sourceStart"] == "9"
-    assert after["sourceEnd"] == "15"
-    assert row is not None
-    assert row["lexical_type"] == "word"
-    assert row["start_offset"] == 9
-    assert row["end_offset"] == 15
-    assert row["selected_text"] == "bright"
+    assert after["toolbarHidden"] is False
+    assert "目标项：bright（phrase）" in copied_text
 
 
 def test_remove_word_card_keeps_reader_scroll_position(

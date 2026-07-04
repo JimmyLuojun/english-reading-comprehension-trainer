@@ -271,6 +271,8 @@ def _fragment_refs_and_state() -> str:
       let analysisSeq = 0;
       let toolbarRepositionFrame = null;
       let activeSelectionAnalysisContextText = "";
+      let activeReaderWordSelection = null;
+      let activeReaderWordSelectionRange = null;
       let selectedWordLexicalType = "word";
       let copyStatusTimer = null;
       let translationSaveChain = Promise.resolve();
@@ -294,6 +296,8 @@ def _fragment_refs_and_state() -> str:
       const wordAnalysisContextByCardId = new Map();
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
+      let lastReaderPointerDown = null;
+      const ACTIVE_READER_WORD_HIGHLIGHT = "active-reader-word-selection";
 
       if (bookId) {
         window.localStorage.setItem("reader:last-book-id", bookId);
@@ -635,6 +639,7 @@ def _fragment_toolbar_selection() -> str:
         hideTranslationEditor();
         hideStructureEditor();
         setEditingTarget(null);
+        clearActiveReaderWordSelection();
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
         setToolbarStatus(wordStatus, "");
@@ -987,6 +992,11 @@ def _fragment_toolbar_selection() -> str:
       }
 
       function recordClickedSentenceTarget(event) {
+        lastReaderPointerDown = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          target: event.target,
+        };
         const paragraph = event.target?.closest?.(".reader-para[data-paragraph-id]");
         if (paragraph) setActiveParagraph(paragraph);
         const sentence = event.target?.closest?.("[data-sentence-id]");
@@ -1097,6 +1107,14 @@ def _fragment_toolbar_selection() -> str:
         return range.cloneRange();
       }
 
+      function clearActiveReaderWordSelection() {
+        activeReaderWordSelection = null;
+        activeReaderWordSelectionRange = null;
+        if (window.CSS?.highlights) {
+          window.CSS.highlights.delete(ACTIVE_READER_WORD_HIGHLIGHT);
+        }
+      }
+
       function codePointLength(value) {
         return Array.from(String(value || "")).length;
       }
@@ -1115,6 +1133,36 @@ def _fragment_toolbar_selection() -> str:
         const length = codePointLength(range.toString());
         if (!length) return null;
         return { start, end: start + length, selectedText: range.toString() };
+      }
+
+      function setActiveReaderWordSelection(selection, range) {
+        clearActiveReaderWordSelection();
+        if (!selection) return;
+        activeReaderWordSelection = { ...selection };
+        activeReaderWordSelectionRange = range ? range.cloneRange() : null;
+        if (activeReaderWordSelectionRange && window.CSS?.highlights && window.Highlight) {
+          window.CSS.highlights.set(
+            ACTIVE_READER_WORD_HIGHLIGHT,
+            new window.Highlight(activeReaderWordSelectionRange),
+          );
+        }
+      }
+
+      function readerWordSelectionFromRange(range, sentence, selectedText) {
+        const sourceOffsets = rangeOffsetsWithinElement(range, sentence)
+          || uniqueOffsetsInSentence(sentence, selectedText);
+        const sentenceId = sentence?.dataset.sentenceId || "";
+        const surfaceForm = selectedText.trim();
+        if (!sentenceId || !surfaceForm) return null;
+        return {
+          sentenceId,
+          surfaceForm,
+          lexicalType: selectedWordLexicalType || lexicalTypeForSelection(surfaceForm),
+          startOffset: sourceOffsets?.start ?? null,
+          endOffset: sourceOffsets?.end ?? null,
+          selectedText: sourceOffsets?.selectedText || surfaceForm,
+          contextText: sentence?.textContent || "",
+        };
       }
 
       function uniqueOffsetsInSentence(sentence, selectedText) {
@@ -1150,6 +1198,9 @@ def _fragment_toolbar_selection() -> str:
         selectedWordLexicalType = ["word", "phrase", "collocation"].includes(value)
           ? value
           : lexicalTypeForSelection(wordSurfaceForm.value);
+        if (activeReaderWordSelection) {
+          activeReaderWordSelection.lexicalType = selectedWordLexicalType;
+        }
         wordForm.querySelectorAll("[data-word-lexical]").forEach((button) => {
           const active = button.dataset.wordLexical === selectedWordLexicalType;
           button.classList.toggle("active", active);
@@ -1158,6 +1209,9 @@ def _fragment_toolbar_selection() -> str:
       }
 
       function activeReaderWordSelectionSnapshot() {
+        if (activeReaderWordSelection) {
+          return { ...activeReaderWordSelection };
+        }
         const sentenceId = wordSentenceId.value;
         const surfaceForm = wordSurfaceForm.value.trim();
         if (!sentenceId || !surfaceForm) return null;
@@ -1173,6 +1227,76 @@ def _fragment_toolbar_selection() -> str:
           selectedText: sourceOffsets?.selectedText || surfaceForm,
           contextText: sentence?.textContent || "",
         };
+      }
+
+      function pointInsideActiveReaderWordSelection(event) {
+        if (!event || !activeReaderWordSelectionRange) return false;
+        const padding = 3;
+        for (const rect of activeReaderWordSelectionRange.getClientRects()) {
+          if (
+            event.clientX >= rect.left - padding
+            && event.clientX <= rect.right + padding
+            && event.clientY >= rect.top - padding
+            && event.clientY <= rect.bottom + padding
+          ) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function activeReaderWordSelectionIsPointerTarget(event) {
+        return Boolean(
+          activeReaderWordSelection
+          && pointInsideActiveReaderWordSelection(event),
+        );
+      }
+
+      function rangesShareClientRect(firstRange, secondRange) {
+        if (!firstRange || !secondRange) return false;
+        const padding = 2;
+        const firstRects = Array.from(firstRange.getClientRects());
+        const secondRects = Array.from(secondRange.getClientRects());
+        return firstRects.some((first) => secondRects.some((second) => (
+          first.right >= second.left - padding
+          && first.left <= second.right + padding
+          && first.bottom >= second.top - padding
+          && first.top <= second.bottom + padding
+        )));
+      }
+
+      function selectionMatchesActiveReaderWordRange(range, selectedText) {
+        if (!activeReaderWordSelection || !activeReaderWordSelectionRange) return false;
+        const activeText = normalizeText(
+          activeReaderWordSelection.selectedText || activeReaderWordSelection.surfaceForm || "",
+        );
+        const currentText = normalizeText(selectedText || "");
+        if (currentText && activeText && currentText !== activeText && !activeText.includes(currentText)) {
+          return false;
+        }
+        return rangesShareClientRect(range, activeReaderWordSelectionRange);
+      }
+
+      function restoreActiveReaderWordToolbar() {
+        if (!activeReaderWordSelection) return false;
+        const sentence = document.getElementById(`sentence-${activeReaderWordSelection.sentenceId}`);
+        const range = activeReaderWordSelectionRange;
+        if (!sentence || !range) return false;
+        activeSentenceId = activeReaderWordSelection.sentenceId;
+        activeSentenceTranslation = sentence.dataset.translation || "";
+        activeSentenceStructure = sentence.dataset.structure || "";
+        activeWordCardId = null;
+        activeWordCardIds = [];
+        wordSentenceId.value = activeReaderWordSelection.sentenceId;
+        wordSurfaceForm.value = activeReaderWordSelection.surfaceForm;
+        setSelectedWordLexicalType(activeReaderWordSelection.lexicalType);
+        configureCrossSentenceActions([]);
+        setVisible(sentenceForm, false);
+        setVisible(wordDetail, false);
+        setVisible(crossSentence, false);
+        setVisible(wordForm, true);
+        showToolbar(range);
+        return true;
       }
 
       function addSelectionFields(body, selection) {
@@ -1821,14 +1945,21 @@ def _fragment_toolbar_selection() -> str:
       }
 
       async function markReaderSelection(lexicalType, submitter, options = {}) {
-        const sentenceId = wordSentenceId.value;
-        const surfaceForm = wordSurfaceForm.value.trim();
+        const selection = activeReaderWordSelectionSnapshot();
+        const sentenceId = selection?.sentenceId || wordSentenceId.value;
+        const surfaceForm = selection?.surfaceForm || wordSurfaceForm.value.trim();
         if (!sentenceId || !surfaceForm) return;
         const analyzeAfter = Boolean(options.analyzeAfter);
         const anchor = captureReadingAnchor(submitter);
-        const range = selectedReaderRangeClone();
+        const range = activeReaderWordSelectionRange?.cloneRange() || selectedReaderRangeClone();
         const sentence = document.getElementById(`sentence-${sentenceId}`);
-        const sourceOffsets = rangeOffsetsWithinElement(range, sentence);
+        const sourceOffsets = selection && selection.startOffset !== null && selection.endOffset !== null
+          ? {
+              start: selection.startOffset,
+              end: selection.endOffset,
+              selectedText: selection.selectedText || surfaceForm,
+            }
+          : rangeOffsetsWithinElement(range, sentence);
         const body = new URLSearchParams({
           sentence_id: sentenceId,
           surface_form: surfaceForm,
@@ -1854,6 +1985,7 @@ def _fragment_toolbar_selection() -> str:
           }
           registerWordCard(payload.word_card);
           rebuildGlossaryRegex();
+          clearActiveReaderWordSelection();
           const marked = applyWordCardToRange(range, payload.word_card, payload.source)
             || applyWordCardToSource(payload.source, payload.word_card);
           if (marked && activeSentenceId) {
@@ -1893,6 +2025,10 @@ def _fragment_toolbar_selection() -> str:
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
           if (analysisWordActionInProgress) return;
           if (Date.now() < suppressCollapsedToolbarHideUntil) return;
+          if (activeReaderWordSelectionIsPointerTarget(lastReaderPointerDown)) {
+            restoreActiveReaderWordToolbar();
+            return;
+          }
           if (toolbarContainsFocus()) return;
           hideToolbar();
           return;
@@ -1901,6 +2037,13 @@ def _fragment_toolbar_selection() -> str:
         const range = selection.getRangeAt(0);
         if (selectionInsideToolbar(range)) return;
         const selectedText = selection.toString().trim();
+        if (
+          activeReaderWordSelectionIsPointerTarget(lastReaderPointerDown)
+          && selectionMatchesActiveReaderWordRange(range, selectedText)
+        ) {
+          restoreActiveReaderWordToolbar();
+          return;
+        }
         const normalizedSelection = normalizeText(selectedText);
         if (!normalizedSelection) {
           hideToolbar();
@@ -1975,6 +2118,10 @@ def _fragment_toolbar_selection() -> str:
           }
           setVisible(wordDetail, true);
         } else {
+          setActiveReaderWordSelection(
+            readerWordSelectionFromRange(range, sentence, selectedText),
+            range,
+          );
           setVisible(wordForm, true);
         }
         showToolbar(range);
@@ -5138,8 +5285,13 @@ def _fragment_bootstrap() -> str:
         markReaderSelection(lexicalType, event.submitter);
       });
       wordForm.querySelectorAll("[data-word-lexical]").forEach((button) => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           setSelectedWordLexicalType(button.dataset.wordLexical || "word");
+          suppressCollapsedToolbarHideUntil = Date.now() + 1200;
+          restoreActiveReaderWordToolbar();
+          setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);
         });
       });
       if (wordCopyPrompt) {
@@ -5282,6 +5434,12 @@ def _fragment_bootstrap() -> str:
         });
       }
       reader.addEventListener("click", (event) => {
+        if (activeReaderWordSelectionIsPointerTarget(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          restoreActiveReaderWordToolbar();
+          return;
+        }
         const selection = window.getSelection();
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan && !selectionIntersectsElement(selection, wordSpan)) {

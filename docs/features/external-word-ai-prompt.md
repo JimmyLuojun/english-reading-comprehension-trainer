@@ -63,24 +63,27 @@ Recommended desktop layout:
 [ Word | Phrase | Collocation ]   [ Copy prompt ] [ AI analysis ]
 ```
 
-The first group is a segmented set of direct mark actions. The active segment
-shows the default lexical type for the current selection, and clicking a segment
-saves the selection immediately with a short `Marked ...` response.
+The first group is a segmented lexical-type selector. The active segment shows
+the default type for the current selection, and clicking a segment keeps the
+toolbar open so the learner can choose `Copy prompt` or `AI analysis` next.
 
 Button meaning:
 
-- `Word`: mark as a word analysis target.
-- `Phrase`: mark as a phrase analysis target.
-- `Collocation`: mark as a collocation analysis target.
-- `Copy prompt`: copy the external AI prompt for the current selection.
-- `AI analysis`: run the internal model.
+- `Word`: use `word` as the target type.
+- `Phrase`: use `phrase` as the target type.
+- `Collocation`: use `collocation` as the target type.
+- `Copy prompt`: copy the external AI prompt for the current selection and
+  selected target type.
+- `AI analysis`: save the current selection with the selected target type and
+  run the internal model.
 
 Default selection:
 
 - One token defaults to `word`.
 - Multiple tokens default to `phrase`.
-- The active segment is only the default. Clicking a segment marks immediately,
-  so the user gets visible confirmation instead of a silent mode switch.
+- The active segment is the current target type. Clicking a segment is only a
+  type choice; it should show short feedback such as `Using phrase` and must
+  not dismiss the toolbar.
 
 Visual behavior:
 
@@ -370,7 +373,8 @@ Add focused tests before or alongside implementation:
   - grouped toolbar contract exists;
   - single token defaults to `word`;
   - multi-token defaults to `phrase`;
-  - lexical type segment controls update the prompt payload;
+  - lexical type segment controls keep the toolbar open and update the prompt
+    payload;
   - `Copy prompt` opens external-word panel mode;
   - Word Analysis panel contains `Copy prompt`.
 - Golden fixture:

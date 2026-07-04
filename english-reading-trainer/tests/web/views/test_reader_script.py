@@ -1180,8 +1180,18 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert "function lexicalTypeLabel(value)" in script
     assert "function setSelectedWordLexicalType(value)" in script
     assert "function activeReaderWordSelectionSnapshot()" in script
+    assert "let activeReaderWordSelection = null;" in script
+    assert "function setActiveReaderWordSelection(selection, range)" in script
+    assert "function activeReaderWordSelectionIsPointerTarget(event)" in script
+    assert "function selectionMatchesActiveReaderWordRange(range, selectedText)" in script
+    assert "function restoreActiveReaderWordToolbar()" in script
+    assert "activeReaderWordSelectionIsPointerTarget(lastReaderPointerDown)" in update_toolbar
+    assert "selectionMatchesActiveReaderWordRange(range, selectedText)" in update_toolbar
     assert "setSelectedWordLexicalType(lexicalTypeForSelection(selectedText));" in update_toolbar
+    assert "readerWordSelectionFromRange(range, sentence, selectedText)" in update_toolbar
     assert "const analyzeAfter = Boolean(options.analyzeAfter);" in mark_reader
+    assert "const selection = activeReaderWordSelectionSnapshot();" in mark_reader
+    assert "const range = activeReaderWordSelectionRange?.cloneRange() || selectedReaderRangeClone();" in mark_reader
     assert 'setToolbarStatus(wordStatus, analyzeAfter ? "Saving and analyzing..." : "Saving...");' in mark_reader
     assert "setToolbarStatus(wordStatus, `Marked ${lexicalTypeLabel(lexicalType)}`);" in mark_reader
     assert "scheduleToolbarHide(700);" in mark_reader
@@ -1191,6 +1201,10 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert "prepareExternalWordResultBox({ selection }, \"Prompt copied. Paste external result here.\");" in copy_word_prompt
     assert "applyWordCardToSource(payload.source, payload.word_card);" in save_word_selection
     assert 'wordForm.querySelectorAll("[data-word-lexical]")' in listeners
+    assert "event.preventDefault();" in listeners
+    assert "event.stopPropagation();" in listeners
+    assert "restoreActiveReaderWordToolbar();" in listeners
+    assert "setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);" in listeners
     assert 'wordCopyPrompt.addEventListener("click"' in listeners
     assert 'wordAnalyze.addEventListener("click"' in listeners
     assert "markReaderSelection(selectedWordLexicalType, wordAnalyze" in listeners
@@ -1243,6 +1257,9 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
     click_handler = click_handler[:click_handler.index('document.addEventListener("selectionchange"')]
 
     assert "selection.getRangeAt(index).intersectsNode(element)" in helper
+    assert "if (activeReaderWordSelectionIsPointerTarget(event))" in click_handler
+    assert "event.stopPropagation();" in click_handler
+    assert "restoreActiveReaderWordToolbar();" in click_handler
     assert "if (wordSpan && !selectionIntersectsElement(selection, wordSpan))" in click_handler
     assert "if (selectionIntersectsElement(selection, sentence)) return;" in click_handler
     assert "loadSavedAnalysis(sentence.dataset.sentenceId);" in click_handler

@@ -301,13 +301,13 @@ def test_selection_toolbar_contains_translation_editor_without_delete_action() -
     assert 'id="toolbar-word-copy-prompt"' in html
     assert 'id="toolbar-word-status"' in html
     assert 'class="word-toolbar-segment"' in html
-    assert 'type="submit" name="lexical_type" value="word" data-word-lexical="word"' in html
+    assert 'type="button" name="lexical_type" value="word" data-word-lexical="word"' in html
     assert (
-        'type="submit" name="lexical_type" value="phrase" data-word-lexical="phrase"'
+        'type="button" name="lexical_type" value="phrase" data-word-lexical="phrase"'
         in html
     )
     assert (
-        'type="submit" name="lexical_type" value="collocation" '
+        'type="button" name="lexical_type" value="collocation" '
         'data-word-lexical="collocation"'
     ) in html
     assert ">AI analysis</button>" in html
