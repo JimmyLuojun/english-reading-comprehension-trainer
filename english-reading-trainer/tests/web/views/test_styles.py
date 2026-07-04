@@ -78,6 +78,14 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "text-overflow: ellipsis;" in css
     assert "max-width: min(calc(100vw - 16px), 760px)" in css
     assert "#toolbar-sentence-form" in css
+    assert "#toolbar-word-form" in css
+    assert "#toolbar-word-form {\n      flex-wrap: wrap;" in css
+    assert ".word-toolbar-segment" in css
+    assert "flex: 0 0 auto;" in css
+    assert "min-width: max-content;" in css
+    assert ".word-toolbar-segment button.active" in css
+    assert ".selection-toolbar button.primary" in css
+    assert 'grid-template-columns: 1fr 1fr;' in css
     assert "white-space: nowrap;" in css
     assert ".selection-toolbar button:disabled" in css
     assert "cursor: not-allowed;" in css

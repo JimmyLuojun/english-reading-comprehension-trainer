@@ -21,13 +21,22 @@ from app.web.services.analysis import (
     analyze_word_card_for_reader,
     build_external_paragraph_logic_prompt,
     build_external_sentence_prompt,
+    build_external_word_prompt_for_card,
+    build_external_word_prompt_for_selection,
     save_external_paragraph_logic_for_reader,
     save_external_sentence_analysis_for_reader,
+    save_external_word_analysis_for_card,
+    save_external_word_analysis_for_selection,
 )
 
 
 def _truthy_form_value(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _optional_int_form_value(value: str | None) -> int | None:
+    text = (value or "").strip()
+    return int(text) if text else None
 
 
 def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConnection]) -> None:
@@ -175,6 +184,37 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             )
         return JSONResponse(payload)
 
+    @web_app.get("/analysis/word/{card_id}/external-prompt")
+    async def external_word_card_prompt_endpoint(card_id: int) -> JSONResponse:
+        try:
+            payload = await run_in_threadpool(
+                build_external_word_prompt_for_card,
+                db_factory(),
+                card_id,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        return JSONResponse(payload)
+
+    @web_app.post("/analysis/word/{card_id}/external")
+    async def external_word_card_analysis_endpoint(
+        card_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        outcome = await run_in_threadpool(
+            save_external_word_analysis_for_card,
+            db_factory(),
+            card_id,
+            external_result=form.get("external_result", ""),
+        )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
+
     @web_app.post("/analysis/word/{card_id}")
     async def analyze_word_endpoint(card_id: int, request: Request) -> JSONResponse:
         form = await _read_form(request)
@@ -186,6 +226,57 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
             force_refresh=_truthy_form_value(form.get("force_refresh")),
         )
+        if outcome.is_error:
+            return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
+        return JSONResponse(outcome.payload)
+
+    @web_app.post("/analysis/selection/word-external-prompt")
+    async def external_word_selection_prompt_endpoint(request: Request) -> JSONResponse:
+        form = await _read_form(request)
+        try:
+            payload = await run_in_threadpool(
+                build_external_word_prompt_for_selection,
+                db_factory(),
+                sentence_id=int(form.get("sentence_id", "0")),
+                surface_form=form.get("surface_form", ""),
+                lexical_type=form.get("lexical_type", "word"),
+                start_offset=_optional_int_form_value(
+                    form.get("start_offset") or form.get("source_start_offset")
+                ),
+                end_offset=_optional_int_form_value(
+                    form.get("end_offset") or form.get("source_end_offset")
+                ),
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        return JSONResponse(payload)
+
+    @web_app.post("/analysis/selection/word-external")
+    async def external_word_selection_analysis_endpoint(request: Request) -> JSONResponse:
+        form = await _read_form(request)
+        try:
+            outcome = await run_in_threadpool(
+                save_external_word_analysis_for_selection,
+                db_factory(),
+                sentence_id=int(form.get("sentence_id", "0")),
+                surface_form=form.get("surface_form", ""),
+                lexical_type=form.get("lexical_type", "word"),
+                start_offset=_optional_int_form_value(
+                    form.get("start_offset") or form.get("source_start_offset")
+                ),
+                end_offset=_optional_int_form_value(
+                    form.get("end_offset") or form.get("source_end_offset")
+                ),
+                external_result=form.get("external_result", ""),
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
         return JSONResponse(outcome.payload)

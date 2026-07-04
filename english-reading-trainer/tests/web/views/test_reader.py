@@ -298,7 +298,20 @@ def test_selection_toolbar_contains_translation_editor_without_delete_action() -
     assert 'id="toolbar-structure-open"' in html
     assert 'id="toolbar-external-prompt"' in html
     assert 'id="toolbar-word-analyze"' in html
+    assert 'id="toolbar-word-copy-prompt"' in html
+    assert 'id="toolbar-word-status"' in html
+    assert 'class="word-toolbar-segment"' in html
+    assert 'type="submit" name="lexical_type" value="word" data-word-lexical="word"' in html
+    assert (
+        'type="submit" name="lexical_type" value="phrase" data-word-lexical="phrase"'
+        in html
+    )
+    assert (
+        'type="submit" name="lexical_type" value="collocation" '
+        'data-word-lexical="collocation"'
+    ) in html
     assert ">AI analysis</button>" in html
+    assert ">Copy prompt</button>" in html
     assert "Copy AI prompt" in html
     assert 'id="toolbar-structure-editor"' in html
     assert "Write structure" in html
@@ -328,6 +341,7 @@ def test_analysis_panel_wraps_optional_structure_sections() -> None:
     assert 'id="analysis-logic-markers-section"' in html
     assert 'id="analysis-anaphora-section"' in html
     assert 'id="analysis-copy-all"' in html
+    assert 'id="analysis-copy-prompt"' in html
     assert 'id="analysis-copy-source"' in html
     assert 'id="analysis-copy-analysis"' in html
     assert 'id="analysis-copy-status"' in html

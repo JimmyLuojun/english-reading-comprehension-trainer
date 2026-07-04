@@ -469,6 +469,11 @@ def _css() -> str:
       flex-wrap: wrap;
       max-width: 100%;
     }
+    #toolbar-word-form {
+      flex-wrap: wrap;
+      padding: 2px;
+      gap: 8px;
+    }
     #toolbar-sentence-form {
       flex-wrap: nowrap;
     }
@@ -484,6 +489,37 @@ def _css() -> str:
     #toolbar-sentence-form button {
       flex: 0 0 auto;
       white-space: nowrap;
+    }
+    .word-toolbar-segment {
+      display: inline-flex;
+      flex: 0 0 auto;
+      min-width: max-content;
+      overflow: hidden;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      background: #0f172a;
+    }
+    .word-toolbar-segment button {
+      min-height: 36px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: #dbeafe;
+      white-space: nowrap;
+    }
+    .word-toolbar-segment button + button {
+      border-left: 1px solid #374151;
+    }
+    .word-toolbar-segment button.active {
+      background: #e0f2fe;
+      color: #0f172a;
+      box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.35);
+    }
+    .selection-toolbar button.primary {
+      border-color: #a7f3d0;
+      background: #ccfbf1;
+      color: #0f172a;
+      font-weight: 650;
     }
     .selection-toolbar button.danger,
     .paragraph-toolbar button.danger {
@@ -1233,6 +1269,22 @@ def _css() -> str:
       }
       #toolbar-sentence-form {
         flex-wrap: wrap;
+      }
+      #toolbar-word-form {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: stretch;
+      }
+      #toolbar-word-form[hidden] {
+        display: none;
+      }
+      .word-toolbar-segment {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
+      .word-toolbar-segment button {
+        flex: 1 1 0;
+        min-width: 0;
       }
       .translation-editor {
         width: 100%;

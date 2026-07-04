@@ -38,7 +38,9 @@
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
+      const wordCopyPrompt = document.getElementById("toolbar-word-copy-prompt");
       const wordAnalyze = document.getElementById("toolbar-word-analyze");
+      const wordStatus = document.getElementById("toolbar-word-status");
       const analysisWordForm = document.getElementById("toolbar-analysis-word-form");
       const analysisWordSentenceId = document.getElementById("toolbar-analysis-word-sentence-id");
       const analysisWordSurfaceForm = document.getElementById("toolbar-analysis-word-surface-form");
@@ -75,6 +77,7 @@
       const copyAll = document.getElementById("analysis-copy-all");
       const copySource = document.getElementById("analysis-copy-source");
       const copyAnalysis = document.getElementById("analysis-copy-analysis");
+      const copyPrompt = document.getElementById("analysis-copy-prompt");
       const copyStatus = document.getElementById("analysis-copy-status");
       const wordPronunciation = document.getElementById("analysis-word-pronunciation");
       const sentenceSections = document.getElementById("analysis-sentence-sections");
@@ -243,6 +246,8 @@
       let activeAnalysisParagraphId = null;
       let activeExternalPromptSentenceId = null;
       let activeExternalPromptParagraphId = null;
+      let activeExternalPromptWordSelection = null;
+      let activeExternalPromptWordCardId = null;
       let activeAnalysisPayload = null;
       let activeAnalysisLabel = "";
       let analysisHistory = [];
@@ -262,6 +267,7 @@
       let analysisSeq = 0;
       let toolbarRepositionFrame = null;
       let activeSelectionAnalysisContextText = "";
+      let selectedWordLexicalType = "word";
       let copyStatusTimer = null;
       let translationSaveChain = Promise.resolve();
       let structureSaveChain = Promise.resolve();
@@ -623,6 +629,7 @@
         setEditingTarget(null);
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
+        setToolbarStatus(wordStatus, "");
         setVisible(analysisWordForm, false);
         setVisible(wordDetail, false);
         activeWordDetailFromAnalysis = false;
@@ -1123,6 +1130,51 @@
 
       function lexicalTypeForSelection(value) {
         return String(value || "").trim().includes(" ") ? "phrase" : "word";
+      }
+
+      function lexicalTypeLabel(value) {
+        if (value === "collocation") return "collocation";
+        if (value === "phrase") return "phrase";
+        return "word";
+      }
+
+      function setSelectedWordLexicalType(value) {
+        selectedWordLexicalType = ["word", "phrase", "collocation"].includes(value)
+          ? value
+          : lexicalTypeForSelection(wordSurfaceForm.value);
+        wordForm.querySelectorAll("[data-word-lexical]").forEach((button) => {
+          const active = button.dataset.wordLexical === selectedWordLexicalType;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+      }
+
+      function activeReaderWordSelectionSnapshot() {
+        const sentenceId = wordSentenceId.value;
+        const surfaceForm = wordSurfaceForm.value.trim();
+        if (!sentenceId || !surfaceForm) return null;
+        const range = selectedReaderRangeClone();
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        const sourceOffsets = rangeOffsetsWithinElement(range, sentence);
+        return {
+          sentenceId,
+          surfaceForm,
+          lexicalType: selectedWordLexicalType || lexicalTypeForSelection(surfaceForm),
+          startOffset: sourceOffsets?.start ?? null,
+          endOffset: sourceOffsets?.end ?? null,
+          selectedText: sourceOffsets?.selectedText || surfaceForm,
+          contextText: sentence?.textContent || "",
+        };
+      }
+
+      function addSelectionFields(body, selection) {
+        body.set("sentence_id", selection.sentenceId);
+        body.set("surface_form", selection.surfaceForm);
+        body.set("lexical_type", selection.lexicalType);
+        if (selection.startOffset !== null && selection.endOffset !== null) {
+          body.set("start_offset", String(selection.startOffset));
+          body.set("end_offset", String(selection.endOffset));
+        }
       }
 
       function applyWordCardToRange(range, card, source = null) {
@@ -1777,6 +1829,7 @@
         });
         addSourceFields(body, sourceOffsets);
         readerToolbarBusy = true;
+        setToolbarStatus(wordStatus, analyzeAfter ? "Saving and analyzing..." : "Saving...");
         try {
           const response = await fetch("/mark/word", {
             method: "POST",
@@ -1799,14 +1852,19 @@
             const sentence = document.getElementById(`sentence-${activeSentenceId}`);
             if (sentence) sentence.normalize();
           }
-          window.getSelection()?.removeAllRanges();
-          hideToolbar();
           restoreReadingAnchor(anchor);
           if (analyzeAfter) {
+            window.getSelection()?.removeAllRanges();
+            hideToolbar();
             requestWordAnalysis(String(payload.card_id), {
               contextText: sentence?.textContent || "",
             });
+            return;
           }
+          setToolbarStatus(wordStatus, `Marked ${lexicalTypeLabel(lexicalType)}`);
+          suppressCollapsedToolbarHideUntil = Date.now() + 1200;
+          window.getSelection()?.removeAllRanges();
+          scheduleToolbarHide(700);
         } catch {
           window.location.assign(returnTo);
         } finally {
@@ -1886,6 +1944,7 @@
 
         wordSentenceId.value = activeSentenceId;
         wordSurfaceForm.value = selectedText;
+        setSelectedWordLexicalType(lexicalTypeForSelection(selectedText));
         configureCrossSentenceActions([]);
         if (wholeSentence) {
           setVisible(sentenceForm, true);
@@ -2409,6 +2468,8 @@
       function prepareExternalResultBox(sentenceId, status = "") {
         activeExternalPromptSentenceId = sentenceId || activeAnalysisSentenceId || null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         if (analysisExternalResult) {
           analysisExternalResult.placeholder = "Paste the full external AI reply here";
         }
@@ -2420,10 +2481,25 @@
       function prepareExternalParagraphResultBox(paragraphId, status = "") {
         activeExternalPromptParagraphId = paragraphId || activeAnalysisParagraphId || null;
         activeExternalPromptSentenceId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         if (analysisExternalResult) {
           analysisExternalResult.placeholder = "Paste the full external paragraph analysis reply here";
         }
         if (analysisExternalSave) analysisExternalSave.textContent = "Save paragraph analysis";
+        if (analysisExternalSection) analysisExternalSection.hidden = false;
+        if (analysisExternalStatus) analysisExternalStatus.textContent = status;
+      }
+
+      function prepareExternalWordResultBox(options = {}, status = "") {
+        activeExternalPromptWordSelection = options.selection || null;
+        activeExternalPromptWordCardId = options.cardId || null;
+        activeExternalPromptSentenceId = null;
+        activeExternalPromptParagraphId = null;
+        if (analysisExternalResult) {
+          analysisExternalResult.placeholder = "Paste the full external word analysis reply here";
+        }
+        if (analysisExternalSave) analysisExternalSave.textContent = "Save word analysis";
         if (analysisExternalSection) analysisExternalSection.hidden = false;
         if (analysisExternalStatus) analysisExternalStatus.textContent = status;
       }
@@ -2547,6 +2623,8 @@
         activeAnalysisParagraphId = null;
         activeExternalPromptSentenceId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
@@ -2563,6 +2641,8 @@
         activeAnalysisSourceSentenceId = null;
         activeAnalysisParagraphId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
@@ -2574,6 +2654,8 @@
         if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
         simplified.textContent = "";
@@ -2603,6 +2685,8 @@
         if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         if (analysisExternalSection) analysisExternalSection.hidden = true;
         clearExternalResultBox();
         simplified.textContent = "";
@@ -2670,6 +2754,8 @@
         if (panelRetryPro) panelRetryPro.hidden = true;
         activeExternalPromptSentenceId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         clearExternalResultBox();
         clearParagraphAnalysis();
       }
@@ -3558,6 +3644,8 @@
         activeAnalysisSourceSentenceId = null;
         activeExternalPromptParagraphId = null;
         activeExternalPromptSentenceId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         markParagraphAnalysisState(payload);
         setParagraphMode();
         openPanel();
@@ -3726,6 +3814,8 @@
         activeAnalysisSourceSentenceId = activeAnalysisSentenceId;
         activeAnalysisParagraphId = null;
         activeExternalPromptParagraphId = null;
+        activeExternalPromptWordSelection = null;
+        activeExternalPromptWordCardId = null;
         setSentenceMode();
         openPanel();
         panelStatus.className = "analysis-status";
@@ -3895,6 +3985,68 @@
         }
       }
 
+      async function copyExternalWordSelectionPrompt(selection) {
+        if (!selection) return;
+        activeAnalysisWordCardId = null;
+        activeAnalysisSourceSentenceId = selection.sentenceId;
+        activeAnalysisPayload = null;
+        activeAnalysisLabel = "";
+        clearAnalysisHistory();
+        setPanelLoadingWord("Waiting for external word result.");
+        prepareExternalWordResultBox({ selection }, "Copying prompt...");
+        try {
+          const body = new URLSearchParams();
+          addSelectionFields(body, selection);
+          const response = await fetch("/analysis/selection/word-external-prompt", {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "Prompt copy failed.";
+            }
+            return;
+          }
+          await writeClipboard(payload.prompt || "");
+          prepareExternalWordResultBox({ selection }, "Prompt copied. Paste external result here.");
+          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
+          }
+        }
+      }
+
+      async function copyExternalWordCardPrompt(cardId) {
+        if (!cardId) return;
+        activeExternalPromptWordCardId = String(cardId);
+        if (panelMode !== "word") setWordMode();
+        if (panel.hidden) openPanel();
+        prepareExternalWordResultBox({ cardId: String(cardId) }, "Copying prompt...");
+        try {
+          const response = await fetch(`/analysis/word/${cardId}/external-prompt`);
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "Prompt copy failed.";
+            }
+            return;
+          }
+          await writeClipboard(payload.prompt || "");
+          prepareExternalWordResultBox(
+            { cardId: String(cardId) },
+            "Prompt copied. Paste external result here.",
+          );
+          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
+          }
+        }
+      }
+
       async function copyParagraphPrompt(paragraphId) {
         if (!paragraphId) return;
         activeAnalysisParagraphId = paragraphId;
@@ -4015,6 +4167,93 @@
           renderAnalysisPayload(payload);
           clearExternalResultBox();
           prepareExternalResultBox(sentenceId, "Saved");
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Save failed: ${error}`;
+          }
+        }
+      }
+
+      async function saveExternalWordSelectionAnalysis() {
+        const selection = activeExternalPromptWordSelection;
+        const externalResult = (analysisExternalResult?.value || "").trim();
+        if (!selection) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Select a word, phrase, or collocation first.";
+          return;
+        }
+        if (!externalResult) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Paste external result first.";
+          return;
+        }
+        if (analysisExternalStatus) analysisExternalStatus.textContent = "Saving...";
+        const body = new URLSearchParams();
+        addSelectionFields(body, selection);
+        body.set("external_result", externalResult);
+        try {
+          const response = await fetch("/analysis/selection/word-external", {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "External word analysis failed.";
+            }
+            return;
+          }
+          if (payload.word_card) {
+            registerWordCard(payload.word_card);
+            rebuildGlossaryRegex();
+            applyWordCardToSource(payload.source, payload.word_card);
+          }
+          renderWordAnalysis(payload);
+          clearExternalResultBox();
+          prepareExternalWordResultBox(
+            { cardId: String(payload.card_id || "") },
+            "Saved",
+          );
+        } catch (error) {
+          if (analysisExternalStatus) {
+            analysisExternalStatus.textContent = `Save failed: ${error}`;
+          }
+        }
+      }
+
+      async function saveExternalWordCardAnalysis() {
+        const cardId = activeExternalPromptWordCardId || activeAnalysisWordCardId;
+        const externalResult = (analysisExternalResult?.value || "").trim();
+        if (!cardId) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Open a word analysis first.";
+          return;
+        }
+        if (!externalResult) {
+          if (analysisExternalStatus) analysisExternalStatus.textContent = "Paste external result first.";
+          return;
+        }
+        if (analysisExternalStatus) analysisExternalStatus.textContent = "Saving...";
+        const body = new URLSearchParams();
+        body.set("external_result", externalResult);
+        try {
+          const response = await fetch(`/analysis/word/${cardId}/external`, {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: body.toString(),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (analysisExternalStatus) {
+              analysisExternalStatus.textContent = payload.error || "External word analysis failed.";
+            }
+            return;
+          }
+          if (payload.word_card) {
+            registerWordCard(payload.word_card);
+            rebuildGlossaryRegex();
+          }
+          renderWordAnalysis(payload);
+          clearExternalResultBox();
+          prepareExternalWordResultBox({ cardId: String(cardId) }, "Saved");
         } catch (error) {
           if (analysisExternalStatus) {
             analysisExternalStatus.textContent = `Save failed: ${error}`;
@@ -4373,6 +4612,8 @@
         activeAnalysisLabel = (payload.surface_form || payload.lemma || "word").trim();
         activeAnalysisWordCardId = String(payload.card_id || "");
         activeAnalysisSourceSentenceId = String(payload.sentence_id || "");
+        activeExternalPromptWordCardId = null;
+        activeExternalPromptWordSelection = null;
         setWordMode();
         openPanel();
         panelStatus.className = "analysis-status";
@@ -4748,9 +4989,26 @@
       if (copyAll) copyAll.addEventListener("click", () => copyAnalysisPayload("all"));
       if (copySource) copySource.addEventListener("click", () => copyAnalysisPayload("source"));
       if (copyAnalysis) copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"));
+      if (copyPrompt) {
+        copyPrompt.addEventListener("click", () => {
+          if (panelMode === "word" && activeAnalysisWordCardId) {
+            copyExternalWordCardPrompt(activeAnalysisWordCardId);
+          } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
+            copyParagraphPrompt(activeAnalysisParagraphId);
+          } else if (activeAnalysisSentenceId) {
+            copyExternalSentencePrompt(activeAnalysisSentenceId);
+          } else {
+            setCopyStatus("Nothing to copy");
+          }
+        });
+      }
       if (analysisExternalSave) {
         analysisExternalSave.addEventListener("click", () => {
-          if (panelMode === "paragraph" || activeExternalPromptParagraphId) {
+          if (activeExternalPromptWordSelection) {
+            saveExternalWordSelectionAnalysis();
+          } else if (panelMode === "word" || activeExternalPromptWordCardId) {
+            saveExternalWordCardAnalysis();
+          } else if (panelMode === "paragraph" || activeExternalPromptParagraphId) {
             saveExternalParagraphAnalysis();
           } else {
             saveExternalSentenceAnalysis();
@@ -4863,9 +5121,24 @@
         const lexicalType = event.submitter?.value || "word";
         markReaderSelection(lexicalType, event.submitter);
       });
+      wordForm.querySelectorAll("[data-word-lexical]").forEach((button) => {
+        button.addEventListener("click", () => {
+          setSelectedWordLexicalType(button.dataset.wordLexical || "word");
+        });
+      });
+      if (wordCopyPrompt) {
+        wordCopyPrompt.addEventListener("click", async () => {
+          const selection = activeReaderWordSelectionSnapshot();
+          if (!selection) return;
+          const anchor = captureReadingAnchor(wordCopyPrompt);
+          hideToolbar();
+          restoreReadingAnchor(anchor);
+          copyExternalWordSelectionPrompt(selection);
+        });
+      }
       if (wordAnalyze) {
         wordAnalyze.addEventListener("click", () => {
-          markReaderSelection(lexicalTypeForSelection(wordSurfaceForm.value), wordAnalyze, {
+          markReaderSelection(selectedWordLexicalType, wordAnalyze, {
             analyzeAfter: true,
           });
         });

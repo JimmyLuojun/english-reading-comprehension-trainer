@@ -443,10 +443,14 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <input id="toolbar-word-sentence-id" type="hidden" name="sentence_id">
         <input id="toolbar-word-surface-form" type="hidden" name="surface_form">
         <input type="hidden" name="return_to" value="{_escape(return_to)}">
-        <button type="submit" name="lexical_type" value="word">Mark word</button>
-        <button type="submit" name="lexical_type" value="phrase">Mark phrase</button>
-        <button type="submit" name="lexical_type" value="collocation">Mark collocation</button>
+        <div class="word-toolbar-segment" role="group" aria-label="Lexical type">
+          <button type="submit" name="lexical_type" value="word" data-word-lexical="word">Word</button>
+          <button type="submit" name="lexical_type" value="phrase" data-word-lexical="phrase">Phrase</button>
+          <button type="submit" name="lexical_type" value="collocation" data-word-lexical="collocation">Collocation</button>
+        </div>
+        <button id="toolbar-word-copy-prompt" type="button" class="primary">Copy prompt</button>
         <button id="toolbar-word-analyze" type="button">AI analysis</button>
+        <span id="toolbar-word-status" class="toolbar-status" aria-live="polite"></span>
       </form>
       <form id="toolbar-analysis-word-form" method="post" action="/mark/word" class="toolbar-group" hidden>
         <input id="toolbar-analysis-word-sentence-id" type="hidden" name="sentence_id">
@@ -524,6 +528,7 @@ def _analysis_panel() -> str:
             <button id="analysis-copy-all" type="button" class="copy-button">Copy all</button>
             <button id="analysis-copy-source" type="button" class="copy-button">Copy source</button>
             <button id="analysis-copy-analysis" type="button" class="copy-button">Copy analysis</button>
+            <button id="analysis-copy-prompt" type="button" class="copy-button">Copy prompt</button>
             <span id="analysis-copy-status" class="copy-status" aria-live="polite"></span>
           </div>
           <p id="analysis-panel-meta" class="muted"></p>

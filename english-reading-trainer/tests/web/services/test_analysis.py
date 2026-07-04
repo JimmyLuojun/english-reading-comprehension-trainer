@@ -3,9 +3,39 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
+from app.db_connection import DatabaseConnection
 from app.web.services import analysis
+
+MIGRATIONS_DIR = Path(__file__).parents[3] / "migrations"
+
+
+def _seed_sentence_text(db: DatabaseConnection, text: str) -> int:
+    with db.get_connection() as conn:
+        book_id = conn.execute(
+            "INSERT INTO books (title, author, source_format, file_hash, imported_at) "
+            "VALUES ('B', '', 'txt', ?, '2026-01-01T00:00:00+00:00')",
+            (f"hash_service_{abs(hash(text))}",),
+        ).lastrowid
+        chapter_id = conn.execute(
+            "INSERT INTO chapters (book_id, idx, title, sentence_start, sentence_end) "
+            "VALUES (?, 1, 'Ch', 0, 1)",
+            (book_id,),
+        ).lastrowid
+        paragraph_id = conn.execute(
+            "INSERT INTO paragraphs (chapter_id, idx, sentence_start, sentence_end) "
+            "VALUES (?, 1, 0, 1)",
+            (chapter_id,),
+        ).lastrowid
+        return conn.execute(
+            """INSERT INTO sentences
+               (book_id, chapter_id, paragraph_id, idx, text, text_hash,
+                char_offset_start, char_offset_end)
+               VALUES (?, ?, ?, 0, ?, ?, 0, ?)""",
+            (book_id, chapter_id, paragraph_id, text, f"sent_{abs(hash(text))}", len(text)),
+        ).lastrowid
 
 
 def _valid_paragraph_logic() -> dict:
@@ -32,6 +62,33 @@ def _valid_paragraph_logic() -> dict:
         "possible_misreading": "Treating common documents as universally enough.",
         "reading_check": "Notice the qualification after the common list.",
         "takeaway_suggestion": "Watch for exceptions after general guidance.",
+    }
+
+
+def _valid_word_analysis() -> dict:
+    return {
+        "lemma": "evidence",
+        "lexical_type": "word",
+        "pos": "verb",
+        "meaning_in_context": "shown to exist or be present in an observable way",
+        "chinese_meaning": "被证明存在",
+        "role_in_sentence": "It modifies the nearby noun and narrows the claim.",
+        "register": "formal",
+        "why_this_word": "Evidenced is more formal than shown and fits analytic prose.",
+        "vs_simpler": [
+            {
+                "simpler": "shown",
+                "difference": "Shown is plainer; evidenced implies proof or trace.",
+            }
+        ],
+        "learner_note_check": {
+            "status": "not_provided",
+            "feedback": "",
+            "corrected_understanding": "",
+        },
+        "morphology": {"root": "", "family": ["evidence", "evident"]},
+        "predicted_error_types": ["L01"],
+        "confidence": 0.9,
     }
 
 
@@ -425,6 +482,256 @@ def test_build_external_sentence_prompt_wraps_project_prompt(monkeypatch) -> Non
     assert "```json 代码块```" in prompt
     assert "当前分析模式：诊断模式" in prompt
     assert "PROJECT PROMPT 猫坐着。 主干：cat sat" in prompt
+
+
+def test_build_external_word_prompt_for_selection_uses_offsets_and_contract(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The blocker was evidenced clearly."},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "build_word_prompt",
+        lambda db, sentence_id, surface_form: f"PROJECT WORD {sentence_id} {surface_form}",
+    )
+
+    payload = analysis.build_external_word_prompt_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        lexical_type="word",
+        start_offset=16,
+        end_offset=25,
+    )
+
+    assert payload["ok"] is True
+    assert payload["surface_form"] == "evidenced"
+    assert payload["lexical_type"] == "word"
+    assert payload["start_offset"] == 16
+    assert payload["end_offset"] == 25
+    assert "陌生词、短语或搭配" in payload["prompt"]
+    assert "目标项：evidenced（word）" in payload["prompt"]
+    assert "lexical_type 必须优先使用：word" in payload["prompt"]
+    assert "TARGET ITEM 必须保持为：evidenced" in payload["prompt"]
+    assert "role_in_sentence 必须明确点名本次选中的表层形式 “evidenced”" in payload[
+        "prompt"
+    ]
+    assert "PROJECT WORD 9 evidenced" in payload["prompt"]
+
+
+def test_build_external_word_prompt_for_selection_rejects_bad_offsets(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The blocker was evidenced clearly."},
+    )
+
+    try:
+        analysis.build_external_word_prompt_for_selection(
+            object(),
+            sentence_id=9,
+            surface_form="evidenced",
+            lexical_type="word",
+            start_offset=0,
+            end_offset=3,
+        )
+    except ValueError as exc:
+        assert str(exc) == "selection offsets do not match the selected text."
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_build_external_word_prompt_for_card_uses_note(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "user_note": "不是名词 evidence",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "build_word_prompt",
+        lambda db, sentence_id, surface_form: f"PROJECT WORD {sentence_id} {surface_form}",
+    )
+
+    payload = analysis.build_external_word_prompt_for_card(object(), 7)
+
+    assert payload["ok"] is True
+    assert payload["card_id"] == 7
+    assert payload["sentence_id"] == 9
+    assert "learner note: 不是名词 evidence" in payload["prompt"]
+
+
+def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        analysis,
+        "_validated_word_selection",
+        lambda *args, **kwargs: {
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": 16,
+            "end_offset": 25,
+        },
+    )
+    def fake_create_or_update_word_card(*args, **kwargs):
+        captured["create_args"] = (args, kwargs)
+        return 7, True
+
+    def fake_validate_external_word_json(*args, **kwargs):
+        captured["validate_args"] = (args, kwargs)
+        return analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        )
+
+    def fake_attach_external_word_analysis(*args, **kwargs):
+        captured["attach_args"] = (args, kwargs)
+        return analysis.AnalysisOutcome(payload={"ok": True})
+
+    monkeypatch.setattr(
+        analysis,
+        "create_or_update_word_card",
+        fake_create_or_update_word_card,
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        fake_validate_external_word_json,
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        fake_attach_external_word_analysis,
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"ok": True, "card_id": card_id, "is_stale": True},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_word_card_payload",
+        lambda db, card_id: {"id": card_id, "surface_form": "evidenced"},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_matching_word_source",
+        lambda *args, **kwargs: {"id": 3, "sentence_id": 9},
+    )
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        lexical_type="word",
+        start_offset=16,
+        end_offset=25,
+        external_result='```json\n{"lemma":"evidence"}\n```',
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload == {
+        "ok": True,
+        "card_id": 7,
+        "is_stale": False,
+        "from_cache": False,
+        "word_card": {"id": 7, "surface_form": "evidenced"},
+        "source": {"id": 3, "sentence_id": 9},
+    }
+    assert captured["create_args"][0][1:4] == (9, "evidenced", analysis.LexicalType.WORD)
+    assert captured["validate_args"][1]["surface_form"] == "evidenced"
+    assert captured["attach_args"][1]["surface_form"] == "evidenced"
+
+
+def test_save_external_word_card_returns_404_for_missing_card(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 404
+    assert outcome.error_payload() == {"ok": False, "error": "Word card not found."}
+
+
+def test_save_external_word_selection_preserves_selected_card_when_lemma_differs(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "external_word.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence_text(db, "The blocker was evidenced clearly.")
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        db,
+        sentence_id=sentence_id,
+        surface_form="evidenced",
+        lexical_type="word",
+        start_offset=16,
+        end_offset=25,
+        external_result=(
+            "中文讲解\n"
+            "```json\n"
+            f"{json.dumps(_valid_word_analysis(), ensure_ascii=False)}\n"
+            "```"
+        ),
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload is not None
+    assert outcome.payload["surface_form"] == "evidenced"
+    assert outcome.payload["analysis"]["lemma"] == "evidence"
+    assert outcome.payload["source"]["start_offset"] == 16
+    assert outcome.payload["source"]["end_offset"] == 25
+    assert outcome.payload["word_card"]["surface_form"] == "evidenced"
+    assert outcome.payload["word_card"]["current_meaning"] == (
+        "shown to exist or be present in an observable way"
+    )
+    with db.get_connection() as conn:
+        rows = conn.execute("SELECT lemma, surface_form FROM word_cards").fetchall()
+    assert [(row["lemma"], row["surface_form"]) for row in rows] == [
+        ("evidenced", "evidenced")
+    ]
+
+
+def test_save_external_word_selection_rejects_invalid_json_before_card_create(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "external_word_invalid.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence_text(db, "The blocker was evidenced clearly.")
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        db,
+        sentence_id=sentence_id,
+        surface_form="evidenced",
+        lexical_type="word",
+        start_offset=16,
+        end_offset=25,
+        external_result='```json\n{"bad": true}\n```',
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload()["error"].startswith("External JSON failed validation:")
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) AS count FROM word_cards").fetchone()["count"]
+    assert count == 0
 
 
 def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -> None:

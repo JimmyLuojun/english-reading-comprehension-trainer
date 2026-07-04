@@ -70,6 +70,7 @@
 - [Markdown 导入执行方案](features/markdown-import.md)：已实现的 Markdown 文件导入，清洗常见 Markdown 语法后进入标准句子流并记录 `source_format='md'`。
 - [URL 导入执行方案](features/url-import.md)：已实现的 Web URL 导入 MVP，远程 HTML/plain-text 抽正文后作为 TXT 内容导入，不改 schema。
 - [外部网页选句分析方案](features/external-web-sentence-analysis.md)：计划中的 Chrome Extension + 本地 FastAPI bridge，第一版按 `s` 选中网页当前句子并在右侧 drawer 显示结合上下文的 AI 分析；后续再做来源管理、词/短语分析和 Review 整合。
+- [External Word AI Prompt / 外部 AI 词汇分析提示词](features/external-word-ai-prompt.md)：Reader 词/短语/搭配外部 AI 快速分析闭环；用分组浮层 `Word | Phrase | Collocation` + `Copy prompt` + `AI analysis`，支持未保存选词直接复制 prompt、已有 Word Analysis 面板复制 prompt，以及 paste-back 验证保存为正常 Word Analysis。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。
 - [Logic Reading Lens / 文章逻辑视角](features/logic-reading-lens.md)：已实现——句子分析 v7 显示 `argument_role` / reason / check；Reader 支持裸键 `p` 选择段落、独立段落浮层、右侧段落 argument-flow 分析和 Copy prompt；不复制正式逻辑训练项目，不新增第二套 Review。
 - [PDF 导入执行方案](features/pdf-import.md)：已实现的 PDF 导入归一化方案。

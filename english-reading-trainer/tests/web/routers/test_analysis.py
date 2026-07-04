@@ -27,6 +27,10 @@ def test_register_analysis_routes_adds_analysis_endpoints() -> None:
     assert ("POST", "/analysis/paragraph/{paragraph_id}/logic-external") in paths
     assert ("GET", "/analysis/word/{card_id}") in paths
     assert ("POST", "/analysis/word/{card_id}") in paths
+    assert ("GET", "/analysis/word/{card_id}/external-prompt") in paths
+    assert ("POST", "/analysis/word/{card_id}/external") in paths
+    assert ("POST", "/analysis/selection/word-external-prompt") in paths
+    assert ("POST", "/analysis/selection/word-external") in paths
 
 
 def test_sentence_analysis_route_parses_force_refresh(monkeypatch) -> None:
@@ -187,6 +191,142 @@ def test_external_sentence_prompt_route_returns_prompt(monkeypatch) -> None:
         "ok": True,
         "sentence_id": 5,
         "prompt": "prompt for 5",
+    }
+
+
+def test_external_word_card_prompt_route_returns_prompt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "build_external_word_prompt_for_card",
+        lambda db, card_id: {
+            "ok": True,
+            "card_id": card_id,
+            "sentence_id": 9,
+            "prompt": f"word prompt for {card_id}",
+        },
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/word/7/external-prompt")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "card_id": 7,
+        "sentence_id": 9,
+        "prompt": "word prompt for 7",
+    }
+
+
+def test_external_word_selection_prompt_route_passes_offsets(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_build_external_word_prompt_for_selection(*args, **kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "prompt": "selection prompt"}
+
+    monkeypatch.setattr(
+        analysis,
+        "build_external_word_prompt_for_selection",
+        fake_build_external_word_prompt_for_selection,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/selection/word-external-prompt",
+        data={
+            "sentence_id": "9",
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": "16",
+            "end_offset": "25",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "prompt": "selection prompt"}
+    assert captured == {
+        "sentence_id": 9,
+        "surface_form": "evidenced",
+        "lexical_type": "word",
+        "start_offset": 16,
+        "end_offset": 25,
+    }
+
+
+def test_external_word_card_analysis_route_passes_pasted_result(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_save_external_word_analysis_for_card(*args, **kwargs):
+        captured.update(kwargs)
+        captured["card_id"] = args[1]
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_card",
+        fake_save_external_word_analysis_for_card,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/word/7/external",
+        data={"external_result": "full word reply"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "card_id": 7,
+        "external_result": "full word reply",
+    }
+
+
+def test_external_word_selection_analysis_route_passes_selection(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_save_external_word_analysis_for_selection(*args, **kwargs):
+        captured.update(kwargs)
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_selection",
+        fake_save_external_word_analysis_for_selection,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/selection/word-external",
+        data={
+            "sentence_id": "9",
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": "16",
+            "end_offset": "25",
+            "external_result": "full word reply",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "sentence_id": 9,
+        "surface_form": "evidenced",
+        "lexical_type": "word",
+        "start_offset": 16,
+        "end_offset": 25,
+        "external_result": "full word reply",
     }
 
 

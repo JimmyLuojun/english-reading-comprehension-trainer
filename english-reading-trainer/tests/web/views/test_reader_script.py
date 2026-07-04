@@ -1167,12 +1167,33 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     listeners = script[script.index('wordForm.addEventListener("submit"'):]
     listeners = listeners[: listeners.index('analysisWordForm.addEventListener("click"')]
 
+    copy_word_prompt = script[script.index("async function copyExternalWordSelectionPrompt"):]
+    copy_word_prompt = copy_word_prompt[: copy_word_prompt.index("async function copyExternalWordCardPrompt")]
+    save_word_selection = script[script.index("async function saveExternalWordSelectionAnalysis"):]
+    save_word_selection = save_word_selection[: save_word_selection.index("async function saveExternalWordCardAnalysis")]
+
     assert 'document.getElementById("toolbar-word-analyze")' in refs
+    assert 'document.getElementById("toolbar-word-copy-prompt")' in refs
+    assert 'document.getElementById("toolbar-word-status")' in refs
     assert "analysisOpen.hidden = !wholeSentence;" in update_toolbar
     assert "function lexicalTypeForSelection(value)" in script
+    assert "function lexicalTypeLabel(value)" in script
+    assert "function setSelectedWordLexicalType(value)" in script
+    assert "function activeReaderWordSelectionSnapshot()" in script
+    assert "setSelectedWordLexicalType(lexicalTypeForSelection(selectedText));" in update_toolbar
     assert "const analyzeAfter = Boolean(options.analyzeAfter);" in mark_reader
+    assert 'setToolbarStatus(wordStatus, analyzeAfter ? "Saving and analyzing..." : "Saving...");' in mark_reader
+    assert "setToolbarStatus(wordStatus, `Marked ${lexicalTypeLabel(lexicalType)}`);" in mark_reader
+    assert "scheduleToolbarHide(700);" in mark_reader
     assert "requestWordAnalysis(String(payload.card_id)" in mark_reader
+    assert 'fetch("/analysis/selection/word-external-prompt"' in copy_word_prompt
+    assert 'fetch("/analysis/selection/word-external"' in save_word_selection
+    assert "prepareExternalWordResultBox({ selection }, \"Prompt copied. Paste external result here.\");" in copy_word_prompt
+    assert "applyWordCardToSource(payload.source, payload.word_card);" in save_word_selection
+    assert 'wordForm.querySelectorAll("[data-word-lexical]")' in listeners
+    assert 'wordCopyPrompt.addEventListener("click"' in listeners
     assert 'wordAnalyze.addEventListener("click"' in listeners
+    assert "markReaderSelection(selectedWordLexicalType, wordAnalyze" in listeners
     assert "analyzeAfter: true" in listeners
 
 
@@ -1190,9 +1211,12 @@ def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> Non
     assert 'document.getElementById("analysis-copy-all")' in script
     assert 'document.getElementById("analysis-copy-source")' in script
     assert 'document.getElementById("analysis-copy-analysis")' in script
+    assert 'document.getElementById("analysis-copy-prompt")' in script
     assert 'copyAll.addEventListener("click", () => copyAnalysisPayload("all"))' in script
     assert 'copySource.addEventListener("click", () => copyAnalysisPayload("source"))' in script
     assert 'copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"))' in script
+    assert 'copyPrompt.addEventListener("click"' in script
+    assert "copyExternalWordCardPrompt(activeAnalysisWordCardId);" in script
     assert "activeAnalysisPayload" in copy_helper
     assert "buildWordCopyText(activeAnalysisPayload, kind)" in copy_helper
     assert "buildSentenceCopyText(activeAnalysisPayload, kind)" in copy_helper
