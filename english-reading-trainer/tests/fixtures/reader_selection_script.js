@@ -1480,7 +1480,8 @@
         appendCopyLine(lines, "Paragraph main claim", analysis.paragraph_main_claim);
         appendCopyItems(lines, "Argument flow", analysis.argument_flow || [], (item) => {
           const sentence = item.sentence_text || sentenceTextFromPayload(payload, item.sentence_id);
-          return `${sentence || `sentence ${item.sentence_id || ""}`} · ${item.role || "unclear"}: ${item.reason || ""}`.trim();
+          const connector = item.connector_function ? ` / ${item.connector_function}` : "";
+          return `${sentence || `sentence ${item.sentence_id || ""}`} · ${item.role || "unclear"}${connector}: ${item.reason || ""}`.trim();
         });
         appendCopyLine(lines, "Evidence", analysis.evidence);
         appendCopyLine(lines, "Concession or counterpoint", analysis.concession_or_counterpoint);
@@ -3540,6 +3541,9 @@
             .join(" · ");
           if (idLine) block.append(comparisonLine("Reference", idLine));
           block.append(role, comparisonLine("Why", item.reason || ""));
+          if (item.connector_function) {
+            block.append(comparisonLine("Connection", item.connector_function));
+          }
           paragraphFlow.append(block);
         }
         applyGlossaryHighlights(paragraphFlow);

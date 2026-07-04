@@ -118,7 +118,7 @@ def test_reader_query_marks_paragraph_with_saved_logic_analysis(
         cache_id = conn.execute(
             """INSERT INTO ai_cache
                (content_hash, prompt_version, model, response_json, is_valid, created_at)
-               VALUES (?, 'paragraph_logic_lens.v3', 'external-ai', '{}', 1,
+               VALUES (?, 'paragraph_logic_lens.v4', 'external-ai', '{}', 1,
                        '2026-06-19T00:00:00+00:00')""",
             (content_hash,),
         ).lastrowid

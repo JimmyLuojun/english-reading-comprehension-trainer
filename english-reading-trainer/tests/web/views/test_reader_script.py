@@ -89,7 +89,9 @@ def test_paragraph_shortcut_and_toolbar_contracts() -> None:
     assert "markParagraphAnalysisState(payload);" in paragraph_render
     assert "function sentenceTextFromPayload(payload, sentenceId)" in script
     assert "item.sentence_text || sentenceTextFromPayload(payload, item.sentence_id)" in paragraph_copy_text
+    assert "item.connector_function ? ` / ${item.connector_function}` : \"\"" in paragraph_copy_text
     assert "const sourceText = item.sentence_text" in paragraph_flow
+    assert 'comparisonLine("Connection", item.connector_function)' in paragraph_flow
     assert 'requestParagraphAnalysis(activeAnalysisParagraphId, { forceRefresh: true });' in retry
     assert "loadSavedParagraphAnalysis(activeParagraphId);" in script
     assert "requestParagraphAnalysis(activeParagraphId);" in script

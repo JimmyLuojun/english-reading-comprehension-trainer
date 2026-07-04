@@ -52,10 +52,10 @@ class TestSyncPromptVersions:
     ) -> None:
         result = sync_prompt_versions(db, REAL_PROMPTS_DIR)
 
-        assert result.inserted == 23
-        assert result.total_files == 23
+        assert result.inserted == 24
+        assert result.total_files == 24
         assert result.active_versions == {
-            "paragraph_logic_lens": "v3",
+            "paragraph_logic_lens": "v4",
             "profile_summary": "v1",
             "sentence_analysis_diagnose": "v7",
             "sentence_analysis_predict": "v7",
@@ -66,7 +66,7 @@ class TestSyncPromptVersions:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-            assert count == 23
+            assert count == 24
         assert active_count == 5
 
     def test_sync_is_idempotent(

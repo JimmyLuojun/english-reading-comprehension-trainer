@@ -157,7 +157,7 @@ def test_analyze_paragraph_logic_success_and_cache(db: DatabaseConnection) -> No
 
     assert result.is_valid is True
     assert result.from_cache is False
-    assert result.prompt_version == "paragraph_logic_lens.v3"
+    assert result.prompt_version == "paragraph_logic_lens.v4"
     assert result.model == "test-model"
     assert result.data["argument_flow"][0]["role"] == "claim"
     assert mock.call_count == 1

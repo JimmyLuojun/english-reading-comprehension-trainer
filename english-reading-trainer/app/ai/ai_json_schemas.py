@@ -41,6 +41,21 @@ ARGUMENT_ROLE_VALUES = [
     "transition",
     "unclear",
 ]
+CONNECTOR_FUNCTION_VALUES = [
+    "addition",
+    "contrast",
+    "cause",
+    "result",
+    "example",
+    "concession",
+    "sequence",
+    "clarification",
+    "summary",
+    "topic_shift",
+    "emphasis",
+    "condition",
+    "purpose",
+]
 
 # ---------------------------------------------------------------------------
 # Sentence analysis schema  (§9.1)
@@ -310,6 +325,10 @@ PARAGRAPH_LOGIC_LENS_SCHEMA: dict = {
                     "sentence_id": {"type": "integer"},
                     "sentence_text": {"type": "string", "minLength": 1},
                     "role": {"type": "string", "enum": ARGUMENT_ROLE_VALUES},
+                    "connector_function": {
+                        "type": "string",
+                        "enum": CONNECTOR_FUNCTION_VALUES,
+                    },
                     "reason": {"type": "string", "minLength": 1},
                 },
             },

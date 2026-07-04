@@ -263,7 +263,7 @@ def _attach_paragraph_logic_analysis(
     db: DatabaseConnection,
     paragraph_id: int,
     *,
-    prompt_version: str = "paragraph_logic_lens.v3",
+    prompt_version: str = "paragraph_logic_lens.v4",
 ) -> int:
     with db.get_connection() as conn:
         paragraph = conn.execute(
@@ -352,7 +352,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 23
+        assert count == 24
         assert active_count == 5
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -1346,8 +1346,8 @@ class TestReadingAndMarking:
         assert payload["ok"] is True
         assert payload["cache_id"] == cache_id
         assert payload["from_cache"] is True
-        assert payload["prompt_version"] == "paragraph_logic_lens.v3"
-        assert payload["active_prompt_version"] == "paragraph_logic_lens.v3"
+        assert payload["prompt_version"] == "paragraph_logic_lens.v4"
+        assert payload["active_prompt_version"] == "paragraph_logic_lens.v4"
         assert payload["analysis"]["paragraph_main_claim"] == (
             "The paragraph sets a simple scene."
         )

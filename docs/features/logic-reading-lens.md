@@ -12,12 +12,14 @@ Implemented state:
 - Feature 2 is live in the Reader: click a normal paragraph, press bare `p`,
   use the separate paragraph toolbar, then run or copy paragraph argument
   analysis.
-- Paragraph analysis uses `paragraph_logic_lens.v3`, validates against
+- Paragraph analysis uses `paragraph_logic_lens.v4`, validates against
   `PARAGRAPH_LOGIC_LENS_SCHEMA`, caches in `ai_cache`, and is not attached to
   sentence cards, Review, or `sentence_card_errors`.
-- `paragraph_logic_lens.v3` keeps original sentence text beside stable internal
+- `paragraph_logic_lens.v4` keeps original sentence text beside stable internal
   ids and defines the role taxonomy for claim/evidence/example/counterargument/
-  concession/conclusion/background/qualification/transition/unclear.
+  concession/conclusion/background/qualification/transition/unclear. It also
+  allows optional `connector_function` metadata when sentence-to-sentence
+  movement helps the learner understand the paragraph.
 
 The boundary is intentional:
 
@@ -240,6 +242,7 @@ Add a new paragraph logic schema, separate from sentence analysis:
       "sentence_id": 124,
       "sentence_text": "Yet it failed because local incentives did not change.",
       "role": "claim",
+      "connector_function": "contrast",
       "reason": "This sentence states the paragraph's main judgment."
     },
     {
@@ -280,6 +283,11 @@ Use nullable or empty-string fields for `concession_or_counterpoint` and
 `hidden_assumption` when they are not present. Do not invent them for every
 paragraph.
 
+`argument_flow[].connector_function` is optional and should be omitted unless it
+helps explain paragraph movement. Keep the primary role focused on what the
+sentence contributes to the argument; use connector metadata for how it connects
+to nearby sentences. Do not split `transition` into many primary roles.
+
 ### Implementation Plan
 
 No DB migration is required for the MVP. Cache paragraph analyses by recomputing
@@ -306,11 +314,11 @@ a paragraph content hash and writing valid JSON to `ai_cache`.
    - include previous/next paragraph text as context when available;
    - preserve original sentence order.
 5. AI pipeline:
-   - add prompt `english-reading-trainer/prompts/paragraph_logic_lens.v3.md`;
+   - add prompt `english-reading-trainer/prompts/paragraph_logic_lens.v4.md`;
    - add a `PARAGRAPH_LOGIC_LENS_SCHEMA`;
    - add a small service such as `analyze_paragraph_logic_for_reader`;
    - use `ai_cache` with a distinct prompt version such as
-     `paragraph_logic_lens.v3`;
+     `paragraph_logic_lens.v4`;
    - do not attach paragraph analysis to `sentence_cards.ai_analysis_id`.
 6. Routes:
    - `POST /analysis/paragraph/{paragraph_id}/logic` analyzes and returns the

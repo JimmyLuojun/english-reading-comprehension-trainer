@@ -14,8 +14,8 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PROMPT_NAME = "paragraph_logic_lens"
-_PROMPT_FILE_VERSION = "v3"
-_PROMPT_VERSION = "paragraph_logic_lens.v3"
+_PROMPT_FILE_VERSION = "v4"
+_PROMPT_VERSION = "paragraph_logic_lens.v4"
 
 _RETRY_SUFFIX = (
     "\n\n[CORRECTION NEEDED] Your previous response was not valid JSON or "

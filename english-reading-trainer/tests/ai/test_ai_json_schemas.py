@@ -10,6 +10,7 @@ import jsonschema
 
 from app.ai.ai_json_schemas import (
     ARGUMENT_ROLE_VALUES,
+    CONNECTOR_FUNCTION_VALUES,
     PARAGRAPH_LOGIC_LENS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA,
     SENTENCE_ANALYSIS_SCHEMA_V2,
@@ -835,6 +836,22 @@ class TestParagraphLogicLensSchema:
     def test_valid_paragraph_logic_passes(self) -> None:
         _validate(VALID_PARAGRAPH_LOGIC, PARAGRAPH_LOGIC_LENS_SCHEMA)
 
+    def test_valid_paragraph_logic_accepts_optional_connector_function(self) -> None:
+        payload = {
+            **VALID_PARAGRAPH_LOGIC,
+            "argument_flow": [
+                {
+                    "sentence_id": 124,
+                    "sentence_text": "Yet it failed because local incentives did not change.",
+                    "role": "claim",
+                    "connector_function": "contrast",
+                    "reason": "States the point while turning away from the setup.",
+                }
+            ],
+        }
+
+        _validate(payload, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
     def test_invalid_argument_role_rejected(self) -> None:
         bad = {
             **VALID_PARAGRAPH_LOGIC,
@@ -849,6 +866,39 @@ class TestParagraphLogicLensSchema:
         }
         with pytest.raises(jsonschema.ValidationError):
             _validate(bad, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
+    def test_invalid_connector_function_rejected(self) -> None:
+        bad = {
+            **VALID_PARAGRAPH_LOGIC,
+            "argument_flow": [
+                {
+                    "sentence_id": 124,
+                    "sentence_text": "Yet it failed because local incentives did not change.",
+                    "role": "claim",
+                    "connector_function": "vibes",
+                    "reason": "Not in the closed enum.",
+                }
+            ],
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(bad, PARAGRAPH_LOGIC_LENS_SCHEMA)
+
+    def test_connector_function_values_are_stable(self) -> None:
+        assert CONNECTOR_FUNCTION_VALUES == [
+            "addition",
+            "contrast",
+            "cause",
+            "result",
+            "example",
+            "concession",
+            "sequence",
+            "clarification",
+            "summary",
+            "topic_shift",
+            "emphasis",
+            "condition",
+            "purpose",
+        ]
 
     def test_extra_top_level_field_rejected(self) -> None:
         bad = {**VALID_PARAGRAPH_LOGIC, "formal_logic": "modus ponens"}

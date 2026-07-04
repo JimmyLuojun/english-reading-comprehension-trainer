@@ -97,7 +97,7 @@ def test_analyze_paragraph_logic_for_reader_returns_payload(monkeypatch) -> None
             from_cache=False,
             is_stale=False,
             is_valid=True,
-            prompt_version="paragraph_logic_lens.v3",
+            prompt_version="paragraph_logic_lens.v4",
             model="model",
         ),
     )
@@ -109,8 +109,8 @@ def test_analyze_paragraph_logic_for_reader_returns_payload(monkeypatch) -> None
         "ok": True,
         "paragraph_id": 3,
         "cache_id": 9,
-        "prompt_version": "paragraph_logic_lens.v3",
-        "active_prompt_version": "paragraph_logic_lens.v3",
+        "prompt_version": "paragraph_logic_lens.v4",
+        "active_prompt_version": "paragraph_logic_lens.v4",
         "model": "model",
         "is_stale": False,
         "from_cache": False,
@@ -252,8 +252,8 @@ def test_save_external_paragraph_logic_accepts_markdown_reply(monkeypatch) -> No
         "ok": True,
         "paragraph_id": 3,
         "cache_id": 42,
-        "prompt_version": "paragraph_logic_lens.v3",
-        "active_prompt_version": "paragraph_logic_lens.v3",
+        "prompt_version": "paragraph_logic_lens.v4",
+        "active_prompt_version": "paragraph_logic_lens.v4",
         "model": "external-ai",
         "is_stale": False,
         "from_cache": False,
@@ -262,7 +262,7 @@ def test_save_external_paragraph_logic_accepts_markdown_reply(monkeypatch) -> No
         "context": "Previous paragraph: Setup.",
         "analysis": valid_json,
     }
-    assert saved["args"][2] == "paragraph_logic_lens.v3"
+    assert saved["args"][2] == "paragraph_logic_lens.v4"
     assert saved["args"][3] == "external-ai"
     assert saved["args"][5] is True
     assert saved["kwargs"] == {"replace_valid": True}

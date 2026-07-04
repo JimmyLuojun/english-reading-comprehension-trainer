@@ -187,7 +187,7 @@ def test_fetch_paragraph_logic_payload_returns_saved_cache(tmp_path: Path) -> No
         cache_id = conn.execute(
             """INSERT INTO ai_cache
                (content_hash, prompt_version, model, response_json, is_valid, created_at)
-               VALUES (?, 'paragraph_logic_lens.v3', 'external-ai', ?, 1,
+               VALUES (?, 'paragraph_logic_lens.v4', 'external-ai', ?, 1,
                        '2026-06-19T00:00:00+00:00')""",
             (
                 compute_content_hash(
@@ -204,8 +204,8 @@ def test_fetch_paragraph_logic_payload_returns_saved_cache(tmp_path: Path) -> No
     assert payload["ok"] is True
     assert payload["paragraph_id"] == paragraph_id
     assert payload["cache_id"] == cache_id
-    assert payload["prompt_version"] == "paragraph_logic_lens.v3"
-    assert payload["active_prompt_version"] == "paragraph_logic_lens.v3"
+    assert payload["prompt_version"] == "paragraph_logic_lens.v4"
+    assert payload["active_prompt_version"] == "paragraph_logic_lens.v4"
     assert payload["from_cache"] is True
     assert payload["is_stale"] is False
     assert payload["paragraph_text"] == "First claim. Second evidence."

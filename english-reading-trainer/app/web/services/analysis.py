@@ -201,6 +201,7 @@ def build_external_paragraph_logic_prompt(
 JSON 规则：
 - JSON 必须严格符合下方 PROJECT JSON CONTRACT 的 schema。
 - argument_flow 每一项必须同时包含 sentence_id 和 sentence_text；sentence_text 写原始英文句子。
+- argument_flow 的 connector_function 是可选字段；只有当它能帮助理解句间连接时才填写。
 - role 必须按 PROJECT JSON CONTRACT 的 Role guide 判断；不要把背景或过渡句误标为 evidence。
 - JSON 内不要写注释。
 - JSON 后不要追加任何内容。
