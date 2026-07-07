@@ -162,10 +162,12 @@ def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
     assert "toolbarResizeObserver.observe(toolbar);" in script
     assert "window.setTimeout(() => {\n            hideToolbar();" not in script
 
-    hide_toolbar = script[script.index("function hideToolbar()"):]
+    hide_toolbar = script[script.index("function hideToolbar(options = {})"):]
     hide_toolbar = hide_toolbar[:hide_toolbar.index("function setVisible")]
     assert "clearScheduledToolbarHide();" in hide_toolbar
-    assert hide_toolbar.index("clearScheduledToolbarHide();") < hide_toolbar.index("hideAllPanels();")
+    assert hide_toolbar.index("clearScheduledToolbarHide();") < hide_toolbar.index(
+        "hideAllPanels(options);"
+    )
     assert "window.cancelAnimationFrame(toolbarRepositionFrame);" in hide_toolbar
 
     position_toolbar = script[script.index("function positionToolbar(anchor)"):]
@@ -241,6 +243,14 @@ def test_saved_sentence_analysis_loading_uses_active_sentence_id() -> None:
     loading = loading[: loading.index("function setPanelLoadingWord")]
     load_saved = script[script.index("async function loadSavedAnalysis"):]
     load_saved = load_saved[: load_saved.index("async function requestAnalysis")]
+    rendering = script[script.index("function clearActiveAnalysisSentenceHighlight"):]
+    rendering = rendering[: rendering.index("function clearExternalResultBox")]
+    study_panel = script[script.index("function renderSentenceStudyPanel"):]
+    study_panel = study_panel[: study_panel.index("function renderAnalysisPayload")]
+    render_payload = script[script.index("function renderAnalysisPayload"):]
+    render_payload = render_payload[: render_payload.index("function renderDiagnosis")]
+    close_panel = script[script.index("function closePanel"):]
+    close_panel = close_panel[: close_panel.index("function openPanelPlaceholder")]
 
     assert "activeAnalysisSentenceId = sentenceId;" in load_saved
     assert load_saved.index("activeAnalysisSentenceId = sentenceId;") < load_saved.index(
@@ -248,6 +258,13 @@ def test_saved_sentence_analysis_loading_uses_active_sentence_id() -> None:
     )
     assert "prepareExternalResultBox(activeAnalysisSentenceId);" in loading
     assert "prepareExternalResultBox(sentenceId);" not in loading
+    assert '"[data-sentence-id].analysis-selected"' in rendering
+    assert 'sentence.classList.add("analysis-selected");' in rendering
+    assert "clearActiveAnalysisSentenceHighlight();" in rendering
+    assert "highlightActiveAnalysisSentence(activeAnalysisSentenceId);" in loading
+    assert "highlightActiveAnalysisSentence(activeAnalysisSentenceId);" in study_panel
+    assert "highlightActiveAnalysisSentence(activeAnalysisSentenceId);" in render_payload
+    assert "clearActiveAnalysisSentenceHighlight();" in close_panel
 
 
 def test_sentence_analysis_panel_edits_translation_structure_and_takeaway() -> None:
@@ -1042,7 +1059,7 @@ def test_toolbar_editing_target_highlight_is_temporary() -> None:
     script = _selection_script()
     helper = script[script.index("function setEditingTarget(sentenceEl)"):]
     helper = helper[: helper.index("function selectedSentenceSpans")]
-    hide_all = script[script.index("function hideAllPanels()"):]
+    hide_all = script[script.index("function hideAllPanels(options = {})"):]
     hide_all = hide_all[: hide_all.index("function clearScheduledToolbarHide")]
     open_translation = script[script.index("function openTranslationEditor()"):]
     open_translation = open_translation[: open_translation.index("function openStructureEditor")]
@@ -1164,6 +1181,14 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
     mark_reader = script[script.index("async function markReaderSelection"):]
     mark_reader = mark_reader[: mark_reader.index("function updateToolbar")]
+    hide_all = script[script.index("function hideAllPanels"):]
+    hide_all = hide_all[: hide_all.index("function clearScheduledToolbarHide")]
+    hide_toolbar = script[script.index("function hideToolbar"):]
+    hide_toolbar = hide_toolbar[: hide_toolbar.index("function hideToolbarUnlessEditing")]
+    loading_word = script[script.index("function setPanelLoadingWord"):]
+    loading_word = loading_word[: loading_word.index("function renderAnalysisError")]
+    render_word = script[script.index("function renderWordAnalysis"):]
+    render_word = render_word[: render_word.index("async function saveAnalysisMeaningIfEmpty")]
     listeners = script[script.index('wordForm.addEventListener("submit"'):]
     listeners = listeners[: listeners.index('analysisWordForm.addEventListener("click"')]
 
@@ -1185,6 +1210,10 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert "function activeReaderWordSelectionIsPointerTarget(event)" in script
     assert "function selectionMatchesActiveReaderWordRange(range, selectedText)" in script
     assert "function restoreActiveReaderWordToolbar()" in script
+    assert "function hideAllPanels(options = {})" in hide_all
+    assert "if (!options.preserveReaderWordSelection)" in hide_all
+    assert "function hideToolbar(options = {})" in hide_toolbar
+    assert "hideAllPanels(options);" in hide_toolbar
     assert "activeReaderWordSelectionIsPointerTarget(lastReaderPointerDown)" in update_toolbar
     assert "selectionMatchesActiveReaderWordRange(range, selectedText)" in update_toolbar
     assert "setSelectedWordLexicalType(lexicalTypeForSelection(selectedText));" in update_toolbar
@@ -1200,12 +1229,16 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert 'fetch("/analysis/selection/word-external"' in save_word_selection
     assert "prepareExternalWordResultBox({ selection }, \"Prompt copied. Paste external result here.\");" in copy_word_prompt
     assert "applyWordCardToSource(payload.source, payload.word_card);" in save_word_selection
+    assert "function highlightActiveWordAnalysisTarget(cardId)" in script
+    assert "highlightActiveWordAnalysisTarget(activeAnalysisWordCardId);" in loading_word
+    assert "highlightActiveWordAnalysisTarget(payload.card_id);" in render_word
     assert 'wordForm.querySelectorAll("[data-word-lexical]")' in listeners
     assert "event.preventDefault();" in listeners
     assert "event.stopPropagation();" in listeners
     assert "restoreActiveReaderWordToolbar();" in listeners
     assert "setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);" in listeners
     assert 'wordCopyPrompt.addEventListener("click"' in listeners
+    assert "hideToolbar({ preserveReaderWordSelection: true });" in listeners
     assert 'wordAnalyze.addEventListener("click"' in listeners
     assert "markReaderSelection(selectedWordLexicalType, wordAnalyze" in listeners
     assert "analyzeAfter: true" in listeners

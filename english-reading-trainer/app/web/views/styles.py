@@ -398,6 +398,13 @@ def _css() -> str:
     [data-sentence-id].analyzed-stale {
       border-left-style: dashed;
     }
+    [data-sentence-id].analysis-selected {
+      border-radius: 4px;
+      background: rgba(15, 143, 131, 0.12);
+      box-shadow: 0 0 0 2px rgba(15, 143, 131, 0.18);
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
     [data-sentence-id].analysis-highlight-fallback {
       outline: 2px solid rgba(37, 99, 235, 0.35);
       outline-offset: 2px;

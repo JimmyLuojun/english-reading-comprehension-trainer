@@ -48,6 +48,7 @@ _JSON_FENCE_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _EXTERNAL_MODEL_NAME = "external-ai"
+_EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE = 0.8
 _PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 
 
@@ -250,8 +251,13 @@ def build_external_sentence_prompt(
 
 JSON 规则：
 - JSON 必须严格符合下方 PROJECT JSON CONTRACT 的 schema。
+- 最后 JSON 的顶层必须包含 PROJECT JSON CONTRACT 要求的所有字段，尤其不要漏掉 `confidence`。
+- `confidence` 是必填顶层字段，必须是 0.0 到 1.0 之间的数字；不确定时也要给出合理置信度，例如 0.82。
+- 输出最终 JSON 前，先自检这些顶层字段都存在：`subject_skeleton`, `clauses`, `modifiers`, `logic_markers`, `anaphora`, `simplified_en`, `chinese_gloss`, `blocking_point`, `argument_role`, `argument_role_reason`, `argument_role_check`, `predicted_error_types`, `diagnosis_basis`, `diagnosed_error_types`, `diagnosis_evidence`, `takeaway_suggestion`, `confidence`。
 - JSON 内不要写注释。
 - JSON 后不要追加任何内容。
+- 只输出一个 ```json 代码块```，不要输出其他代码块。
+- 保存时系统只读取最后这个 JSON 代码块；中文讲解是给人看的。
 - 如果 PROJECT JSON CONTRACT 要求“Return JSON only”，只把这条要求用于最后的 JSON 代码块；前面的中文讲解仍然要输出。
 - 当前分析模式：{mode}
 
@@ -389,7 +395,9 @@ def save_external_sentence_analysis_for_reader(
 ) -> AnalysisOutcome:
     """Save JSON produced by an external AI chat and return reader payload."""
     try:
-        raw_json = extract_external_json_block(external_result)
+        raw_json = _normalize_external_sentence_json(
+            extract_external_json_block(external_result)
+        )
         if user_translation is not None and user_translation.strip():
             save_sentence_translation(db, sentence_id, user_translation)
         if user_structure is not None and user_structure.strip():
@@ -659,7 +667,39 @@ def extract_external_json_block(external_result: str) -> str:
         return matches[-1]
     if text.startswith("{") and text.endswith("}"):
         return text
+    embedded = _largest_embedded_json_object(text)
+    if embedded:
+        return embedded
     raise ValueError("Paste an external AI reply ending with a ```json code block```.")
+
+
+def _largest_embedded_json_object(text: str) -> str:
+    decoder = json.JSONDecoder()
+    best = ""
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            candidate = text[index:end].strip()
+            if len(candidate) > len(best):
+                best = candidate
+    return best
+
+
+def _normalize_external_sentence_json(raw_json: str) -> str:
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return raw_json
+    if not isinstance(data, dict):
+        return raw_json
+    if "confidence" not in data:
+        data["confidence"] = _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE
+    return json.dumps(data, ensure_ascii=False)
 
 
 def _sentence_context_text(db: DatabaseConnection, sentence_id: int) -> str:

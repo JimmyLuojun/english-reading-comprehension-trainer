@@ -447,6 +447,14 @@ def test_extract_external_json_block_accepts_raw_json() -> None:
     assert analysis.extract_external_json_block('{"ok": true}') == '{"ok": true}'
 
 
+def test_extract_external_json_block_accepts_embedded_raw_json() -> None:
+    pasted = '说明文字 “{"outer": {"inner": true}, "subject_skeleton": "It happens"}”，'
+
+    assert analysis.extract_external_json_block(pasted) == (
+        '{"outer": {"inner": true}, "subject_skeleton": "It happens"}'
+    )
+
+
 def test_extract_external_json_block_rejects_free_text() -> None:
     outcome = analysis.save_external_sentence_analysis_for_reader(
         object(),
@@ -481,6 +489,10 @@ def test_build_external_sentence_prompt_wraps_project_prompt(monkeypatch) -> Non
     assert "先输出给人看的中文讲解" in prompt
     assert "```json 代码块```" in prompt
     assert "当前分析模式：诊断模式" in prompt
+    assert "尤其不要漏掉 `confidence`" in prompt
+    assert "`confidence` 是必填顶层字段" in prompt
+    assert "`takeaway_suggestion`, `confidence`" in prompt
+    assert "只输出一个 ```json 代码块```" in prompt
     assert "PROJECT PROMPT 猫坐着。 主干：cat sat" in prompt
 
 
@@ -801,16 +813,97 @@ def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -
         "is_stale": False,
         "from_cache": False,
     }
+    saved_json = json.loads(str(captured.pop("raw_json")))
     assert captured == {
         "translation": "猫坐着。",
         "structure": "主干：cat sat",
         "prompt_basis": "猫坐着。",
         "sentence_id": 3,
-        "raw_json": '{"subject_skeleton":"cat sat"}',
         "model": "external-ai",
         "prompt_version": "v6",
         "context": "",
     }
+    assert saved_json == {
+        "subject_skeleton": "cat sat",
+        "confidence": 0.8,
+    }
+
+
+def test_save_external_sentence_analysis_adds_missing_confidence_for_v7_json(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db = DatabaseConnection(tmp_path / "external_sentence_missing_confidence.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence_text(
+        db,
+        "Well, it just so happens that since Breslin has gotten closer to "
+        "Rottmayer, Rottmayer has developed a new edge to his defiance that "
+        "wasn't there before.",
+    )
+    monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v7")
+
+    pasted = {
+        "subject_skeleton": "It happens",
+        "clauses": [
+            {
+                "type": "main",
+                "text": "Well, it just so happens",
+                "role": "main predication introducing a formal sentence pattern",
+            },
+            {
+                "type": "noun",
+                "text": (
+                    "that since Breslin has gotten closer to Rottmayer, "
+                    "Rottmayer has developed a new edge to his defiance that "
+                    "wasn't there before"
+                ),
+                "role": "subject clause post-posed after dummy it",
+            },
+        ],
+        "modifiers": [
+            {"target": "happens", "modifier": "just so", "type": "adverb"},
+        ],
+        "logic_markers": [{"marker": "since", "function": "cause"}],
+        "anaphora": [{"pronoun": "it", "refers_to": "dummy subject"}],
+        "simplified_en": "Coincidentally, Rottmayer became newly defiant.",
+        "chinese_gloss": "碰巧的是，罗特梅耶的态度里多出了一股锋芒。",
+        "blocking_point": "Isolating the nested since clause.",
+        "argument_role": "claim",
+        "argument_role_reason": "The sentence makes an accusatory observation.",
+        "argument_role_check": "Check whether the correlation is being used as a claim.",
+        "predicted_error_types": ["G03", "L01", "D01"],
+        "diagnosis_basis": "predicted",
+        "diagnosed_error_types": [],
+        "diagnosis_evidence": [],
+        "takeaway_suggestion": "先隔离 it happens that 内部的 since 从句。",
+        "structure_feedback": {
+            "is_correct": False,
+            "missed_or_wrong": [
+                {
+                    "error_code": "G03",
+                    "learner_claim": "since 是主语从句。",
+                    "correction": "since 是嵌套在 that 从句内部的状语从句。",
+                    "reason": "整个 that 块才是真正的主语从句。",
+                }
+            ],
+            "correct_highlights": ["识别出 it happens that 句型。"],
+            "corrected_structure": "It + happens + [that [since...], Rottmayer has developed ...].",
+            "why_it_matters_for_translation": "避免把 it 当成普通指代代词。",
+            "next_check": "先判断 it 是否为形式主语。",
+        },
+    }
+
+    outcome = analysis.save_external_sentence_analysis_for_reader(
+        db,
+        sentence_id,
+        external_result=json.dumps(pasted, ensure_ascii=False),
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload is not None
+    assert outcome.payload["analysis"]["confidence"] == 0.8
+    assert outcome.payload["analysis"]["structure_feedback"]["is_correct"] is False
 
 
 def test_save_external_sentence_analysis_reports_validation_error(monkeypatch) -> None:

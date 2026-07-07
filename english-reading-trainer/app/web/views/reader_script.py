@@ -635,11 +635,13 @@ def _fragment_toolbar_selection() -> str:
         }
       }
 
-      function hideAllPanels() {
+      function hideAllPanels(options = {}) {
         hideTranslationEditor();
         hideStructureEditor();
         setEditingTarget(null);
-        clearActiveReaderWordSelection();
+        if (!options.preserveReaderWordSelection) {
+          clearActiveReaderWordSelection();
+        }
         setVisible(sentenceForm, false);
         setVisible(wordForm, false);
         setToolbarStatus(wordStatus, "");
@@ -665,13 +667,13 @@ def _fragment_toolbar_selection() -> str:
         }, delay);
       }
 
-      function hideToolbar() {
+      function hideToolbar(options = {}) {
         clearScheduledToolbarHide();
         if (toolbarRepositionFrame) {
           window.cancelAnimationFrame(toolbarRepositionFrame);
           toolbarRepositionFrame = null;
         }
-        hideAllPanels();
+        hideAllPanels(options);
         toolbar.hidden = true;
         activeSentenceId = null;
         activeSentenceTranslation = "";
@@ -2595,8 +2597,22 @@ def _fragment_reader_progress_and_actions() -> str:
 """
 
 def _fragment_analysis_panel_rendering() -> str:
-    return r"""      function setSentenceMode() {
+    return r"""      function clearActiveAnalysisSentenceHighlight() {
+        reader.querySelectorAll("[data-sentence-id].analysis-selected").forEach((node) => {
+          node.classList.remove("analysis-selected");
+        });
+      }
+
+      function highlightActiveAnalysisSentence(sentenceId) {
+        clearActiveAnalysisSentenceHighlight();
+        if (!sentenceId) return;
+        const sentence = document.getElementById(`sentence-${sentenceId}`);
+        if (sentence) sentence.classList.add("analysis-selected");
+      }
+
+      function setSentenceMode() {
         panelMode = "sentence";
+        clearActiveReaderWordSelection();
         if (panelKicker) panelKicker.textContent = "Sentence analysis";
         if (panelTitle) panelTitle.textContent = "AI Analysis";
         if (wordPronunciation) {
@@ -2612,6 +2628,8 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function setParagraphMode() {
         panelMode = "paragraph";
+        clearActiveAnalysisSentenceHighlight();
+        clearActiveReaderWordSelection();
         if (panelKicker) panelKicker.textContent = "Paragraph logic";
         if (panelTitle) panelTitle.textContent = "Paragraph Logic";
         if (wordPronunciation) {
@@ -2627,6 +2645,7 @@ def _fragment_analysis_panel_rendering() -> str:
 
       function setWordMode() {
         panelMode = "word";
+        clearActiveAnalysisSentenceHighlight();
         if (panelKicker) panelKicker.textContent = "Word analysis";
         if (panelTitle) panelTitle.textContent = "Word Analysis";
         if (analysisExternalSection) analysisExternalSection.hidden = true;
@@ -2804,6 +2823,8 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
+        clearActiveAnalysisSentenceHighlight();
+        clearActiveReaderWordSelection();
         clearEvidenceHighlight();
         reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
           el.classList.remove("word-analysis-active");
@@ -2822,6 +2843,7 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
+        clearActiveAnalysisSentenceHighlight();
         openPanel();
         panelStatus.className = "analysis-status";
         panelStatus.textContent = "Select a sentence or marked word, then choose AI analysis.";
@@ -2853,6 +2875,7 @@ def _fragment_analysis_panel_rendering() -> str:
       function setPanelLoading(message) {
         setSentenceMode();
         openPanel();
+        highlightActiveAnalysisSentence(activeAnalysisSentenceId);
         prepareExternalResultBox(activeAnalysisSentenceId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message;
@@ -2881,9 +2904,24 @@ def _fragment_analysis_panel_rendering() -> str:
         renderStructureFeedback(null);
       }
 
+      function clearActiveWordAnalysisTargetHighlight() {
+        reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
+          el.classList.remove("word-analysis-active");
+        });
+      }
+
+      function highlightActiveWordAnalysisTarget(cardId) {
+        clearActiveWordAnalysisTargetHighlight();
+        const cleanCardId = String(cardId || "");
+        if (!cleanCardId) return;
+        const wordSpan = reader.querySelector(`[data-word-card="${cleanCardId}"]`);
+        if (wordSpan) wordSpan.classList.add("word-analysis-active");
+      }
+
       function setPanelLoadingWord(message) {
         setWordMode();
         openPanel();
+        highlightActiveWordAnalysisTarget(activeAnalysisWordCardId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message;
         panelMeta.textContent = "";
@@ -3956,6 +3994,7 @@ def _fragment_analysis_panel_rendering() -> str:
         activeAnalysisSourceSentenceId = sentenceId;
         setSentenceMode();
         openPanel();
+        highlightActiveAnalysisSentence(activeAnalysisSentenceId);
         prepareExternalResultBox(activeAnalysisSentenceId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = message || "";
@@ -3994,6 +4033,7 @@ def _fragment_analysis_panel_rendering() -> str:
         activeExternalPromptWordCardId = null;
         setSentenceMode();
         openPanel();
+        highlightActiveAnalysisSentence(activeAnalysisSentenceId);
         panelStatus.className = "analysis-status";
         panelStatus.textContent = payload.is_stale ? "Analysis is stale. Reanalyze when ready." : "";
         panelRetry.hidden = false;
@@ -4804,13 +4844,7 @@ def _fragment_analysis_requests_and_evidence() -> str:
           payload.model || "model unknown",
           payload.from_cache ? "cache" : "fresh",
         ].join(" · ");
-        reader.querySelectorAll("[data-word-card].word-analysis-active").forEach((el) => {
-          el.classList.remove("word-analysis-active");
-        });
-        if (payload.card_id) {
-          const wordSpan = reader.querySelector(`[data-word-card="${payload.card_id}"]`);
-          if (wordSpan) wordSpan.classList.add("word-analysis-active");
-        }
+        highlightActiveWordAnalysisTarget(payload.card_id);
         const speakText = (payload.surface_form || payload.lemma || "").trim();
         if (wordPronunciation) {
           wordPronunciation.dataset.speakText = speakText;
@@ -5316,7 +5350,7 @@ def _fragment_bootstrap() -> str:
           const selection = activeReaderWordSelectionSnapshot();
           if (!selection) return;
           const anchor = captureReadingAnchor(wordCopyPrompt);
-          hideToolbar();
+          hideToolbar({ preserveReaderWordSelection: true });
           restoreReadingAnchor(anchor);
           copyExternalWordSelectionPrompt(selection);
         });

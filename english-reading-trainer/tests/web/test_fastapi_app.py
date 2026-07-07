@@ -1876,7 +1876,7 @@ class TestReadingAndMarking:
         response = client.get(f"/read/{book_id}")
 
         assert response.status_code == 200
-        assert "function hideAllPanels()" in response.text
+        assert "function hideAllPanels(options = {})" in response.text
         assert "function blurToolbarFocus()" in response.text
         assert "function selectionInsideToolbar(range)" in response.text
         assert "function selectionInsideAnalysisPanel(range)" in response.text

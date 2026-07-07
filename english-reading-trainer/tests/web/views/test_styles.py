@@ -238,6 +238,13 @@ def test_css_word_card_lexical_type_colors_keep_sentence_state_subtle() -> None:
     assert '[data-word-card][data-lexical-type="phrase"]' in css
     assert '[data-word-card][data-lexical-type="collocation"]' in css
     assert '[data-word-card][data-lexical-type="idiom"]' in css
+    selected = _css_block(
+        css,
+        "[data-sentence-id].analysis-selected {",
+        "[data-sentence-id].analysis-highlight-fallback {",
+    )
+    assert "background: rgba(15, 143, 131, 0.12);" in selected
+    assert "box-shadow: 0 0 0 2px rgba(15, 143, 131, 0.18);" in selected
     assert "rgba(16, 185, 129" in css
     assert "rgba(168, 85, 247" in css
     assert "rgba(249, 115, 22" in css
