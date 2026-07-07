@@ -12,17 +12,31 @@ from app.web.services import imports
 
 
 def test_import_text_bytes_returns_book_id(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_import_text(db, raw, title, author):
+        captured["title"] = title
+        captured["author"] = author
+        return SimpleNamespace(book_id=7)
+
     monkeypatch.setattr(
         imports,
         "import_text",
-        lambda db, raw, title, author: SimpleNamespace(book_id=7),
+        fake_import_text,
     )
 
-    outcome = imports.import_text_bytes(object(), b"Hello.", form_title="", author=" A ")
+    outcome = imports.import_text_bytes(
+        object(),
+        b"Movie Scripts\n\nHello.",
+        form_title="",
+        author=" A ",
+        fallback_title="The_escappe_plan_lines",
+    )
 
     assert outcome.book_id == 7
     assert not outcome.is_error
     assert not outcome.is_duplicate
+    assert captured == {"title": "The_escappe_plan_lines", "author": "A"}
 
 
 def test_import_text_bytes_maps_duplicate_to_existing_book(monkeypatch) -> None:

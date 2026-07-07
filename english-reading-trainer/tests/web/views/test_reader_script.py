@@ -63,7 +63,7 @@ def test_paragraph_shortcut_and_toolbar_contracts() -> None:
     assert '"Open stale analysis"' in script
     assert '"Open analysis panel"' in script
     assert "paragraphAnalyze.textContent = paragraphAnalysisButtonLabel(paragraph);" in script
-    assert 'const isParagraph = event.code === "KeyP";' in shortcut
+    assert 'readerShortcutMatches(event, "KeyP", "p")' in shortcut
     assert "paragraphShortcutIsBlocked(event)" in shortcut
     assert "showParagraphToolbar(paragraph);" in shortcut
     assert "hideToolbar();" in script[script.index("function showParagraphToolbar") :]
@@ -1268,6 +1268,26 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
     assert "showMarkedSentenceToolbar(sentence);" in click_handler
 
 
+def test_open_sentence_panel_follows_whole_sentence_selection_without_hiding_toolbar() -> None:
+    script = _selection_script()
+    helper = script[script.index("function syncOpenSentencePanelToSentence"):]
+    helper = helper[: helper.index("function selectedWordCardIds")]
+    switch_helper = script[script.index("function switchOpenEditorToSentence"):]
+    switch_helper = switch_helper[: switch_helper.index("function maybeSwitchOpenEditorToSelectedSentence")]
+    marked_toolbar = script[script.index("function showMarkedSentenceToolbar"):]
+    marked_toolbar = marked_toolbar[: marked_toolbar.index("function openTranslatedSentenceShortcut")]
+    selection_handler = script[script.index("function updateToolbar()"):]
+    selection_handler = selection_handler[: selection_handler.index("function readProgress()")]
+
+    assert 'panel.hidden || panelMode !== "sentence"' in helper
+    assert 'String(activeAnalysisSentenceId || "") === String(sentence.dataset.sentenceId)' in helper
+    assert 'renderSentenceStudyPanel(sentence, message, toolbarInteractionSeq - 1);' in helper
+    assert "syncOpenSentencePanelToSentence(sentence);" in switch_helper
+    assert "syncOpenSentencePanelToSentence(sentence);" in marked_toolbar
+    assert "if (wholeSentence)" in selection_handler
+    assert "syncOpenSentencePanelToSentence(sentence);" in selection_handler
+
+
 def test_translation_editor_repositions_after_expanding() -> None:
     script = _selection_script()
     position_toolbar = script[script.index("function positionToolbar(anchor)"):]
@@ -1379,6 +1399,7 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     assert "function lastClickedSentence()" in script
     assert "function recordClickedSentenceTarget(event)" in script
     assert "function selectWholeSentence(sentence)" in script
+    assert "function readerShortcutMatches(event, code, key)" in script
     assert 'reader.addEventListener("pointerdown", recordClickedSentenceTarget);' in script
     assert 'document.addEventListener("keydown", handleReaderShortcut);' in script
     # macOS global hotkey tools steal modifier combos, so the shortcut uses bare keys:
@@ -1388,8 +1409,9 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     assert "event.metaKey" in shortcut
     assert "event.isComposing" in shortcut
     # Match the physical key via event.code rather than event.key (layout-independent).
-    assert 'event.code === "KeyS"' in shortcut
-    assert 'event.code === "KeyT"' in shortcut
+    assert 'readerShortcutMatches(event, "KeyS", "s")' in shortcut
+    assert 'readerShortcutMatches(event, "KeyT", "t")' in shortcut
+    assert 'event.code === code || (event.key || "").toLowerCase() === key' in script
     assert "eventTargetIsTextInput(event)" in shortcut
     assert "range.selectNodeContents(sentence);" in script
     assert "selection.removeAllRanges();" in script

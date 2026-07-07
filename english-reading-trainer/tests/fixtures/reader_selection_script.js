@@ -892,6 +892,7 @@
           structureEditorDirty = false;
           setToolbarStatus(structureStatus, "");
         }
+        syncOpenSentencePanelToSentence(sentence);
         setEditingTarget(sentence);
         positionToolbar(sentence.getBoundingClientRect());
       }
@@ -900,6 +901,15 @@
         const sentence = selectedWholeSentenceFromCurrentSelection();
         if (!sentence) return;
         switchOpenEditorToSentence(sentence);
+      }
+
+      function syncOpenSentencePanelToSentence(sentence) {
+        if (!sentence?.dataset.sentenceId || !panel || panel.hidden || panelMode !== "sentence") return;
+        if (String(activeAnalysisSentenceId || "") === String(sentence.dataset.sentenceId)) return;
+        const message = sentence.dataset.analysisId
+          ? "Selected sentence loaded. Use the toolbar to open or recheck the saved AI analysis."
+          : "No saved AI analysis yet.";
+        renderSentenceStudyPanel(sentence, message, toolbarInteractionSeq - 1);
       }
 
       function selectedWordCardIds(range) {
@@ -995,15 +1005,20 @@
         lastClickedSentenceId = sentence?.dataset.sentenceId || null;
       }
 
+      function readerShortcutMatches(event, code, key) {
+        return event.code === code || (event.key || "").toLowerCase() === key;
+      }
+
       function handleReaderShortcut(event) {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
         if (event.isComposing || eventTargetIsTextInput(event)) return;
         // macOS global hotkey tools intercept every modifier combo (Option+S/T were stolen),
         // so use bare physical keys matched via event.code (layout- and modifier-independent).
-        // The reader text is non-editable, so plain S/T never collide with typing here.
-        const isSelect = event.code === "KeyS";
-        const isTranslate = event.code === "KeyT";
-        const isParagraph = event.code === "KeyP";
+        // Some browsers and automation paths only populate event.key, so keep a key fallback.
+        // The reader text is non-editable, so plain S/T/P never collide with typing here.
+        const isSelect = readerShortcutMatches(event, "KeyS", "s");
+        const isTranslate = readerShortcutMatches(event, "KeyT", "t");
+        const isParagraph = readerShortcutMatches(event, "KeyP", "p");
         if (!isSelect && !isTranslate && !isParagraph) return;
         event.preventDefault();
         if (isParagraph) {
@@ -1763,6 +1778,7 @@
         analysisOpen.textContent = analysisButtonLabel(sentence);
         configureCrossSentenceActions([]);
         setVisible(sentenceForm, true);
+        syncOpenSentencePanelToSentence(sentence);
         positionToolbar(sentence.getBoundingClientRect());
       }
 
@@ -2091,6 +2107,7 @@
         configureCrossSentenceActions([]);
         if (wholeSentence) {
           setVisible(sentenceForm, true);
+          syncOpenSentencePanelToSentence(sentence);
         } else if (activeWordCardId) {
           const detailSpan = reader.querySelector(`[data-word-card="${activeWordCardId}"]`);
           if (detailSpan) {

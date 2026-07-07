@@ -273,6 +273,7 @@ def _css() -> str:
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
       font-size: 20px;
       line-height: 1.8;
+      overflow-wrap: anywhere;
     }
     .reader-para.logic-selected {
       border-radius: var(--radius-sm);
@@ -327,6 +328,7 @@ def _css() -> str:
     .reader-md-list-item {
       margin: 0.28em 0;
       padding-left: 0.25em;
+      overflow-wrap: anywhere;
     }
     .reader-figure {
       margin: 28px 0;
@@ -364,6 +366,7 @@ def _css() -> str:
       cursor: text;
       scroll-margin-top: 72px;
       text-underline-offset: 0.22em;
+      overflow-wrap: anywhere;
     }
     .reader-sentence.editing-target {
       background: rgba(96, 165, 250, 0.16);

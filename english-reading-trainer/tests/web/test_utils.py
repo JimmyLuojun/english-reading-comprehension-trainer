@@ -16,3 +16,16 @@ def test_resolve_title_prefers_form_title() -> None:
 def test_resolve_title_uses_first_line_or_fallback() -> None:
     assert _resolve_title("", b"  First line\nSecond") == "First line"
     assert _resolve_title("", b"   \n") == "Imported Text"
+
+
+def test_resolve_title_prefers_meaningful_filename_fallback_before_first_line() -> None:
+    assert _resolve_title(
+        "",
+        b"Movie Scripts\n\nBody.",
+        fallback_title="The_escappe_plan_lines",
+    ) == "The_escappe_plan_lines"
+
+
+def test_resolve_title_ignores_throwaway_filename_fallback() -> None:
+    assert _resolve_title("", b"First line\nBody.", fallback_title="a") == "First line"
+    assert _resolve_title("", b"First line\nBody.", fallback_title="tmp110d0ebd") == "First line"

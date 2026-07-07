@@ -2691,7 +2691,22 @@ class TestImportRoutes:
             count = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
         assert count == 1
 
-    def test_import_file_auto_title_from_first_line(
+    def test_import_file_auto_title_from_filename_stem(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        content = b"The Grand Adventure\n\nThis story begins on a cold day."
+        client.post(
+            "/import/file",
+            files={"file": ("The_escappe_plan_lines.txt", content, "text/plain")},
+            data={"title": "", "author": ""},
+            follow_redirects=False,
+        )
+
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT title FROM books LIMIT 1").fetchone()
+        assert row["title"] == "The_escappe_plan_lines"
+
+    def test_import_file_auto_title_from_first_line_for_throwaway_filename(
         self, client: TestClient, db: DatabaseConnection
     ) -> None:
         content = b"The Grand Adventure\n\nThis story begins on a cold day."

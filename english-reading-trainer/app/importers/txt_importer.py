@@ -179,9 +179,64 @@ def _split_chapters(text: str) -> list[dict]:
 
 
 def _split_paragraphs(body: str) -> list[str]:
-    """Split chapter body into non-empty paragraphs on blank lines."""
+    """Split chapter body into non-empty paragraphs."""
     blocks = re.split(r"\n{2,}", body)
-    return [b.strip() for b in blocks if b.strip()]
+    paragraphs: list[str] = []
+    for block in blocks:
+        if not block.strip():
+            continue
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if _looks_like_line_based_text(lines):
+            paragraphs.extend(_line_based_paragraphs(lines))
+        else:
+            paragraphs.append(_normalize_paragraph_text(block))
+    return paragraphs
+
+
+def _normalize_paragraph_text(text: str) -> str:
+    """Collapse TXT hard line breaks inside a paragraph into normal spaces."""
+    return re.sub(r"[ \t\r\n]+", " ", text).strip()
+
+
+def _looks_like_line_based_text(lines: list[str]) -> bool:
+    """Detect script/subtitle-style TXT blocks where physical lines are semantic."""
+    if len(lines) < 6:
+        return False
+    short_lines = sum(1 for line in lines if len(line) <= 64)
+    return short_lines / len(lines) >= 0.75
+
+
+def _line_based_paragraphs(lines: list[str]) -> list[str]:
+    """Group short TXT lines into readable utterance paragraphs."""
+    paragraphs: list[str] = []
+    pending: list[str] = []
+    for line in lines:
+        if _line_is_standalone_break(line):
+            if pending:
+                paragraphs.append(_normalize_paragraph_text(" ".join(pending)))
+                pending = []
+            paragraphs.append(_normalize_paragraph_text(line))
+            continue
+        pending.append(line)
+        if _line_ends_utterance(line):
+            paragraphs.append(_normalize_paragraph_text(" ".join(pending)))
+            pending = []
+    if pending:
+        paragraphs.append(_normalize_paragraph_text(" ".join(pending)))
+    return paragraphs
+
+
+def _line_ends_utterance(line: str) -> bool:
+    return bool(re.search(r"""[.!?…]['")\]]*$""", line.strip()))
+
+
+def _line_is_standalone_break(line: str) -> bool:
+    stripped = line.strip()
+    return (
+        stripped.isdigit()
+        or ">" in stripped
+        or bool(re.search(r"\(\d{4}\)$", stripped))
+    )
 
 
 def _sha256(data: bytes) -> str:

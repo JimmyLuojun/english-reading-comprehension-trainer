@@ -20,6 +20,8 @@ from app.importers.txt_importer import (
     DuplicateBookError,
     ImportResult,
     _is_heading,
+    _line_based_paragraphs,
+    _normalize_paragraph_text,
     _split_chapters,
     _text_hash,
     import_text,
@@ -254,6 +256,12 @@ class TestImportTxtChapters:
 
 
 class TestImportTxtParagraphs:
+    def test_normalizes_single_line_breaks_inside_paragraph(self) -> None:
+        text = "Jax has got\nthe jump on you tomorrow.\nTwo bell."
+        assert _normalize_paragraph_text(text) == (
+            "Jax has got the jump on you tomorrow. Two bell."
+        )
+
     def test_blank_line_splits_paragraphs(self, db: DatabaseConnection, tmp_path: Path) -> None:
         text = "First paragraph sentence.\n\nSecond paragraph sentence."
         f = write_txt(tmp_path, "book.txt", text)
@@ -271,6 +279,89 @@ class TestImportTxtParagraphs:
         f = write_txt(tmp_path, "book.txt", text)
         result = import_txt(db, f, title="Book")
         assert result.paragraph_count == 1
+
+    def test_imported_sentence_text_collapses_subtitle_line_breaks(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        text = "Jax has got\nthe jump on you tomorrow.\nTwo bell."
+        f = write_txt(tmp_path, "book.txt", text)
+        result = import_txt(db, f, title="Book")
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT text FROM sentences WHERE book_id = ? ORDER BY idx",
+                (result.book_id,),
+            ).fetchall()
+        assert [row["text"] for row in rows] == [
+            "Jax has got the jump on you tomorrow.",
+            "Two bell.",
+        ]
+
+    def test_line_based_script_lines_become_readable_paragraphs(self) -> None:
+        lines = [
+            'Movie Scripts   >   "E" page 27   >   Escape Plan (2013)',
+            "Escape Plan (2013)",
+            "1",
+            "Yo, are you up?",
+            "Yeah.",
+            "Jax has got",
+            "the jump on you tomorrow.",
+            "Two bell.",
+            "Yo. Did you hear",
+            "what I said?",
+        ]
+
+        assert _line_based_paragraphs(lines) == [
+            'Movie Scripts > "E" page 27 > Escape Plan (2013)',
+            "Escape Plan (2013)",
+            "1",
+            "Yo, are you up?",
+            "Yeah.",
+            "Jax has got the jump on you tomorrow.",
+            "Two bell.",
+            "Yo. Did you hear what I said?",
+        ]
+
+    def test_imported_script_style_txt_uses_line_paragraphs(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        text = "\n".join(
+            [
+                "Yo, are you up?",
+                "Yeah.",
+                "Jax has got",
+                "the jump on you tomorrow.",
+                "Two bell.",
+                "I figure I owe you.",
+                "Yo. Did you hear",
+                "what I said?",
+                "I heard.",
+            ]
+        )
+        f = write_txt(tmp_path, "script.txt", text)
+        result = import_txt(db, f, title="Script")
+
+        with db.get_connection() as conn:
+            paragraph_count = conn.execute(
+                "SELECT COUNT(*) FROM paragraphs p "
+                "JOIN chapters c ON p.chapter_id = c.id WHERE c.book_id = ?",
+                (result.book_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT text FROM sentences WHERE book_id = ? ORDER BY idx",
+                (result.book_id,),
+            ).fetchall()
+
+        assert paragraph_count == 7
+        assert [row["text"] for row in rows] == [
+            "Yo, are you up?",
+            "Yeah.",
+            "Jax has got the jump on you tomorrow.",
+            "Two bell.",
+            "I figure I owe you.",
+            "Yo.",
+            "Did you hear what I said?",
+            "I heard.",
+        ]
 
 
 class TestImportTxtHashes:
@@ -304,8 +395,8 @@ class TestImportTxtHashes:
         sentence = "The quick brown fox."
         f1 = write_txt(tmp_path, "book1.txt", sentence)
         f2 = write_txt(tmp_path, "book2.txt", sentence + " Extra content.")
-        r1 = import_txt(db, f1, title="Book 1")
-        r2 = import_txt(db, f2, title="Book 2")
+        import_txt(db, f1, title="Book 1")
+        import_txt(db, f2, title="Book 2")
         with db.get_connection() as conn:
             hashes = conn.execute(
                 "SELECT text_hash FROM sentences WHERE text = ?", (sentence,)

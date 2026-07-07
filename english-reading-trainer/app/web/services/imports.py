@@ -91,9 +91,10 @@ def import_text_bytes(
     *,
     form_title: str,
     author: str,
+    fallback_title: str = "",
 ) -> ImportOutcome:
     """Import raw TXT bytes and return a routing-neutral outcome."""
-    title = _resolve_title(form_title, raw)
+    title = _resolve_title(form_title, raw, fallback_title=fallback_title)
     try:
         result = import_text(db, raw, title=title, author=author.strip())
     except DuplicateBookError:

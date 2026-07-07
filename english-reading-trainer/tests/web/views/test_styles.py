@@ -70,6 +70,10 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "pointer-events: none;" in css
     assert "--reader-max-width: 840px" in css
     assert "max-width: var(--reader-max-width)" in css
+    assert ".reader-para {\n      margin: 0 0 1.2em;" in css
+    assert ".reader-sentence {\n      cursor: text;" in css
+    assert ".reader-md-list-item {\n      margin: 0.28em 0;" in css
+    assert css.count("overflow-wrap: anywhere;") >= 4
     assert "#toolbar-analysis-word-status" in css
     assert ".toolbar-status {\n      flex: 1 0 100%;" in css
     assert "height: 28px;" in css

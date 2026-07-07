@@ -125,6 +125,7 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 raw,
                 form_title=title,
                 author=author,
+                fallback_title=_upload_title_stem(file.filename or ""),
             )
         )
 
