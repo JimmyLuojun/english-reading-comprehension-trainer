@@ -11,6 +11,7 @@ from app.web.views.layout import _escape
 from app.web.views.reader_script import _selection_script
 
 _INLINE_MARKDOWN_IMAGE_RE = re.compile(r"\[\[md-image:(\d+)\]\]")
+_WORD_BOUNDARY_CHARS = r"A-Za-z0-9"
 
 def _reader_view(
     rows: list[dict[str, Any]],
@@ -340,15 +341,10 @@ def _highlight_word_cards(
 
     matches: list[tuple[int, int, dict[str, Any]]] = []
     for card in word_cards:
-        start = card.get("start_offset")
-        end = card.get("end_offset")
-        if start is None or end is None:
+        source_range = _word_card_source_range(text, card)
+        if source_range is None:
             continue
-        start = int(start)
-        end = int(end)
-        if start < 0 or end <= start or end > len(text):
-            continue
-        matches.append((start, end, card))
+        matches.append((*source_range, card))
 
     selected: list[tuple[int, int, dict[str, Any]]] = []
     occupied_until = -1
@@ -383,6 +379,53 @@ def _highlight_word_cards(
         cursor = end
     pieces.append(_escape(text[cursor:]))
     return _render_inline_markdown_images("".join(pieces), book_id)
+
+
+def _word_card_source_range(text: str, card: dict[str, Any]) -> tuple[int, int] | None:
+    start = card.get("start_offset")
+    end = card.get("end_offset")
+    if start is not None and end is not None:
+        start = int(start)
+        end = int(end)
+        if start < 0 or end <= start or end > len(text):
+            return None
+        return start, end
+    if start is not None or end is not None:
+        return None
+    return _infer_unique_word_card_source_range(text, card)
+
+
+def _infer_unique_word_card_source_range(text: str, card: dict[str, Any]) -> tuple[int, int] | None:
+    for term in _word_card_candidate_terms(card):
+        match = _unique_reader_term_match(text, term)
+        if match is not None:
+            return match.span(1)
+    return None
+
+
+def _word_card_candidate_terms(card: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key in ("selected_text", "surface_form", "lemma"):
+        term = str(card.get(key) or "").strip()
+        normalized = term.casefold()
+        if not term or normalized in seen:
+            continue
+        seen.add(normalized)
+        terms.append(term)
+    return terms
+
+
+def _unique_reader_term_match(text: str, term: str) -> re.Match[str] | None:
+    escaped = re.escape(term).replace(r"\ ", r"\s+")
+    pattern = re.compile(
+        rf"(?<![{_WORD_BOUNDARY_CHARS}])({escaped})(?![{_WORD_BOUNDARY_CHARS}])",
+        re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def _render_inline_markdown_images(html: str, book_id: int) -> str:

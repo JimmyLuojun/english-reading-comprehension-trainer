@@ -62,15 +62,86 @@ def test_highlight_word_cards_uses_exact_source_offsets() -> None:
     assert ">long</span>" in html
 
 
-def test_highlight_word_cards_ignores_sources_without_offsets() -> None:
+def test_highlight_word_cards_infers_unique_source_without_offsets() -> None:
     html = _highlight_word_cards(
-        "long term memory",
-        [{"id": 1, "surface_form": "long", "lexical_type": "word", "current_meaning": "", "user_note": ""}],
+        "The first count in the indictment...",
+        [
+            {
+                "id": 1,
+                "source_id": 11,
+                "surface_form": "indictment",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            }
+        ],
+        7,
+    )
+
+    assert html.count('data-word-card="1"') == 1
+    assert 'data-source-start="23"' in html
+    assert 'data-source-end="33"' in html
+    assert ">indictment</span>..." in html
+
+
+def test_highlight_word_cards_uses_selected_text_when_surface_is_stale() -> None:
+    html = _highlight_word_cards(
+        "The first count in the indictment...",
+        [
+            {
+                "id": 1,
+                "source_id": 11,
+                "selected_text": "indictment",
+                "surface_form": "count",
+                "lemma": "count",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            }
+        ],
+        7,
+    )
+
+    assert html.count('data-word-card="1"') == 1
+    assert ">indictment</span>..." in html
+
+
+def test_highlight_word_cards_leaves_ambiguous_no_offset_source_plain() -> None:
+    html = _highlight_word_cards(
+        "long term memory long",
+        [
+            {
+                "id": 1,
+                "surface_form": "long",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            }
+        ],
         7,
     )
 
     assert 'data-word-card="1"' not in html
-    assert html == "long term memory"
+    assert html == "long term memory long"
+
+
+def test_highlight_word_cards_does_not_infer_inside_larger_word() -> None:
+    html = _highlight_word_cards(
+        "concatenate values",
+        [
+            {
+                "id": 1,
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "current_meaning": "",
+                "user_note": "",
+            }
+        ],
+        7,
+    )
+
+    assert 'data-word-card="1"' not in html
+    assert html == "concatenate values"
 
 
 def test_highlight_word_cards_ignores_invalid_and_overlapping_offsets() -> None:
