@@ -695,22 +695,12 @@ def _css() -> str:
       border-bottom: 1px solid var(--line);
       background: var(--surface);
       box-shadow: 0 10px 18px rgba(15, 23, 42, 0.05);
-      transition: box-shadow 0.16s ease, max-height 0.16s ease, padding 0.16s ease,
-        width 0.16s ease;
+      transition: box-shadow 0.16s ease, border-color 0.16s ease;
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
       .analysis-panel-header:not(:focus-within) {
-      width: var(--analysis-panel-tools-handle-width);
-      min-height: var(--analysis-panel-tools-handle-width);
-      max-height: var(--analysis-panel-tools-handle-width);
-      margin: calc(-1 * var(--analysis-panel-padding))
-        calc(-1 * var(--analysis-panel-padding)) 8px auto;
-      padding: 0;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-right: 0;
-      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-      box-shadow: -8px 0 20px rgba(15, 23, 42, 0.12);
+      box-shadow: none;
+      border-bottom-color: transparent;
       cursor: pointer;
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
@@ -722,9 +712,17 @@ def _css() -> str:
       .analysis-panel-header:not(:focus-within)::after {
       content: "...";
       position: absolute;
-      inset: 0;
+      top: 8px;
+      right: 8px;
+      width: var(--analysis-panel-tools-handle-width);
+      height: var(--analysis-panel-tools-handle-width);
       display: grid;
       place-items: center;
+      border: 1px solid var(--line);
+      border-right: 0;
+      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      background: var(--surface);
+      box-shadow: -8px 0 20px rgba(15, 23, 42, 0.12);
       color: var(--accent-strong);
       font-size: 22px;
       line-height: 1;

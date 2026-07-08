@@ -66,6 +66,15 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert ".analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)" in css
     assert ".analysis-panel-header:not(:focus-within)" in css
     assert ".analysis-panel-header:not(:hover):not(:focus-within)" not in css
+    collapsed_header = css[
+        css.index(".analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)")
+        : css.index(".analysis-panel-header h2")
+    ]
+    assert "width: var(--analysis-panel-tools-handle-width);" in collapsed_header
+    assert "min-height: var(--analysis-panel-tools-handle-width);" not in collapsed_header
+    assert "max-height: var(--analysis-panel-tools-handle-width);" not in collapsed_header
+    assert "padding: 0;" not in collapsed_header
+    assert "margin: calc(-1 * var(--analysis-panel-padding))" not in collapsed_header
     assert 'content: "...";' in css
     assert "cursor: pointer;" in css
     assert "pointer-events: none;" in css

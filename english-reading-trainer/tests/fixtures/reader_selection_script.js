@@ -268,6 +268,8 @@
       let analysisSeq = 0;
       let toolbarRepositionFrame = null;
       let selectionChangeFrame = null;
+      let selectionSettleTimer = null;
+      let selectionPointerActive = false;
       let analysisToolsFrame = null;
       let pendingAnalysisToolsPeek = false;
       let analysisToolsCollapsed = false;
@@ -844,6 +846,34 @@
         const selection = window.getSelection();
         return selectionIntersectsElement(selection, reader)
           || selectionIntersectsElement(selection, panel);
+      }
+
+      function clearSelectionSettleTimer() {
+        if (selectionSettleTimer !== null) {
+          window.clearTimeout(selectionSettleTimer);
+          selectionSettleTimer = null;
+        }
+      }
+
+      function scheduleSelectionToolbarSettle(delay = 80) {
+        clearSelectionSettleTimer();
+        selectionSettleTimer = window.setTimeout(() => {
+          selectionSettleTimer = null;
+          scheduleToolbarUpdateFromSelectionChange();
+        }, delay);
+      }
+
+      function beginSelectionPointerGesture(event) {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (!event.target?.closest?.("[data-reader], #analysis-panel")) return;
+        selectionPointerActive = true;
+        clearSelectionSettleTimer();
+      }
+
+      function endSelectionPointerGesture() {
+        if (!selectionPointerActive) return;
+        selectionPointerActive = false;
+        scheduleSelectionToolbarSettle(80);
       }
 
       function switchOpenEditorToSentence(sentence) {
@@ -2151,6 +2181,10 @@
       }
 
       function scheduleToolbarUpdateFromSelectionChange() {
+        if (selectionPointerActive) {
+          scheduleSelectionToolbarSettle(120);
+          return;
+        }
         if (selectionChangeFrame) return;
         selectionChangeFrame = window.requestAnimationFrame(() => {
           selectionChangeFrame = null;
@@ -5562,6 +5596,9 @@
         openTranslatedSentenceShortcut(sentence);
       });
       document.addEventListener("keydown", handleReaderShortcut);
+      document.addEventListener("pointerdown", beginSelectionPointerGesture, { capture: true });
+      document.addEventListener("pointerup", endSelectionPointerGesture, { capture: true });
+      document.addEventListener("pointercancel", endSelectionPointerGesture, { capture: true });
       document.addEventListener("selectionchange", scheduleToolbarUpdateFromSelectionChange);
       if ("ResizeObserver" in window) {
         const toolbarResizeObserver = new ResizeObserver(() => scheduleToolbarReposition());

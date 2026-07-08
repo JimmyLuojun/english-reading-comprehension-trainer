@@ -157,15 +157,34 @@ def test_analysis_panel_toolbar_auto_collapses_and_peeks() -> None:
 
 def test_selection_toolbar_updates_are_animation_frame_coalesced() -> None:
     script = _selection_script()
+    pointer_helpers = script[script.index("function beginSelectionPointerGesture") :]
+    pointer_helpers = pointer_helpers[: pointer_helpers.index("function switchOpenEditorToSentence")]
     scheduler = script[script.index("function scheduleToolbarUpdateFromSelectionChange") :]
     scheduler = scheduler[: scheduler.index("function readProgress")]
     scroll_listener = script[script.index('window.addEventListener("scroll"'):]
     scroll_listener = scroll_listener[: scroll_listener.index("if (window.visualViewport)")]
 
     assert "let selectionChangeFrame = null;" in script
+    assert "let selectionSettleTimer = null;" in script
+    assert "let selectionPointerActive = false;" in script
+    assert 'event.target?.closest?.("[data-reader], #analysis-panel")' in pointer_helpers
+    assert 'event.target?.closest?.("#reader, #analysis-panel")' not in script
+    assert "selectionPointerActive = true;" in pointer_helpers
+    assert "selectionPointerActive = false;" in pointer_helpers
+    assert "scheduleSelectionToolbarSettle(80);" in pointer_helpers
+    assert "if (selectionPointerActive)" in scheduler
+    assert "scheduleSelectionToolbarSettle(120);" in scheduler
     assert "if (selectionChangeFrame) return;" in scheduler
     assert "selectionChangeFrame = window.requestAnimationFrame(() => {" in scheduler
     assert "updateToolbar();" in scheduler
+    assert (
+        'document.addEventListener("pointerdown", beginSelectionPointerGesture, { capture: true });'
+        in script
+    )
+    assert (
+        'document.addEventListener("pointerup", endSelectionPointerGesture, { capture: true });'
+        in script
+    )
     assert (
         'document.addEventListener("selectionchange", scheduleToolbarUpdateFromSelectionChange);'
         in script
