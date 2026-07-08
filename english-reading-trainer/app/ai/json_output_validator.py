@@ -12,8 +12,19 @@ retry logic without knowing parsing details.
 """
 
 import json
+import re
 import jsonschema
 from jsonschema import ValidationError
+
+
+_ADVERBIAL_FRAGMENT_RE = re.compile(
+    r"^(?:if|when|while|although|though|because|since|unless|once|after|before|as)\b",
+    re.IGNORECASE,
+)
+_NOUN_FRAGMENT_RE = re.compile(
+    r"^(?:that|what|whether|who|whom|whose|which|why|how)\b",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +91,8 @@ def _semantic_validate(data: object, schema: dict) -> None:
     Run semantic checks that JSON Schema cannot express.
 
     Currently enforces:
-      - Sentence analysis: clauses must contain at least one 'main' entry.
+      - Sentence analysis: clauses must contain at least one 'main' entry,
+        except standalone dialogue/import fragments such as "If..." or "that...".
     """
     if not isinstance(data, dict):
         return
@@ -89,7 +101,7 @@ def _semantic_validate(data: object, schema: dict) -> None:
     if "clauses" in data and "subject_skeleton" in data:
         clauses = data.get("clauses", [])
         main_clauses = [c for c in clauses if isinstance(c, dict) and c.get("type") == "main"]
-        if not main_clauses:
+        if not main_clauses and not _is_supported_sentence_fragment(clauses):
             raise ValidationError(
                 "Semantic check failed: 'clauses' must contain at least one "
                 "entry with type='main'."
@@ -116,3 +128,18 @@ def _semantic_validate(data: object, schema: dict) -> None:
                 "Semantic check failed: every diagnosed_error_types code must "
                 f"have matching diagnosis_evidence. Missing: {missing_evidence}."
             )
+
+
+def _is_supported_sentence_fragment(clauses: object) -> bool:
+    if not isinstance(clauses, list) or len(clauses) != 1:
+        return False
+    clause = clauses[0]
+    if not isinstance(clause, dict):
+        return False
+    clause_type = clause.get("type")
+    clause_text = str(clause.get("text") or "").strip()
+    if clause_type == "adverbial":
+        return _ADVERBIAL_FRAGMENT_RE.match(clause_text) is not None
+    if clause_type == "noun":
+        return _NOUN_FRAGMENT_RE.match(clause_text) is not None
+    return False

@@ -135,6 +135,82 @@ def test_analyze_sentence_for_reader_maps_invalid_ai_response(monkeypatch) -> No
     }
 
 
+def test_analyze_sentence_for_reader_saves_user_translation(monkeypatch) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    saved: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_sentence_translation",
+        lambda db, sentence_id, value: saved.update(
+            sentence_id=sentence_id,
+            value=value,
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": "猫坐着。"},
+    )
+    monkeypatch.setattr(analysis, "_fetch_cache_metadata", lambda db, cache_id: {})
+    monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v7")
+    monkeypatch.setattr(analysis, "save_sentence_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_analysis_payload",
+        lambda db, sentence_id: {"ok": True, "is_stale": False},
+    )
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_sentence",
+        lambda *args, **kwargs: SimpleNamespace(
+            data={},
+            cache_id=1,
+            from_cache=False,
+            is_stale=False,
+            is_valid=True,
+        ),
+    )
+
+    outcome = analysis.analyze_sentence_for_reader(
+        object(),
+        1,
+        user_translation="猫坐着。",
+    )
+
+    assert outcome.is_error is False
+    assert saved == {"sentence_id": 1, "value": "猫坐着。"}
+
+
+def test_analyze_sentence_for_reader_maps_runtime_error(monkeypatch) -> None:
+    import app.web.fastapi_app as fastapi_app
+
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The cat sat.", "user_translation": ""},
+    )
+    monkeypatch.setattr(
+        fastapi_app,
+        "analyze_sentence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+
+    outcome = analysis.analyze_sentence_for_reader(
+        object(),
+        1,
+        user_translation=None,
+    )
+
+    assert outcome.status_code == 502
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "provider down",
+        "retry": True,
+    }
+
+
 def test_analyze_paragraph_logic_for_reader_returns_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         analysis,
@@ -584,6 +660,17 @@ def test_build_external_word_prompt_for_card_uses_note(monkeypatch) -> None:
     assert "learner note: 不是名词 evidence" in payload["prompt"]
 
 
+def test_build_external_word_prompt_for_card_rejects_missing_card(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
+
+    try:
+        analysis.build_external_word_prompt_for_card(object(), 7)
+    except ValueError as exc:
+        assert str(exc) == "Word card not found."
+    else:
+        raise AssertionError("Expected ValueError")
+
+
 def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -670,6 +757,123 @@ def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
     assert captured["attach_args"][1]["surface_form"] == "evidenced"
 
 
+def test_save_external_word_selection_returns_attach_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_validated_word_selection",
+        lambda *args, **kwargs: {
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": None,
+            "end_offset": None,
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        ),
+    )
+    monkeypatch.setattr(analysis, "create_or_update_word_card", lambda *a, **k: (7, True))
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            error="attach failed",
+            status_code=500,
+            retry=True,
+        ),
+    )
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        lexical_type="word",
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 500
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "attach failed",
+        "retry": True,
+    }
+
+
+def test_save_external_word_selection_maps_selection_value_error(monkeypatch) -> None:
+    def fail_selection(*args, **kwargs):
+        raise ValueError("surface_form must not be empty.")
+
+    monkeypatch.setattr(analysis, "_validated_word_selection", fail_selection)
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="",
+        lexical_type="word",
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "surface_form must not be empty.",
+        "retry": False,
+    }
+
+
+def test_save_external_word_selection_reports_missing_saved_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_validated_word_selection",
+        lambda *args, **kwargs: {
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": None,
+            "end_offset": None,
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        ),
+    )
+    monkeypatch.setattr(analysis, "create_or_update_word_card", lambda *a, **k: (7, True))
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(payload={"ok": True}),
+    )
+    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", lambda db, card_id: None)
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        lexical_type="word",
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 500
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "External word analysis was not saved.",
+        "retry": True,
+    }
+
+
 def test_save_external_word_card_returns_404_for_missing_card(monkeypatch) -> None:
     monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
 
@@ -681,6 +885,180 @@ def test_save_external_word_card_returns_404_for_missing_card(monkeypatch) -> No
 
     assert outcome.status_code == 404
     assert outcome.error_payload() == {"ok": False, "error": "Word card not found."}
+
+
+def test_save_external_word_card_returns_validation_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "evidenced",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            error="bad word JSON",
+            status_code=400,
+            retry=False,
+        ),
+    )
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="not json",
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "bad word JSON",
+        "retry": False,
+    }
+
+
+def test_save_external_word_card_returns_attach_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "evidenced",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            error="attach failed",
+            status_code=500,
+            retry=True,
+        ),
+    )
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 500
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "attach failed",
+        "retry": True,
+    }
+
+
+def test_save_external_word_card_reports_missing_saved_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "evidenced",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(payload={"ok": True}),
+    )
+    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", lambda db, card_id: None)
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 500
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "External word analysis was not saved.",
+        "retry": True,
+    }
+
+
+def test_save_external_word_card_returns_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "evidenced",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v5",
+                "sentence_text": "The blocker was evidenced clearly.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_attach_external_word_analysis",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(payload={"ok": True}),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id: {"ok": True, "card_id": card_id, "is_stale": True},
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_word_card_payload",
+        lambda db, card_id: {"id": card_id, "surface_form": "evidenced"},
+    )
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload == {
+        "ok": True,
+        "card_id": 7,
+        "is_stale": False,
+        "from_cache": False,
+        "word_card": {"id": 7, "surface_form": "evidenced"},
+    }
 
 
 def test_save_external_word_selection_preserves_selected_card_when_lemma_differs(
@@ -744,6 +1122,255 @@ def test_save_external_word_selection_rejects_invalid_json_before_card_create(
     with db.get_connection() as conn:
         count = conn.execute("SELECT COUNT(*) AS count FROM word_cards").fetchone()["count"]
     assert count == 0
+
+
+def test_validate_external_word_json_reports_missing_json() -> None:
+    outcome = analysis._validate_external_word_json(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        external_result="Only a human explanation.",
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "Paste an external AI reply ending with a ```json code block```.",
+        "retry": False,
+    }
+
+
+def test_validate_external_word_json_reports_missing_sentence(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "_active_word_prompt_version", lambda db: "v5")
+
+    def fail_fetch(db, sentence_id):
+        raise ValueError("Sentence id=9 not found.")
+
+    monkeypatch.setattr(analysis, "_fetch_sentence_for_analysis", fail_fetch)
+
+    outcome = analysis._validate_external_word_json(
+        object(),
+        sentence_id=9,
+        surface_form="evidenced",
+        external_result=json.dumps(_valid_word_analysis()),
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error_payload() == {
+        "ok": False,
+        "error": "Sentence id=9 not found.",
+        "retry": False,
+    }
+
+
+def test_largest_embedded_json_object_skips_invalid_candidates() -> None:
+    pasted = 'Noise {bad json} then {"ok": true, "nested": {"x": 1}}.'
+
+    assert analysis._largest_embedded_json_object(pasted) == (
+        '{"ok": true, "nested": {"x": 1}}'
+    )
+
+
+def test_normalize_external_sentence_json_preserves_invalid_json() -> None:
+    assert analysis._normalize_external_sentence_json('{"bad"') == '{"bad"'
+
+
+def test_normalize_external_sentence_json_preserves_non_object_json() -> None:
+    assert analysis._normalize_external_sentence_json("[1, 2]") == "[1, 2]"
+
+
+def test_sentence_context_text_returns_empty_on_error(monkeypatch) -> None:
+    def fail_info(db, sentence_id):
+        raise RuntimeError("context unavailable")
+
+    monkeypatch.setattr(analysis, "get_sentence_info", fail_info)
+
+    assert analysis._sentence_context_text(object(), 9) == ""
+
+
+def test_validated_word_selection_rejects_empty_surface() -> None:
+    try:
+        analysis._validated_word_selection(
+            object(),
+            sentence_id=9,
+            surface_form=" ",
+            lexical_type="word",
+        )
+    except ValueError as exc:
+        assert str(exc) == "surface_form must not be empty."
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_validated_word_selection_rejects_invalid_lexical_type() -> None:
+    try:
+        analysis._validated_word_selection(
+            object(),
+            sentence_id=9,
+            surface_form="evidenced",
+            lexical_type="bad-kind",
+        )
+    except ValueError as exc:
+        assert str(exc) == "Invalid lexical_type: bad-kind"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_validated_word_selection_rejects_partial_offsets() -> None:
+    try:
+        analysis._validated_word_selection(
+            object(),
+            sentence_id=9,
+            surface_form="evidenced",
+            lexical_type="word",
+            start_offset=16,
+        )
+    except ValueError as exc:
+        assert str(exc) == "selection offsets must include both start and end."
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_validated_word_selection_rejects_out_of_range_offsets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_sentence_for_analysis",
+        lambda db, sentence_id: {"text": "The blocker was evidenced clearly."},
+    )
+
+    try:
+        analysis._validated_word_selection(
+            object(),
+            sentence_id=9,
+            surface_form="evidenced",
+            lexical_type="word",
+            start_offset=16,
+            end_offset=99,
+        )
+    except ValueError as exc:
+        assert str(exc) == "selection offsets are outside the sentence text."
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_word_card_payload_returns_none_for_missing_card(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
+
+    assert analysis._word_card_payload(object(), 7) is None
+
+
+def test_matching_word_source_filters_non_matching_sources(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "list_word_card_sources",
+        lambda db, card_id: [
+            {
+                "id": 1,
+                "sentence_id": 8,
+                "source_key": "evidenced",
+                "start_offset": 16,
+                "end_offset": 25,
+                "selected_text": "evidenced",
+            },
+            {
+                "id": 2,
+                "sentence_id": 9,
+                "source_key": "other",
+                "start_offset": 16,
+                "end_offset": 25,
+                "selected_text": "other",
+            },
+            {
+                "id": 3,
+                "sentence_id": 9,
+                "source_key": "evidenced",
+                "start_offset": 1,
+                "end_offset": 2,
+                "selected_text": "evidenced",
+            },
+            {
+                "id": 4,
+                "sentence_id": 9,
+                "source_key": "evidenced",
+                "start_offset": 16,
+                "end_offset": 25,
+                "selected_text": "evidenced",
+            },
+        ],
+    )
+
+    assert (
+        analysis._matching_word_source(
+            object(),
+            card_id=7,
+            sentence_id=9,
+            surface_form="evidenced",
+            start_offset=None,
+            end_offset=None,
+        )
+        is None
+    )
+
+
+def test_matching_word_source_returns_unoffset_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "list_word_card_sources",
+        lambda db, card_id: [
+            {
+                "id": 5,
+                "sentence_id": 9,
+                "source_key": "evidenced",
+                "start_offset": None,
+                "end_offset": None,
+                "selected_text": None,
+            },
+        ],
+    )
+
+    assert analysis._matching_word_source(
+        object(),
+        card_id=7,
+        sentence_id=9,
+        surface_form=" Evidenced ",
+        start_offset=None,
+        end_offset=None,
+    ) == {
+        "id": 5,
+        "sentence_id": 9,
+        "start_offset": None,
+        "end_offset": None,
+        "selected_text": "",
+    }
+
+
+def test_matching_word_source_returns_none_when_offsets_differ(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "list_word_card_sources",
+        lambda db, card_id: [
+            {
+                "id": 5,
+                "sentence_id": 9,
+                "source_key": "evidenced",
+                "start_offset": 1,
+                "end_offset": 2,
+                "selected_text": "evidenced",
+            },
+        ],
+    )
+
+    assert (
+        analysis._matching_word_source(
+            object(),
+            card_id=7,
+            sentence_id=9,
+            surface_form="evidenced",
+            start_offset=16,
+            end_offset=25,
+        )
+        is None
+    )
 
 
 def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -> None:

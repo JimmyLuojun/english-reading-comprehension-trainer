@@ -67,6 +67,48 @@ def test_sentence_analysis_route_parses_force_refresh(monkeypatch) -> None:
     assert captured["user_structure"] == "主干：The cat sat"
 
 
+def test_get_sentence_analysis_route_returns_404(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "_fetch_sentence_analysis_payload", lambda db, sid: None)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/sentence/1")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "ok": False,
+        "error": "No saved analysis for this sentence.",
+        "retry": True,
+    }
+
+
+def test_sentence_analysis_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 502
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "AI response failed validation.", "retry": True}
+
+    monkeypatch.setattr(
+        analysis,
+        "analyze_sentence_for_reader",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post("/analysis/sentence/1")
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "ok": False,
+        "error": "AI response failed validation.",
+        "retry": True,
+    }
+
+
 def test_word_analysis_route_parses_force_refresh(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -94,6 +136,59 @@ def test_word_analysis_route_parses_force_refresh(monkeypatch) -> None:
     assert response.status_code == 200
     assert captured["force_refresh"] is True
     assert captured["prefer_pro"] is True
+
+
+def test_word_analysis_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 404
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "Word card not found."}
+
+    monkeypatch.setattr(
+        analysis,
+        "analyze_word_card_for_reader",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post("/analysis/word/1")
+
+    assert response.status_code == 404
+    assert response.json() == {"ok": False, "error": "Word card not found."}
+
+
+def test_get_word_analysis_route_returns_404(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", lambda db, cid: None)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/word/7")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "ok": False,
+        "error": "No saved analysis for this word.",
+        "retry": True,
+    }
+
+
+def test_get_word_analysis_route_returns_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, cid: {"ok": True, "card_id": cid},
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/word/7")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "card_id": 7}
 
 
 def test_paragraph_logic_route_parses_force_refresh(monkeypatch) -> None:
@@ -156,6 +251,54 @@ def test_paragraph_logic_route_maps_service_error(monkeypatch) -> None:
     }
 
 
+def test_get_paragraph_logic_route_maps_value_error(monkeypatch) -> None:
+    def fail_fetch(db, paragraph_id):
+        raise ValueError("Paragraph id=7 not found.")
+
+    monkeypatch.setattr(analysis, "_fetch_paragraph_logic_payload", fail_fetch)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/paragraph/7/logic")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Paragraph id=7 not found.",
+        "retry": False,
+    }
+
+
+def test_get_paragraph_logic_route_returns_404(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "_fetch_paragraph_logic_payload", lambda db, pid: None)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/paragraph/7/logic")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "ok": False,
+        "error": "No saved analysis for this paragraph.",
+        "retry": True,
+    }
+
+
+def test_get_paragraph_logic_route_returns_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_paragraph_logic_payload",
+        lambda db, pid: {"ok": True, "paragraph_id": pid},
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/paragraph/7/logic")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "paragraph_id": 7}
+
+
 def test_paragraph_logic_prompt_route_returns_prompt(monkeypatch) -> None:
     monkeypatch.setattr(
         analysis,
@@ -172,6 +315,24 @@ def test_paragraph_logic_prompt_route_returns_prompt(monkeypatch) -> None:
         "ok": True,
         "paragraph_id": 5,
         "prompt": "paragraph prompt for 5",
+    }
+
+
+def test_paragraph_logic_prompt_route_maps_value_error(monkeypatch) -> None:
+    def fail_prompt(db, paragraph_id):
+        raise ValueError("Paragraph id=5 not found.")
+
+    monkeypatch.setattr(analysis, "build_external_paragraph_logic_prompt", fail_prompt)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/paragraph/5/logic-prompt")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Paragraph id=5 not found.",
+        "retry": False,
     }
 
 
@@ -219,6 +380,28 @@ def test_external_word_card_prompt_route_returns_prompt(monkeypatch) -> None:
     }
 
 
+def test_external_word_card_prompt_route_maps_value_error(monkeypatch) -> None:
+    def fail_prompt(*args, **kwargs):
+        raise ValueError("Word card not found.")
+
+    monkeypatch.setattr(
+        analysis,
+        "build_external_word_prompt_for_card",
+        fail_prompt,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/word/7/external-prompt")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Word card not found.",
+        "retry": False,
+    }
+
+
 def test_external_word_selection_prompt_route_passes_offsets(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -256,6 +439,31 @@ def test_external_word_selection_prompt_route_passes_offsets(monkeypatch) -> Non
     }
 
 
+def test_external_word_selection_prompt_route_maps_value_error(monkeypatch) -> None:
+    def fail_prompt(*args, **kwargs):
+        raise ValueError("surface_form must not be empty.")
+
+    monkeypatch.setattr(
+        analysis,
+        "build_external_word_prompt_for_selection",
+        fail_prompt,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/selection/word-external-prompt",
+        data={"sentence_id": "9", "surface_form": "", "lexical_type": "word"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "surface_form must not be empty.",
+        "retry": False,
+    }
+
+
 def test_external_word_card_analysis_route_passes_pasted_result(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -285,6 +493,36 @@ def test_external_word_card_analysis_route_passes_pasted_result(monkeypatch) -> 
     assert captured == {
         "card_id": 7,
         "external_result": "full word reply",
+    }
+
+
+def test_external_word_card_analysis_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 400
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "bad external word JSON", "retry": False}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_card",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/word/7/external",
+        data={"external_result": "not json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "bad external word JSON",
+        "retry": False,
     }
 
 
@@ -327,6 +565,72 @@ def test_external_word_selection_analysis_route_passes_selection(monkeypatch) ->
         "start_offset": 16,
         "end_offset": 25,
         "external_result": "full word reply",
+    }
+
+
+def test_external_word_selection_analysis_route_maps_value_error(monkeypatch) -> None:
+    def fail_save(*args, **kwargs):
+        raise ValueError("selection offsets must include both start and end.")
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_selection",
+        fail_save,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/selection/word-external",
+        data={
+            "sentence_id": "9",
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "start_offset": "16",
+            "external_result": "full word reply",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "selection offsets must include both start and end.",
+        "retry": False,
+    }
+
+
+def test_external_word_selection_analysis_route_maps_service_error(monkeypatch) -> None:
+    class Outcome:
+        is_error = True
+        status_code = 400
+
+        @staticmethod
+        def error_payload():
+            return {"ok": False, "error": "bad selection JSON", "retry": False}
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_selection",
+        lambda *args, **kwargs: Outcome(),
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/selection/word-external",
+        data={
+            "sentence_id": "9",
+            "surface_form": "evidenced",
+            "lexical_type": "word",
+            "external_result": "not json",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "bad selection JSON",
+        "retry": False,
     }
 
 

@@ -155,6 +155,7 @@
       const initialPanel = initialParams.get("panel") || "";
       const MAX_ANALYSIS_CONTEXT_TEXT = 1600;
       const ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP = 56;
+      const ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX = 12;
       const ANALYSIS_TOOLS_HOT_ZONE_PX = 84;
       const AUTOSAVE_DELAY_MS = 700;
       const STRUCTURE_TEMPLATE = "主干：\n从句：\n修饰成分：\n指代逻辑：";
@@ -266,6 +267,11 @@
       let toolbarInteractionSeq = 0;
       let analysisSeq = 0;
       let toolbarRepositionFrame = null;
+      let selectionChangeFrame = null;
+      let analysisToolsFrame = null;
+      let pendingAnalysisToolsPeek = false;
+      let analysisToolsCollapsed = false;
+      let analysisToolsPeeking = false;
       let activeSelectionAnalysisContextText = "";
       let activeReaderWordSelection = null;
       let activeReaderWordSelectionRange = null;
@@ -832,6 +838,12 @@
           }
         }
         return false;
+      }
+
+      function currentSelectionIntersectsReaderSurface() {
+        const selection = window.getSelection();
+        return selectionIntersectsElement(selection, reader)
+          || selectionIntersectsElement(selection, panel);
       }
 
       function switchOpenEditorToSentence(sentence) {
@@ -2138,6 +2150,14 @@
         showToolbar(range);
       }
 
+      function scheduleToolbarUpdateFromSelectionChange() {
+        if (selectionChangeFrame) return;
+        selectionChangeFrame = window.requestAnimationFrame(() => {
+          selectionChangeFrame = null;
+          updateToolbar();
+        });
+      }
+
       function readProgress() {
         if (!progressKey) return null;
         try {
@@ -2735,11 +2755,38 @@
         }, 0);
       }
 
+      function setAnalysisToolsState(shouldCollapse, shouldPeek) {
+        if (
+          analysisToolsCollapsed === shouldCollapse
+          && analysisToolsPeeking === shouldPeek
+        ) {
+          return;
+        }
+        analysisToolsCollapsed = shouldCollapse;
+        analysisToolsPeeking = shouldPeek;
+        panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);
+        panel.classList.toggle("analysis-tools-peeking", shouldPeek);
+      }
+
       function updateAnalysisToolsVisibility(peek) {
         if (!panel || panel.hidden) return;
-        const shouldCollapse = panel.scrollTop > ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP;
-        panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);
-        panel.classList.toggle("analysis-tools-peeking", shouldCollapse && Boolean(peek));
+        const collapseAt = ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP
+          + ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX;
+        const expandAt = ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP
+          - ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX;
+        const shouldCollapse = analysisToolsCollapsed
+          ? panel.scrollTop > expandAt
+          : panel.scrollTop > collapseAt;
+        setAnalysisToolsState(shouldCollapse, shouldCollapse && Boolean(peek));
+      }
+
+      function scheduleAnalysisToolsVisibility(peek) {
+        pendingAnalysisToolsPeek = Boolean(peek);
+        if (analysisToolsFrame) return;
+        analysisToolsFrame = window.requestAnimationFrame(() => {
+          analysisToolsFrame = null;
+          updateAnalysisToolsVisibility(pendingAnalysisToolsPeek);
+        });
       }
 
       function pointerIsInAnalysisToolsHotZone(event) {
@@ -2754,7 +2801,7 @@
       function handleAnalysisPanelPointerMove(event) {
         const target = event.target?.closest ? event.target : null;
         const inHeader = Boolean(target?.closest(".analysis-panel-header"));
-        updateAnalysisToolsVisibility(inHeader || pointerIsInAnalysisToolsHotZone(event));
+        scheduleAnalysisToolsVisibility(inHeader || pointerIsInAnalysisToolsHotZone(event));
       }
 
       function syncAnalysisToolsFocusState() {
@@ -5294,13 +5341,19 @@
         showGlossaryWordDetail(hit);
       });
       panel.addEventListener("scroll", () => {
-        updateAnalysisToolsVisibility(false);
+        scheduleAnalysisToolsVisibility(false);
       }, { passive: true });
       panel.addEventListener("mousemove", handleAnalysisPanelPointerMove);
       panel.addEventListener("mouseleave", () => {
-        updateAnalysisToolsVisibility(false);
+        scheduleAnalysisToolsVisibility(false);
       });
       if (panelHeader) {
+        panelHeader.addEventListener("pointerenter", () => {
+          scheduleAnalysisToolsVisibility(true);
+        });
+        panelHeader.addEventListener("pointerleave", () => {
+          scheduleAnalysisToolsVisibility(false);
+        });
         panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);
         panelHeader.addEventListener("focusout", () => {
           window.setTimeout(syncAnalysisToolsFocusState, 0);
@@ -5509,13 +5562,19 @@
         openTranslatedSentenceShortcut(sentence);
       });
       document.addEventListener("keydown", handleReaderShortcut);
-      document.addEventListener("selectionchange", () => window.setTimeout(updateToolbar, 0));
+      document.addEventListener("selectionchange", scheduleToolbarUpdateFromSelectionChange);
       if ("ResizeObserver" in window) {
         const toolbarResizeObserver = new ResizeObserver(() => scheduleToolbarReposition());
         toolbarResizeObserver.observe(toolbar);
       }
       window.addEventListener("scroll", () => {
-        if (!translationEditorOpen && !structureEditorOpen) hideToolbar();
+        if (!translationEditorOpen && !structureEditorOpen) {
+          if (currentSelectionIntersectsReaderSurface()) {
+            scheduleToolbarUpdateFromSelectionChange();
+          } else {
+            hideToolbar();
+          }
+        }
         hideParagraphToolbar(false);
         scheduleProgressSave();
       }, { passive: true });

@@ -64,7 +64,8 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "--analysis-panel-padding: 16px" in css
     assert "--analysis-panel-tools-handle-width: 44px" in css
     assert ".analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)" in css
-    assert ".analysis-panel-header:not(:hover):not(:focus-within)" in css
+    assert ".analysis-panel-header:not(:focus-within)" in css
+    assert ".analysis-panel-header:not(:hover):not(:focus-within)" not in css
     assert 'content: "...";' in css
     assert "cursor: pointer;" in css
     assert "pointer-events: none;" in css

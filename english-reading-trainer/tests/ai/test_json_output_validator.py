@@ -194,6 +194,44 @@ class TestSemanticValidate:
         with pytest.raises(ValidationError, match="main"):
             _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
 
+    def test_adverbial_sentence_fragment_without_main_clause_passes(self) -> None:
+        data = {
+            **VALID_SENTENCE_DATA,
+            "subject_skeleton": "you accept them",
+            "clauses": [
+                {
+                    "type": "adverbial",
+                    "text": "If you accept them as such",
+                    "role": "conditional dialogue fragment",
+                }
+            ],
+        }
+        _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_noun_sentence_fragment_without_main_clause_passes(self) -> None:
+        data = {
+            **VALID_SENTENCE_DATA,
+            "subject_skeleton": "this man is seen",
+            "clauses": [
+                {
+                    "type": "noun",
+                    "text": "that this man is seen as getting a fair shake",
+                    "role": "elliptical continuation of the previous sentence",
+                }
+            ],
+        }
+        _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_non_fragment_adverbial_clause_without_main_clause_raises(self) -> None:
+        bad = {
+            **VALID_SENTENCE_DATA,
+            "clauses": [
+                {"type": "adverbial", "text": "quietly near the door", "role": "modifier"}
+            ],
+        }
+        with pytest.raises(ValidationError, match="main"):
+            _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
+
     def test_non_dict_data_skipped_silently(self) -> None:
         # Should not raise — non-dict is allowed to pass through semantic check
         _semantic_validate([1, 2, 3], SENTENCE_ANALYSIS_SCHEMA)
@@ -211,6 +249,11 @@ class TestSemanticValidate:
     def test_clauses_with_non_dict_items_raises(self) -> None:
         # If clauses contains non-dict items, no main clause found → raises
         bad = {**VALID_SENTENCE_DATA, "clauses": ["not a dict"]}
+        with pytest.raises(ValidationError, match="main"):
+            _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_empty_clauses_without_main_clause_raises(self) -> None:
+        bad = {**VALID_SENTENCE_DATA, "clauses": []}
         with pytest.raises(ValidationError, match="main"):
             _semantic_validate(bad, SENTENCE_ANALYSIS_SCHEMA)
 

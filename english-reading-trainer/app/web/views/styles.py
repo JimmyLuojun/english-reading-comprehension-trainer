@@ -699,7 +699,7 @@ def _css() -> str:
         width 0.16s ease;
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
-      .analysis-panel-header:not(:hover):not(:focus-within) {
+      .analysis-panel-header:not(:focus-within) {
       width: var(--analysis-panel-tools-handle-width);
       min-height: var(--analysis-panel-tools-handle-width);
       max-height: var(--analysis-panel-tools-handle-width);
@@ -714,12 +714,12 @@ def _css() -> str:
       cursor: pointer;
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
-      .analysis-panel-header:not(:hover):not(:focus-within) > * {
+      .analysis-panel-header:not(:focus-within) > * {
       opacity: 0;
       pointer-events: none;
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
-      .analysis-panel-header:not(:hover):not(:focus-within)::after {
+      .analysis-panel-header:not(:focus-within)::after {
       content: "...";
       position: absolute;
       inset: 0;

@@ -21,8 +21,10 @@ from app.importers.txt_importer import (
     ImportResult,
     _is_heading,
     _line_based_paragraphs,
+    _looks_like_line_based_text,
     _normalize_paragraph_text,
     _split_chapters,
+    _split_paragraphs,
     _text_hash,
     import_text,
     import_txt,
@@ -112,6 +114,12 @@ class TestSplitChapters:
         # Preamble + Chapter 1
         titles = [c["title"] for c in chapters]
         assert "Preamble" in titles or "Chapter 1" in titles
+
+    def test_blank_preamble_before_first_heading_is_recorded(self) -> None:
+        chapters = _split_chapters("\n\nChapter 1\nContent.")
+
+        assert chapters[0] == {"title": "Preamble", "body": ""}
+        assert chapters[1]["title"] == "Chapter 1"
 
     def test_chapter_body_excludes_heading_line(self) -> None:
         text = "Chapter 1\nThis is the body."
@@ -261,6 +269,18 @@ class TestImportTxtParagraphs:
         assert _normalize_paragraph_text(text) == (
             "Jax has got the jump on you tomorrow. Two bell."
         )
+
+    def test_split_paragraphs_skips_empty_blocks(self) -> None:
+        assert _split_paragraphs("\n\nFirst paragraph.\n\n") == ["First paragraph."]
+
+    def test_short_blocks_are_not_line_based(self) -> None:
+        assert _looks_like_line_based_text(["One.", "Two."]) is False
+
+    def test_line_based_paragraphs_flush_pending_before_standalone_break(self) -> None:
+        assert _line_based_paragraphs(["Jax has got", "12"]) == ["Jax has got", "12"]
+
+    def test_line_based_paragraphs_flush_pending_at_end(self) -> None:
+        assert _line_based_paragraphs(["Jax has got"]) == ["Jax has got"]
 
     def test_blank_line_splits_paragraphs(self, db: DatabaseConnection, tmp_path: Path) -> None:
         text = "First paragraph sentence.\n\nSecond paragraph sentence."

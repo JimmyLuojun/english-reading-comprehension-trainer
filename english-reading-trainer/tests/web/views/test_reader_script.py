@@ -126,26 +126,52 @@ def test_analysis_panel_opens_at_top_without_progress_scroll_restore() -> None:
 
 def test_analysis_panel_toolbar_auto_collapses_and_peeks() -> None:
     script = _selection_script()
-    visibility = script[script.index("function updateAnalysisToolsVisibility") :]
+    visibility = script[script.index("function setAnalysisToolsState") :]
     visibility = visibility[: visibility.index("function scrollAnalysisPanelToTop")]
     listeners = script[script.index('panel.addEventListener("click"') :]
     listeners = listeners[: listeners.index("if (panelUnmark)")]
 
     assert 'panel?.querySelector(".analysis-panel-header")' in script
     assert "ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP" in script
+    assert "ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX" in script
     assert "ANALYSIS_TOOLS_HOT_ZONE_PX" in script
+    assert "function setAnalysisToolsState(shouldCollapse, shouldPeek)" in visibility
+    assert "if (\n          analysisToolsCollapsed === shouldCollapse" in visibility
     assert 'panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);' in visibility
     assert (
-        'panel.classList.toggle("analysis-tools-peeking", shouldCollapse && Boolean(peek));'
+        'panel.classList.toggle("analysis-tools-peeking", shouldPeek);'
         in visibility
     )
+    assert "function scheduleAnalysisToolsVisibility(peek)" in visibility
+    assert "window.requestAnimationFrame(() => {" in visibility
     assert "pointerIsInAnalysisToolsHotZone(event)" in visibility
     assert 'target?.closest(".analysis-panel-header")' in visibility
     assert 'panel.addEventListener("scroll"' in listeners
     assert 'panel.addEventListener("mousemove", handleAnalysisPanelPointerMove);' in listeners
     assert 'panel.addEventListener("mouseleave"' in listeners
+    assert 'panelHeader.addEventListener("pointerenter"' in listeners
+    assert 'panelHeader.addEventListener("pointerleave"' in listeners
     assert 'panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);' in listeners
     assert 'panelHeader.addEventListener("focusout"' in listeners
+
+
+def test_selection_toolbar_updates_are_animation_frame_coalesced() -> None:
+    script = _selection_script()
+    scheduler = script[script.index("function scheduleToolbarUpdateFromSelectionChange") :]
+    scheduler = scheduler[: scheduler.index("function readProgress")]
+    scroll_listener = script[script.index('window.addEventListener("scroll"'):]
+    scroll_listener = scroll_listener[: scroll_listener.index("if (window.visualViewport)")]
+
+    assert "let selectionChangeFrame = null;" in script
+    assert "if (selectionChangeFrame) return;" in scheduler
+    assert "selectionChangeFrame = window.requestAnimationFrame(() => {" in scheduler
+    assert "updateToolbar();" in scheduler
+    assert (
+        'document.addEventListener("selectionchange", scheduleToolbarUpdateFromSelectionChange);'
+        in script
+    )
+    assert "function currentSelectionIntersectsReaderSurface()" in script
+    assert "currentSelectionIntersectsReaderSurface()" in scroll_listener
 
 
 def test_analysis_selection_toolbar_uses_cancellable_deferred_hide() -> None:
@@ -976,7 +1002,10 @@ def test_toolbar_editors_autosave_and_stay_open_until_closed() -> None:
     assert "setToolbarStatus(translationStatus, automatic ? \"Auto saved\" : \"Saved\");" in save_translation
     assert 'setToolbarStatus(structureStatus, "Auto saving...");' in script
     assert "setToolbarStatus(structureStatus, automatic ? \"Auto saved\" : \"Saved\");" in save_structure
-    assert "if (!translationEditorOpen && !structureEditorOpen) hideToolbar();" in scroll_listener
+    assert "if (!translationEditorOpen && !structureEditorOpen) {" in scroll_listener
+    assert "if (currentSelectionIntersectsReaderSurface())" in scroll_listener
+    assert "scheduleToolbarUpdateFromSelectionChange();" in scroll_listener
+    assert "hideToolbar();" in scroll_listener
     assert 'window.addEventListener("pagehide", flushPendingToolbarAutoSaveOnPageHide);' in script
 
 
