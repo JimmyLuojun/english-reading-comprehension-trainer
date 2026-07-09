@@ -12,7 +12,11 @@ import json
 import pytest
 from jsonschema import ValidationError
 
-from app.ai.ai_json_schemas import SENTENCE_ANALYSIS_SCHEMA, WORD_ANALYSIS_SCHEMA
+from app.ai.ai_json_schemas import (
+    SENTENCE_ANALYSIS_SCHEMA,
+    SENTENCE_ANALYSIS_SCHEMA_V5,
+    WORD_ANALYSIS_SCHEMA,
+)
 from app.ai.json_output_validator import (
     _semantic_validate,
     _strip_fences,
@@ -207,6 +211,83 @@ class TestSemanticValidate:
             ],
         }
         _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_inverted_conditional_fragment_without_main_clause_passes(self) -> None:
+        data = {
+            **VALID_SENTENCE_DATA,
+            "subject_skeleton": "It become necessary",
+            "clauses": [
+                {
+                    "type": "adverbial",
+                    "text": (
+                        "Should it become necessary to abandon the aircraft "
+                        "over Soviet territory"
+                    ),
+                    "role": "conditional clause with if-omission and inversion",
+                }
+            ],
+        }
+        _semantic_validate(data, SENTENCE_ANALYSIS_SCHEMA)
+
+    def test_v7_inverted_conditional_fragment_json_passes(self) -> None:
+        data = {
+            **VALID_DIAGNOSED_SENTENCE_DATA,
+            "subject_skeleton": "It become necessary",
+            "clauses": [
+                {
+                    "type": "adverbial",
+                    "text": (
+                        "Should it become necessary to abandon the aircraft "
+                        "over Soviet territory"
+                    ),
+                    "role": "conditional clause with if-omission and inversion",
+                }
+            ],
+            "modifiers": [
+                {
+                    "target": "necessary",
+                    "modifier": "to abandon the aircraft over Soviet territory",
+                    "type": "infinitival",
+                }
+            ],
+            "logic_markers": [{"marker": "Should", "function": "condition"}],
+            "anaphora": [{"pronoun": "it", "refers_to": "formal subject"}],
+            "simplified_en": "If it becomes necessary to leave the plane.",
+            "chinese_gloss": "如果有必要放弃飞机。",
+            "blocking_point": "Should marks an inverted condition, not a question.",
+            "argument_role": "qualification",
+            "argument_role_reason": "It limits the protocol to an emergency condition.",
+            "argument_role_check": "Read initial Should as if-omission when there is no question.",
+            "predicted_error_types": [],
+            "diagnosis_basis": "user_translation",
+            "diagnosed_error_types": ["G04"],
+            "diagnosis_evidence": [
+                {"error_type": "G04", "evidence": "Should was read as a question."}
+            ],
+            "takeaway_suggestion": "句首 Should/Were/Had 且无问号时，先还原 if 条件句。",
+            "structure_feedback": {
+                "is_correct": False,
+                "missed_or_wrong": [
+                    {
+                        "error_code": "G04",
+                        "learner_claim": "Should it become necessary 是主干疑问句。",
+                        "correction": "这是省略 if 的条件状语从句。",
+                        "reason": "句首助动词倒装表达条件。",
+                    }
+                ],
+                "correct_highlights": [],
+                "corrected_structure": (
+                    "[Condition]: Should it become necessary to abandon the aircraft..."
+                ),
+                "why_it_matters_for_translation": "避免把条件错译成疑问。",
+                "next_check": "先检查能否还原为 If it should...",
+            },
+            "confidence": 0.95,
+        }
+
+        result = parse_and_validate(json.dumps(data), SENTENCE_ANALYSIS_SCHEMA_V5)
+
+        assert result["clauses"][0]["text"].startswith("Should it become necessary")
 
     def test_noun_sentence_fragment_without_main_clause_passes(self) -> None:
         data = {

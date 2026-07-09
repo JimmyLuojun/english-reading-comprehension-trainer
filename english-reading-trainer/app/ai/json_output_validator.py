@@ -21,6 +21,10 @@ _ADVERBIAL_FRAGMENT_RE = re.compile(
     r"^(?:if|when|while|although|though|because|since|unless|once|after|before|as)\b",
     re.IGNORECASE,
 )
+_INVERTED_CONDITIONAL_FRAGMENT_RE = re.compile(
+    r"^(?:should|were|had)\b",
+    re.IGNORECASE,
+)
 _NOUN_FRAGMENT_RE = re.compile(
     r"^(?:that|what|whether|who|whom|whose|which|why|how)\b",
     re.IGNORECASE,
@@ -139,7 +143,10 @@ def _is_supported_sentence_fragment(clauses: object) -> bool:
     clause_type = clause.get("type")
     clause_text = str(clause.get("text") or "").strip()
     if clause_type == "adverbial":
-        return _ADVERBIAL_FRAGMENT_RE.match(clause_text) is not None
+        return (
+            _ADVERBIAL_FRAGMENT_RE.match(clause_text) is not None
+            or _INVERTED_CONDITIONAL_FRAGMENT_RE.match(clause_text) is not None
+        )
     if clause_type == "noun":
         return _NOUN_FRAGMENT_RE.match(clause_text) is not None
     return False

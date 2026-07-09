@@ -1533,6 +1533,108 @@ def test_save_external_sentence_analysis_adds_missing_confidence_for_v7_json(
     assert outcome.payload["analysis"]["structure_feedback"]["is_correct"] is False
 
 
+def test_save_external_sentence_analysis_accepts_inverted_conditional_fragment(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db = DatabaseConnection(tmp_path / "external_sentence_inverted_conditional.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence_text(
+        db,
+        "Should it become necessary to abandon the aircraft over Soviet territory...",
+    )
+    monkeypatch.setattr(analysis, "_active_sentence_prompt_version", lambda db, tr: "v7")
+
+    pasted = {
+        "subject_skeleton": "It become necessary",
+        "clauses": [
+            {
+                "type": "adverbial",
+                "text": (
+                    "Should it become necessary to abandon the aircraft "
+                    "over Soviet territory"
+                ),
+                "role": "conditional clause with if-omission and inversion",
+            }
+        ],
+        "modifiers": [
+            {
+                "target": "abandon",
+                "modifier": "over Soviet territory",
+                "type": "prepositional",
+            },
+            {
+                "target": "necessary",
+                "modifier": "to abandon the aircraft over Soviet territory",
+                "type": "infinitival",
+            },
+        ],
+        "logic_markers": [{"marker": "Should", "function": "condition"}],
+        "anaphora": [
+            {
+                "pronoun": "it",
+                "refers_to": "to abandon the aircraft over Soviet territory",
+            }
+        ],
+        "simplified_en": "If it is necessary to leave the plane over Soviet territory.",
+        "chinese_gloss": "如果在苏联领土上空有必要放弃飞机。",
+        "blocking_point": (
+            "The inverted conditional word Should was misread as a question marker."
+        ),
+        "argument_role": "qualification",
+        "argument_role_reason": (
+            "The clause defines the emergency condition for the protocol."
+        ),
+        "argument_role_check": "Do not read an inverted condition as a question.",
+        "predicted_error_types": [],
+        "diagnosis_basis": "user_translation",
+        "diagnosed_error_types": ["G04", "G02"],
+        "diagnosis_evidence": [
+            {"error_type": "G04", "evidence": "Should was treated as interrogative."},
+            {"error_type": "G02", "evidence": "over Soviet territory was attached wrongly."},
+        ],
+        "takeaway_suggestion": "句首 Should/Were/Had 且无问号时，先还原 if 条件句。",
+        "structure_feedback": {
+            "is_correct": False,
+            "missed_or_wrong": [
+                {
+                    "error_code": "G04",
+                    "learner_claim": (
+                        "主干：Should it become necessary to abandon the aircraft "
+                        "over Soviet territory"
+                    ),
+                    "correction": "这是省略 if 的条件状语从句。",
+                    "reason": "主谓倒装来自条件结构，不是普通疑问句。",
+                },
+                {
+                    "error_code": "G05",
+                    "learner_claim": "to abandon the aircraft 是形容词补足语。",
+                    "correction": "it 是形式主语，不定式是真正主语。",
+                    "reason": "It becomes adj. to do 中不定式承载逻辑主语。",
+                },
+            ],
+            "correct_highlights": [],
+            "corrected_structure": (
+                "[Condition Clause]: Should [it=formal subject] become necessary "
+                "[to abandon the aircraft...=real subject]"
+            ),
+            "why_it_matters_for_translation": "防止把假设条件错译为疑问句。",
+            "next_check": "句首助动词且无问号时，先检查能否还原 if。",
+        },
+        "confidence": 0.95,
+    }
+
+    outcome = analysis.save_external_sentence_analysis_for_reader(
+        db,
+        sentence_id,
+        external_result=json.dumps(pasted, ensure_ascii=False),
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload is not None
+    assert outcome.payload["analysis"]["clauses"][0]["text"].startswith("Should it")
+
+
 def test_save_external_sentence_analysis_reports_validation_error(monkeypatch) -> None:
     monkeypatch.setattr(
         analysis,
