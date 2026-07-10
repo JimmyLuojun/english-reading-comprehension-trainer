@@ -18,6 +18,25 @@ strict local cookie after the first request; API automation can instead send the
 same token in `X-Trainer-Token`. The service intentionally binds only to
 `127.0.0.1` and is not a multi-user or network-facing deployment.
 
+### Restarting without losing the Reader
+
+By default, the launcher generates a fresh local access token for each launch.
+For local development with `--reload`, or when manually stopping and restarting
+the server, set a stable token before launching:
+
+```bash
+cd english-reading-trainer
+export TRAINER_REQUEST_TOKEN="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+.venv/bin/python -m app.web.launcher --port 8001 --reload
+```
+
+Keep the same `TRAINER_REQUEST_TOKEN` value for later restarts (including a new
+terminal session). Open the printed URL once to establish the browser cookie;
+then a hard reload of a Reader page keeps access and restores its saved chapter
+and reading position. An explicit token can also be supplied with
+`--access-token`, but the environment variable avoids placing it in shell
+history.
+
 The app uses `english-reading-trainer/data/reading_trainer.db` by default and
 applies migrations automatically on startup. To use another database:
 
@@ -140,6 +159,8 @@ cd english-reading-trainer
 
 Open the tokenized URL printed by the launcher. Keep the service on the local
 machine; the launcher deliberately does not expose it on a LAN interface.
+For restart-safe local development, follow the stable-token instructions in
+[Restarting without losing the Reader](#restarting-without-losing-the-reader).
 
 The web UI supports TXT/Markdown/EPUB/PDF file import, URL import for
 HTML/plain-text pages, the dashboard, book browsing, chapter reading, sentence

@@ -704,6 +704,19 @@
       }
 
       function setVisible(element, visible) {
+        const exclusiveToolbarPanels = [
+          sentenceForm,
+          wordForm,
+          analysisWordForm,
+          wordDetail,
+          crossSentence,
+        ];
+        if (visible && exclusiveToolbarPanels.includes(element)) {
+          exclusiveToolbarPanels.forEach((panelElement) => {
+            if (panelElement !== element) panelElement.hidden = true;
+          });
+          if (element !== sentenceForm) analysisOpen.hidden = true;
+        }
         element.hidden = !visible;
       }
 
@@ -1426,6 +1439,7 @@
         const sentence = document.getElementById(`sentence-${activeReaderWordSelection.sentenceId}`);
         const range = activeReaderWordSelectionRange;
         if (!sentence || !range) return false;
+        hideAllPanels({ preserveReaderWordSelection: true });
         activeSentenceId = activeReaderWordSelection.sentenceId;
         activeSentenceTranslation = sentence.dataset.translation || "";
         activeSentenceStructure = sentence.dataset.structure || "";
@@ -1439,6 +1453,7 @@
         setVisible(wordDetail, false);
         setVisible(crossSentence, false);
         setVisible(wordForm, true);
+        setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(activeReaderWordSelection.lexicalType)}`);
         showToolbar(range);
         return true;
       }
@@ -2309,6 +2324,7 @@
             range,
           );
           setVisible(wordForm, true);
+          setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);
         }
         showToolbar(range);
       }
@@ -2334,8 +2350,13 @@
         }
       }
 
+      function readerPageWasReloaded() {
+        const navigation = window.performance?.getEntriesByType?.("navigation")[0];
+        return navigation?.type === "reload";
+      }
+
       function restoreReaderProgress() {
-        if (reader.dataset.restoreProgress !== "1") return;
+        if (reader.dataset.restoreProgress !== "1" && !readerPageWasReloaded()) return null;
         const saved = readProgress();
         if (!saved) return null;
         const savedChapter = Number.parseInt(saved.chapter_idx, 10);

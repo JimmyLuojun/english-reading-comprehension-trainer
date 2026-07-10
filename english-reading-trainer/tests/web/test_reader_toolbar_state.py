@@ -136,13 +136,18 @@ def _attach_sentence_analysis(db: DatabaseConnection, sentence_id: int) -> int:
 def _visible_panels(page: Page) -> dict[str, bool]:
     return page.evaluate(
         """(panelIds) => {
+          const isRendered = (element) => Boolean(
+            element
+            && window.getComputedStyle(element).display !== "none"
+            && element.getClientRects().length
+          );
           const state = {
-            toolbar: !document.getElementById("selection-toolbar").hidden,
+            toolbar: isRendered(document.getElementById("selection-toolbar")),
             word_existing_present: Boolean(document.getElementById("toolbar-word-existing")),
           };
           for (const [key, id] of Object.entries(panelIds)) {
             const element = document.getElementById(id);
-            state[key] = Boolean(element && !element.hidden);
+            state[key] = isRendered(element);
           }
           return state;
         }""",
@@ -429,8 +434,11 @@ def test_w_shortcut_selects_hovered_word_and_opens_word_toolbar(
         point = page.evaluate(
             """() => {
               const sentence = document.querySelector("[data-sentence-id]");
-              const node = Array.from(document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT))
-                .find((candidate) => candidate.nodeValue.includes("mat"));
+              const walker = document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT);
+              let node = walker.nextNode();
+              while (node && !node.nodeValue.includes("mat")) {
+                node = walker.nextNode();
+              }
               const index = node.nodeValue.indexOf("mat");
               const range = document.createRange();
               range.setStart(node, index);
@@ -447,10 +455,36 @@ def test_w_shortcut_selects_hovered_word_and_opens_word_toolbar(
               selectedText: window.getSelection().toString(),
               surfaceForm: document.getElementById("toolbar-word-surface-form").value,
               activeType: document.querySelector("[data-word-lexical].active")?.dataset.wordLexical,
+              statusText: document.getElementById("toolbar-word-status").textContent,
             })"""
         )
 
-    assert state == {"selectedText": "mat", "surfaceForm": "mat", "activeType": "word"}
+    assert state == {
+        "selectedText": "mat",
+        "surfaceForm": "mat",
+        "activeType": "word",
+        "statusText": "Using word",
+    }
+
+
+def test_word_type_switch_does_not_resize_the_floating_toolbar(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_text(page, 0, "mat")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        before = page.locator("#selection-toolbar").bounding_box()
+        page.locator('#toolbar-word-form button[value="phrase"]').click()
+        page.wait_for_function(
+            'document.getElementById("toolbar-word-status").textContent === "Using phrase"'
+        )
+        after = page.locator("#selection-toolbar").bounding_box()
+
+    assert before is not None
+    assert after is not None
+    assert after["width"] == before["width"]
+    assert after["height"] == before["height"]
 
 
 def test_multi_word_selection_defaults_to_word_until_user_changes_it(
@@ -496,6 +530,24 @@ def test_selection_modes_are_mutually_exclusive(browser: Browser, reader_url: st
 
         _select_text(page, 1, "bright")
         _assert_only_panel(page, "word")
+
+
+def test_sentence_selection_does_not_render_word_actions_or_duplicate_analysis(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_sentence_contents(page, 1)
+        _assert_only_panel(page, "sentence")
+        visible_actions = page.locator("#selection-toolbar button:visible").all_inner_texts()
+
+    assert visible_actions == [
+        "Mark sentence",
+        "Write translation",
+        "Write structure",
+        "Copy AI prompt",
+        "AI analysis",
+    ]
 
 
 def test_translation_editor_does_not_cover_target_sentence(
@@ -935,6 +987,51 @@ def test_analysis_panel_selection_shows_mark_word(
     assert form_values["markPhrase"] is True
     assert form_values["markCollocation"] is True
     assert form_values["aiAnalysis"] is True
+
+
+def test_w_shortcut_replaces_analysis_word_toolbar_with_reader_word_toolbar(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        page.evaluate(
+            """() => {
+              const node = document.getElementById("analysis-simplified").firstChild;
+              const index = node.nodeValue.indexOf("feline");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + "feline".length);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+        page.wait_for_function('!document.getElementById("toolbar-analysis-word-form").hidden')
+        point = page.evaluate(
+            """() => {
+              const sentence = document.querySelector("[data-sentence-id]");
+              const walker = document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT);
+              let node = walker.nextNode();
+              while (node && !node.nodeValue.includes("mat")) {
+                node = walker.nextNode();
+              }
+              const index = node.nodeValue.indexOf("mat");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + 3);
+              const rect = range.getBoundingClientRect();
+              return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) };
+            }"""
+        )
+        page.mouse.move(point["x"], point["y"])
+        page.keyboard.press("w")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+
+        _assert_only_panel(page, "word")
+        assert page.locator("#toolbar-word-status").text_content() == "Using word"
 
 
 def test_analysis_panel_mark_phrase_keeps_current_analysis(

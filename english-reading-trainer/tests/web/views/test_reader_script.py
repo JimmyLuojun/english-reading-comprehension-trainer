@@ -33,6 +33,16 @@ def test_selection_script_contains_reader_toolbar_contracts() -> None:
     assert "Select a sentence or marked word, then choose AI analysis." in script
 
 
+def test_reader_script_restores_progress_after_a_browser_reload() -> None:
+    script = _selection_script()
+    restore_progress = script[script.index("function readerPageWasReloaded()") :]
+    restore_progress = restore_progress[: restore_progress.index("function topSentenceId()")]
+
+    assert 'getEntriesByType?.("navigation")[0]' in restore_progress
+    assert 'return navigation?.type === "reload";' in restore_progress
+    assert 'reader.dataset.restoreProgress !== "1" && !readerPageWasReloaded()' in restore_progress
+
+
 def test_paragraph_shortcut_and_toolbar_contracts() -> None:
     script = _selection_script()
     shortcut = script[script.index("function handleReaderShortcut") :]
@@ -1495,6 +1505,7 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     assert 'readerShortcutMatches(event, "KeyW", "w")' in shortcut
     assert "selectHoveredWord()" in shortcut
     assert "showCurrentReaderWordSelection()" in shortcut
+    assert 'setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);' in script
     assert "function textNodeNearCaret(container, offset)" in script
     assert 'reader.addEventListener("mousemove", recordReaderPointerMove);' in script
     assert 'event.code === code || (event.key || "").toLowerCase() === key' in script
@@ -1553,6 +1564,32 @@ def test_reader_script_defaults_new_reader_selections_to_word() -> None:
     lexical_type = lexical_type[:lexical_type.index("function lexicalTypeLabel")]
 
     assert 'return "word";' in lexical_type
+
+
+def test_restoring_a_reader_word_toolbar_hides_other_toolbar_groups() -> None:
+    script = _selection_script()
+    restore = script[script.index("function restoreActiveReaderWordToolbar()") :]
+    restore = restore[: restore.index("function addSelectionFields")]
+
+    assert "hideAllPanels({ preserveReaderWordSelection: true });" in restore
+    assert "setVisible(wordForm, true);" in restore
+    assert 'setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(activeReaderWordSelection.lexicalType)}`);' in restore
+
+
+def test_showing_a_selection_panel_hides_every_other_selection_panel() -> None:
+    script = _selection_script()
+    set_visible = script[script.index("function setVisible(element, visible)") :]
+    set_visible = set_visible[: set_visible.index("function setActiveParagraph")]
+
+    assert "const exclusiveToolbarPanels = [" in set_visible
+    assert "sentenceForm," in set_visible
+    assert "wordForm," in set_visible
+    assert "analysisWordForm," in set_visible
+    assert "wordDetail," in set_visible
+    assert "crossSentence," in set_visible
+    assert "if (visible && exclusiveToolbarPanels.includes(element))" in set_visible
+    assert "if (panelElement !== element) panelElement.hidden = true;" in set_visible
+    assert "if (element !== sentenceForm) analysisOpen.hidden = true;" in set_visible
 
 
 def test_sentence_analysis_renders_similar_past_mistakes() -> None:

@@ -484,9 +484,23 @@ def _css() -> str:
       max-width: 100%;
     }
     #toolbar-word-form {
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: max-content max-content max-content;
+      grid-template-areas:
+        "type copy analyze"
+        "status status status";
+      align-items: center;
       padding: 2px;
       gap: 8px;
+    }
+    #toolbar-word-form[hidden] { display: none; }
+    #toolbar-word-form .word-toolbar-segment { grid-area: type; }
+    #toolbar-word-copy-prompt { grid-area: copy; }
+    #toolbar-word-analyze { grid-area: analyze; }
+    #toolbar-word-status {
+      grid-area: status;
+      min-width: 0;
+      width: 100%;
     }
     #toolbar-sentence-form {
       flex-wrap: nowrap;
@@ -1285,13 +1299,13 @@ def _css() -> str:
       #toolbar-word-form {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+          "type type"
+          "copy analyze"
+          "status status";
         align-items: stretch;
       }
-      #toolbar-word-form[hidden] {
-        display: none;
-      }
       .word-toolbar-segment {
-        grid-column: 1 / -1;
         width: 100%;
       }
       .word-toolbar-segment button {
