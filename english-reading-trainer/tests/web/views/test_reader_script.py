@@ -1492,6 +1492,11 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     # Match the physical key via event.code rather than event.key (layout-independent).
     assert 'readerShortcutMatches(event, "KeyS", "s")' in shortcut
     assert 'readerShortcutMatches(event, "KeyT", "t")' in shortcut
+    assert 'readerShortcutMatches(event, "KeyW", "w")' in shortcut
+    assert "selectHoveredWord()" in shortcut
+    assert "showCurrentReaderWordSelection()" in shortcut
+    assert "function textNodeNearCaret(container, offset)" in script
+    assert 'reader.addEventListener("mousemove", recordReaderPointerMove);' in script
     assert 'event.code === code || (event.key || "").toLowerCase() === key' in script
     assert "eventTargetIsTextInput(event)" in shortcut
     assert "range.selectNodeContents(sentence);" in script
@@ -1540,6 +1545,14 @@ def test_translated_sentence_double_click_shortcut_preserves_word_card_priority(
     assert "!sentence.dataset.translation?.trim()" in double_click
     assert "window.getSelection()?.removeAllRanges();" in double_click
     assert "openTranslatedSentenceShortcut(sentence);" in double_click
+
+
+def test_reader_script_defaults_new_reader_selections_to_word() -> None:
+    script = _selection_script()
+    lexical_type = script[script.index("function lexicalTypeForSelection(value)"):]
+    lexical_type = lexical_type[:lexical_type.index("function lexicalTypeLabel")]
+
+    assert 'return "word";' in lexical_type
 
 
 def test_sentence_analysis_renders_similar_past_mistakes() -> None:

@@ -302,6 +302,7 @@
       let suppressNextUpdate = false;
       let suppressCollapsedToolbarHideUntil = 0;
       let lastReaderPointerDown = null;
+      let lastReaderPointerMove = null;
       const ACTIVE_READER_WORD_HIGHLIGHT = "active-reader-word-selection";
 
       if (bookId) {
@@ -1052,6 +1053,90 @@
         lastClickedSentenceId = sentence?.dataset.sentenceId || null;
       }
 
+      function recordReaderPointerMove(event) {
+        if (!event.target?.closest?.("[data-sentence-id]")) return;
+        lastReaderPointerMove = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          target: event.target,
+        };
+      }
+
+      function caretRangeAtPoint(clientX, clientY) {
+        if (document.caretRangeFromPoint) {
+          return document.caretRangeFromPoint(clientX, clientY);
+        }
+        const caretPosition = document.caretPositionFromPoint?.(clientX, clientY);
+        if (!caretPosition) return null;
+        const range = document.createRange();
+        range.setStart(caretPosition.offsetNode, caretPosition.offset);
+        range.collapse(true);
+        return range;
+      }
+
+      function wordRangeAtCaret(caretRange) {
+        const startNode = caretRange?.startContainer;
+        if (!startNode) return null;
+        const textNode = startNode.nodeType === Node.TEXT_NODE
+          ? startNode
+          : textNodeNearCaret(startNode, caretRange.startOffset);
+        if (!textNode) return null;
+        const text = textNode.nodeValue || "";
+        if (!text) return null;
+        const initialOffset = startNode === textNode ? caretRange.startOffset : 0;
+        let offset = Math.min(Math.max(initialOffset, 0), text.length - 1);
+        if (!/[A-Za-z]/.test(text[offset] || "") && /[A-Za-z]/.test(text[offset - 1] || "")) {
+          offset -= 1;
+        }
+        const match = Array.from(text.matchAll(/[A-Za-z]+(?:[’'-][A-Za-z]+)*/g))
+          .find((candidate) => offset >= candidate.index && offset < candidate.index + candidate[0].length);
+        if (!match || match.index === undefined) return null;
+        const range = document.createRange();
+        range.setStart(textNode, match.index);
+        range.setEnd(textNode, match.index + match[0].length);
+        return range;
+      }
+
+      function textNodeNearCaret(container, offset) {
+        const child = container.childNodes[Math.min(offset, container.childNodes.length - 1)]
+          || container.lastChild;
+        if (!child) return null;
+        if (child.nodeType === Node.TEXT_NODE) return child;
+        const walker = document.createTreeWalker(child, NodeFilter.SHOW_TEXT);
+        return walker.nextNode();
+      }
+
+      function showCurrentReaderWordSelection() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+        const range = selection.getRangeAt(0);
+        if (selectionInsideToolbar(range) || selectionInsideAnalysisPanel(range)) return false;
+        const spans = selectedSentenceSpans(range);
+        const selectedText = selection.toString().trim();
+        if (spans.length !== 1 || !selectedText) return false;
+        const sentenceText = normalizeText(spans[0].textContent || "");
+        if (normalizeText(selectedText) === sentenceText) return false;
+        setSelectedWordLexicalType("word");
+        updateToolbar();
+        setSelectedWordLexicalType("word");
+        return !toolbar.hidden && !wordForm.hidden;
+      }
+
+      function selectHoveredWord() {
+        if (!lastReaderPointerMove) return false;
+        const caretRange = caretRangeAtPoint(
+          lastReaderPointerMove.clientX,
+          lastReaderPointerMove.clientY,
+        );
+        const wordRange = wordRangeAtCaret(caretRange);
+        if (!wordRange || !reader.contains(wordRange.commonAncestorContainer)) return false;
+        const selection = window.getSelection();
+        if (!selection) return false;
+        selection.removeAllRanges();
+        selection.addRange(wordRange);
+        return showCurrentReaderWordSelection();
+      }
+
       function readerShortcutMatches(event, code, key) {
         return event.code === code || (event.key || "").toLowerCase() === key;
       }
@@ -1066,8 +1151,13 @@
         const isSelect = readerShortcutMatches(event, "KeyS", "s");
         const isTranslate = readerShortcutMatches(event, "KeyT", "t");
         const isParagraph = readerShortcutMatches(event, "KeyP", "p");
-        if (!isSelect && !isTranslate && !isParagraph) return;
+        const isWord = readerShortcutMatches(event, "KeyW", "w");
+        if (!isSelect && !isTranslate && !isParagraph && !isWord) return;
         event.preventDefault();
+        if (isWord) {
+          if (!selectHoveredWord()) showCurrentReaderWordSelection();
+          return;
+        }
         if (isParagraph) {
           if (paragraphShortcutIsBlocked(event)) return;
           const paragraph = activeParagraphElement?.isConnected
@@ -1239,7 +1329,7 @@
       }
 
       function lexicalTypeForSelection(value) {
-        return String(value || "").trim().includes(" ") ? "phrase" : "word";
+        return "word";
       }
 
       function lexicalTypeLabel(value) {
@@ -5625,11 +5715,17 @@
         }
       });
       reader.addEventListener("pointerdown", recordClickedSentenceTarget);
+      reader.addEventListener("pointermove", recordReaderPointerMove);
+      reader.addEventListener("mousemove", recordReaderPointerMove);
       reader.addEventListener("dblclick", (event) => {
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan) {
           event.preventDefault();
           showWordDetail(wordSpan);
+          return;
+        }
+        if (showCurrentReaderWordSelection()) {
+          event.preventDefault();
           return;
         }
         const sentence = event.target.closest("[data-sentence-id]");
@@ -5686,4 +5782,3 @@
         });
       }
     })();
-    

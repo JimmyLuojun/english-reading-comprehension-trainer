@@ -403,6 +403,68 @@ def test_double_click_marked_word_shows_only_word_detail(browser: Browser, reade
         _assert_only_panel(page, "word_detail")
 
 
+def test_double_click_unmarked_word_opens_word_toolbar_with_word_default(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_text(page, 0, "mat")
+        page.locator("[data-sentence-id]").first.dispatch_event("dblclick")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        state = page.evaluate(
+            """() => ({
+              surfaceForm: document.getElementById("toolbar-word-surface-form").value,
+              activeType: document.querySelector("[data-word-lexical].active")?.dataset.wordLexical,
+            })"""
+        )
+
+    assert state == {"surfaceForm": "mat", "activeType": "word"}
+
+
+def test_w_shortcut_selects_hovered_word_and_opens_word_toolbar(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        point = page.evaluate(
+            """() => {
+              const sentence = document.querySelector("[data-sentence-id]");
+              const node = Array.from(document.createTreeWalker(sentence, NodeFilter.SHOW_TEXT))
+                .find((candidate) => candidate.nodeValue.includes("mat"));
+              const index = node.nodeValue.indexOf("mat");
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + 3);
+              const rect = range.getBoundingClientRect();
+              return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) };
+            }"""
+        )
+        page.mouse.move(point["x"], point["y"])
+        page.keyboard.press("w")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        state = page.evaluate(
+            """() => ({
+              selectedText: window.getSelection().toString(),
+              surfaceForm: document.getElementById("toolbar-word-surface-form").value,
+              activeType: document.querySelector("[data-word-lexical].active")?.dataset.wordLexical,
+            })"""
+        )
+
+    assert state == {"selectedText": "mat", "surfaceForm": "mat", "activeType": "word"}
+
+
+def test_multi_word_selection_defaults_to_word_until_user_changes_it(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_text(page, 0, "sat on")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        active_type = page.locator("[data-word-lexical].active").get_attribute("data-word-lexical")
+
+    assert active_type == "word"
+
+
 def test_word_detail_save_updates_span_and_hides_toolbar(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()
