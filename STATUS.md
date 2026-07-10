@@ -1,9 +1,15 @@
 # Project Status
 
-Updated: 2026-07-08
+Updated: 2026-07-10
 
 ## Current State
 
+- Completed robustness hardening: SQLite uses online backups before pending migrations and destructive book deletes, verifies restore snapshots, runs each migration atomically, and records immutable migration checksums. CLI recovery commands are `db backup`, `db integrity`, and explicit `db restore ... --yes`.
+- The FastAPI service now initializes the default database during lifespan, uses SQLite integrity in `/health`, has request-scoped rotating logs, and bounds OpenAI-compatible requests with configurable timeout/retry settings.
+- The supported Web deployment is local-only through `app.web.launcher`: loopback binding, per-process access token, strict local cookie/header access, same-origin unsafe-request checks, trusted hosts, and conservative security headers. URL import validates every redirect and rejects non-global resolved addresses.
+- Reader interaction JavaScript is now one packaged static asset at `/static/reader.js`; the old large inline copy and duplicate golden fixture are removed. Generated coverage, runtime media assets, and obsolete database backups are no longer tracked by Git.
+- CI now installs Playwright Chromium and runs Ruff, full branch coverage with per-module gates, schema parity, and Reader browser tests through `make verify`.
+- Latest verification (using `english-reading-trainer/.venv/bin/python`): `PLAYWRIGHT_BROWSERS_PATH=/private/tmp/english-reading-trainer-playwright make verify` passed. This covers full pytest and branch coverage, per-module coverage policy (98% total; critical modules 100%), Ruff, schema parity, and all 25 Playwright Reader tests; `git diff --check` also passed. The known FastAPI TestClient deprecation warning remains.
 - The project is in the self-use stabilization phase: local FastAPI Web UI, SQLite storage, TXT/Markdown/EPUB/PDF imports plus URL ingestion, AI analysis/cache, SM-2 review, cards, and EPUB/PDF media support are active.
 - `app/web/fastapi_app.py` has been split into a thin app factory plus `routers/`, `queries/`, `views/`, and shared web helpers while preserving `create_app(db_factory=None)`.
 - `app/web/services/` now holds workflow services for book deletion, TXT/Markdown/EPUB/PDF/URL import outcomes, and AI analysis/card-cache coordination.

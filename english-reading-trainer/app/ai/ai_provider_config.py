@@ -16,12 +16,16 @@ _DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 _DEFAULT_MODEL = "deepseek-v4-flash"
 _DEFAULT_SENTENCE_MODEL = "deepseek-v4-pro"
 _DEFAULT_PRO_MODEL = "deepseek-v4-pro"
+_DEFAULT_TIMEOUT_SECONDS = 45.0
+_DEFAULT_MAX_RETRIES = 1
 _ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "TRAINER_MODEL",
     "TRAINER_SENTENCE_MODEL",
     "TRAINER_PRO_MODEL",
+    "TRAINER_LLM_TIMEOUT_SECONDS",
+    "TRAINER_LLM_MAX_RETRIES",
 )
 
 
@@ -30,6 +34,8 @@ class AIProviderSettings:
     api_key: str
     base_url: str
     model: str
+    timeout_seconds: float
+    max_retries: int
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -70,6 +76,11 @@ def get_ai_provider_settings(model: str | None = None) -> AIProviderSettings:
         api_key=os.environ.get("OPENAI_API_KEY", ""),
         base_url=os.environ.get("OPENAI_BASE_URL", _DEFAULT_BASE_URL),
         model=model or os.environ.get("TRAINER_MODEL", _DEFAULT_MODEL),
+        timeout_seconds=_positive_float_env(
+            "TRAINER_LLM_TIMEOUT_SECONDS",
+            _DEFAULT_TIMEOUT_SECONDS,
+        ),
+        max_retries=_nonnegative_int_env("TRAINER_LLM_MAX_RETRIES", _DEFAULT_MAX_RETRIES),
     )
 
 
@@ -88,3 +99,19 @@ def get_pro_analysis_model(model: str | None = None) -> str:
     """Return the high-accuracy model for explicit Pro reanalysis."""
     load_ai_provider_env()
     return model or os.environ.get("TRAINER_PRO_MODEL", _DEFAULT_PRO_MODEL)
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _nonnegative_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default

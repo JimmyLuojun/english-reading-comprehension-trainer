@@ -135,7 +135,10 @@ def test_fetch_url_article_rejects_blocked_hosts() -> None:
 
 
 def test_fetch_url_article_rejects_private_redirect_targets() -> None:
+    visited_hosts: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        visited_hosts.append(request.url.host)
         if request.url.host == "example.com":
             return httpx.Response(
                 302,
@@ -154,6 +157,97 @@ def test_fetch_url_article_rejects_private_redirect_targets() -> None:
             "https://example.com/article",
             transport=httpx.MockTransport(handler),
         )
+    assert visited_hosts == ["example.com"]
+
+
+def test_fetch_url_article_rejects_hostname_resolving_to_private_address() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"This handler must not run.",
+            request=request,
+        )
+    )
+
+    with pytest.raises(imports.UrlImportError, match="host is not allowed"):
+        imports.fetch_url_article(
+            "https://example.com/private-dns",
+            transport=transport,
+            resolve_host=lambda host: ("127.0.0.1",),
+        )
+
+
+def test_fetch_url_article_follows_only_validated_redirects() -> None:
+    visited: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        visited.append(str(request.url))
+        if request.url.path == "/start":
+            return httpx.Response(
+                302,
+                headers={"location": "/article"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"Read me.",
+            request=request,
+        )
+
+    article = imports.fetch_url_article(
+        "https://example.com/start",
+        transport=httpx.MockTransport(handler),
+        resolve_host=lambda host: ("93.184.216.34",),
+    )
+
+    assert article.text == "Read me."
+    assert visited == ["https://example.com/start", "https://example.com/article"]
+
+
+def test_fetch_url_article_enforces_redirect_budget() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            302,
+            headers={"location": "/again"},
+            request=request,
+        )
+    )
+
+    with pytest.raises(imports.UrlImportError, match="redirected too many"):
+        imports.fetch_url_article(
+            "https://example.com/loop",
+            max_redirects=1,
+            transport=transport,
+            resolve_host=lambda host: ("93.184.216.34",),
+        )
+
+
+def test_fetch_url_article_rejects_redirect_without_location() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(302, request=request)
+    )
+
+    with pytest.raises(imports.UrlImportError, match="missing a location"):
+        imports.fetch_url_article(
+            "https://example.com/start",
+            transport=transport,
+            resolve_host=lambda host: ("93.184.216.34",),
+        )
+
+
+def test_resolve_public_host_rejects_dns_failures_and_empty_results(monkeypatch) -> None:
+    def dns_failure(*args, **kwargs):
+        raise imports.socket.gaierror("no dns")
+
+    monkeypatch.setattr(imports.socket, "getaddrinfo", dns_failure)
+    with pytest.raises(imports.UrlImportError, match="could not be resolved"):
+        imports._resolve_public_host("missing.example")
+
+    monkeypatch.setattr(imports.socket, "getaddrinfo", lambda *args, **kwargs: [])
+    with pytest.raises(imports.UrlImportError, match="could not be resolved"):
+        imports._resolve_public_host("empty.example")
 
 
 def test_fetch_url_article_rejects_unsupported_content_type() -> None:

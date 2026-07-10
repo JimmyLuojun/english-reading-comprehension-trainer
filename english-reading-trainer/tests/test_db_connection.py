@@ -12,7 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from app.db_connection import DatabaseConnection
+from app.db_connection import (
+    DatabaseConnection,
+    DatabaseIntegrityReport,
+    DatabaseRestoreError,
+    MigrationChecksumError,
+    _migration_statements,
+)
 from app.db_models import VALID_ERROR_CODES
 
 
@@ -53,6 +59,7 @@ class TestMigrationRunner:
         assert "013_markdown_source_format.sql" in applied
         assert "014_markdown_reader_blocks.sql" in applied
         assert "015_word_card_source_offsets.sql" in applied
+        assert "016_migration_checksums.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -75,6 +82,150 @@ class TestMigrationRunner:
         assert "013_markdown_source_format.sql" in recorded
         assert "014_markdown_reader_blocks.sql" in recorded
         assert "015_word_card_source_offsets.sql" in recorded
+        assert "016_migration_checksums.sql" in recorded
+
+    def test_malformed_migration_rolls_back_schema_and_tracking_row(
+        self, tmp_path: Path
+    ) -> None:
+        migrations = tmp_path / "migrations"
+        migrations.mkdir()
+        (migrations / "001_bad.sql").write_text(
+            "CREATE TABLE partial_state (id INTEGER);\nTHIS IS NOT SQL;\n",
+            encoding="utf-8",
+        )
+        db = DatabaseConnection(tmp_path / "broken.db")
+
+        with pytest.raises(sqlite3.OperationalError):
+            db.apply_migrations(migrations)
+
+        assert db.table_exists("partial_state") is False
+        assert db.get_applied_migrations() == []
+
+    def test_existing_database_is_backed_up_before_pending_migration(
+        self, tmp_path: Path
+    ) -> None:
+        migrations = tmp_path / "migrations"
+        migrations.mkdir()
+        first = migrations / "001_initial.sql"
+        first.write_text("CREATE TABLE sample (id INTEGER PRIMARY KEY);\n", encoding="utf-8")
+        db = DatabaseConnection(tmp_path / "backup.db")
+        db.apply_migrations(migrations)
+        with db.get_connection() as conn:
+            conn.execute("INSERT INTO sample (id) VALUES (1)")
+
+        (migrations / "002_upgrade.sql").write_text(
+            "ALTER TABLE sample ADD COLUMN label TEXT NOT NULL DEFAULT '';\n",
+            encoding="utf-8",
+        )
+        db.apply_migrations(migrations)
+
+        backups = list(db.backup_dir.glob("backup.pre-migration.*.db"))
+        assert len(backups) == 1
+        with sqlite3.connect(backups[0]) as conn:
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(sample)")]
+            assert columns == ["id"]
+            assert conn.execute("SELECT id FROM sample").fetchone()[0] == 1
+
+    def test_modified_applied_migration_is_rejected(self, tmp_path: Path) -> None:
+        migrations = tmp_path / "migrations"
+        migrations.mkdir()
+        migration = migrations / "001_initial.sql"
+        migration.write_text("CREATE TABLE sample (id INTEGER PRIMARY KEY);\n", encoding="utf-8")
+        checksum_migration = migrations / "002_checksums.sql"
+        checksum_migration.write_text(
+            "ALTER TABLE schema_migrations ADD COLUMN checksum TEXT;\n",
+            encoding="utf-8",
+        )
+        db = DatabaseConnection(tmp_path / "checksums.db")
+        db.apply_migrations(migrations)
+
+        migration.write_text("CREATE TABLE sample (id INTEGER PRIMARY KEY, changed TEXT);\n", encoding="utf-8")
+
+        with pytest.raises(MigrationChecksumError, match="modified"):
+            db.apply_migrations(migrations)
+
+    def test_create_backup_and_restore_backup(self, db: DatabaseConnection) -> None:
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('Before restore', 'txt', 'restore-hash', '2026-01-01T00:00:00+00:00')"
+            )
+        backup = db.create_backup(reason="manual-test")
+        with db.get_connection() as conn:
+            conn.execute("UPDATE books SET title = 'Changed after backup'")
+
+        pre_restore = db.restore_backup(backup)
+
+        assert pre_restore.exists()
+        with db.get_connection() as conn:
+            assert conn.execute("SELECT title FROM books").fetchone()[0] == "Before restore"
+
+    def test_backup_requires_existing_database(self, tmp_path: Path) -> None:
+        db = DatabaseConnection(tmp_path / "missing.db")
+
+        with pytest.raises(FileNotFoundError, match="Database does not exist"):
+            db.create_backup()
+
+    def test_restore_requires_existing_backup(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        with pytest.raises(DatabaseRestoreError, match="Backup does not exist"):
+            db.restore_backup(tmp_path / "missing-backup.db")
+
+    def test_restore_rejects_non_sqlite_file(self, db: DatabaseConnection, tmp_path: Path) -> None:
+        bad_backup = tmp_path / "not-a-database.db"
+        bad_backup.write_text("not sqlite", encoding="utf-8")
+
+        with pytest.raises(DatabaseRestoreError, match="readable SQLite"):
+            db.restore_backup(bad_backup)
+
+    def test_restore_removes_temporary_file_when_replacement_fails(
+        self, db: DatabaseConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backup = db.create_backup(reason="replacement-failure")
+        temporary_path = db.db_path.with_name(f".{db.db_path.name}.restore")
+
+        def fail_replace(source: Path, destination: Path) -> None:
+            raise OSError("replacement failed")
+
+        monkeypatch.setattr("app.db_connection.os.replace", fail_replace)
+
+        with pytest.raises(OSError, match="replacement failed"):
+            db.restore_backup(backup)
+
+        assert not temporary_path.exists()
+
+    def test_integrity_report_is_healthy_for_migrated_database(
+        self, db: DatabaseConnection
+    ) -> None:
+        assert db.check_integrity() == DatabaseIntegrityReport(("ok",), ())
+
+    def test_checksum_verification_rejects_missing_applied_migration(self, tmp_path: Path) -> None:
+        migrations = tmp_path / "migrations"
+        migrations.mkdir()
+        initial = migrations / "001_initial.sql"
+        initial.write_text("CREATE TABLE sample (id INTEGER PRIMARY KEY);\n", encoding="utf-8")
+        checksum = migrations / "002_checksums.sql"
+        checksum.write_text(
+            "ALTER TABLE schema_migrations ADD COLUMN checksum TEXT;\n",
+            encoding="utf-8",
+        )
+        db = DatabaseConnection(tmp_path / "missing-migration.db")
+        db.apply_migrations(migrations)
+        initial.unlink()
+
+        with pytest.raises(MigrationChecksumError, match="missing from disk"):
+            db.apply_migrations(migrations)
+
+    def test_backup_retention_zero_leaves_existing_backups(self, db: DatabaseConnection) -> None:
+        db._backup_retention = 0
+        first = db.create_backup(reason="retention")
+        second = db.create_backup(reason="retention")
+
+        assert first.exists()
+        assert second.exists()
+
+    def test_incomplete_migration_statement_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="incomplete SQL"):
+            _migration_statements("CREATE TABLE example (id INTEGER);\nSELECT")
 
     def test_word_card_sources_migration_backfills_and_recounts(
         self, tmp_path: Path
@@ -218,6 +369,7 @@ class TestMigrationRunner:
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
+            "016_migration_checksums.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -308,6 +460,7 @@ class TestMigrationRunner:
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
+            "016_migration_checksums.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -582,6 +735,7 @@ class TestConstraints:
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
+            "016_migration_checksums.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -636,6 +790,7 @@ class TestConstraints:
                 "013_markdown_source_format.sql",
                 "014_markdown_reader_blocks.sql",
                 "015_word_card_source_offsets.sql",
+                "016_migration_checksums.sql",
             }:
                 shutil.copy(sql_file, old_migrations / sql_file.name)
 
@@ -677,6 +832,7 @@ class TestConstraints:
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
+            "016_migration_checksums.sql",
         ]
         with db.get_connection() as conn:
             conn.execute(
@@ -746,6 +902,7 @@ class TestConstraints:
             "013_markdown_source_format.sql",
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
+            "016_migration_checksums.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

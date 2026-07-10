@@ -231,6 +231,8 @@ def test_call_llm_returns_message_content(monkeypatch) -> None:
             api_key="key",
             base_url="https://example.test",
             model="provider-model",
+            timeout_seconds=12.5,
+            max_retries=2,
         ),
     )
     monkeypatch.setitem(
@@ -243,6 +245,8 @@ def test_call_llm_returns_message_content(monkeypatch) -> None:
     assert captured["client_kwargs"] == {
         "api_key": "key",
         "base_url": "https://example.test",
+        "timeout": 12.5,
+        "max_retries": 2,
     }
     assert captured["model"] == "provider-model"
     assert captured["messages"] == [{"role": "user", "content": "Prompt"}]
@@ -257,7 +261,13 @@ def test_call_llm_wraps_provider_errors(monkeypatch) -> None:
     monkeypatch.setattr(
         llm_sentence_analyzer,
         "get_ai_provider_settings",
-        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-model"),
+        lambda _model: SimpleNamespace(
+            api_key="key",
+            base_url="",
+            model="provider-model",
+            timeout_seconds=12.5,
+            max_retries=2,
+        ),
     )
     monkeypatch.setitem(
         __import__("sys").modules,

@@ -100,9 +100,18 @@ def test_render_replaces_variables() -> None:
 
 def test_call_llm_returns_chat_completion_text(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeClient:
-        def __init__(self, *, api_key: str, base_url: str) -> None:
+        def __init__(
+            self,
+            *,
+            api_key: str,
+            base_url: str,
+            timeout: float,
+            max_retries: int,
+        ) -> None:
             self.api_key = api_key
             self.base_url = base_url
+            assert timeout == 12.5
+            assert max_retries == 2
             self.chat = SimpleNamespace(
                 completions=SimpleNamespace(create=self.create),
             )
@@ -128,6 +137,8 @@ def test_call_llm_returns_chat_completion_text(monkeypatch: pytest.MonkeyPatch) 
             api_key="key",
             base_url="https://example.invalid",
             model="provider-model",
+            timeout_seconds=12.5,
+            max_retries=2,
         ),
     )
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from app.db_connection import DatabaseConnection
@@ -60,7 +61,9 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 _unlink_silent(tmp_path)
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
-                return _do_import_epub(db_factory(), tmp_path, title, author)
+                return await run_in_threadpool(
+                    _do_import_epub, db_factory(), tmp_path, title, author
+                )
             finally:
                 _unlink_silent(tmp_path)
 
@@ -80,7 +83,9 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 _unlink_silent(tmp_path)
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
-                return _do_import_pdf(db_factory(), tmp_path, title, author)
+                return await run_in_threadpool(
+                    _do_import_pdf, db_factory(), tmp_path, title, author
+                )
             finally:
                 _unlink_silent(tmp_path)
 
@@ -100,7 +105,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 _unlink_silent(tmp_path)
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
-                return _do_import_markdown(
+                return await run_in_threadpool(
+                    _do_import_markdown,
                     db_factory(),
                     tmp_path,
                     title,
@@ -119,15 +125,15 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             )
         if not raw.strip():
             return _error_page("Uploaded file is empty.", status_code=400)
-        return _import_outcome_response(
-            import_text_bytes(
+        outcome = await run_in_threadpool(
+            import_text_bytes,
                 db_factory(),
                 raw,
                 form_title=title,
                 author=author,
                 fallback_title=_upload_title_stem(file.filename or ""),
-            )
         )
+        return _import_outcome_response(outcome)
 
     @web_app.post("/import/paste")
     async def import_paste(request: Request) -> Any:
@@ -143,14 +149,14 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             )
         if not text.strip():
             return _error_page("Pasted text is empty.", status_code=400)
-        return _import_outcome_response(
-            import_text_bytes(
+        outcome = await run_in_threadpool(
+            import_text_bytes,
                 db_factory(),
                 raw,
                 form_title=title,
                 author=author,
-            )
         )
+        return _import_outcome_response(outcome)
 
     @web_app.post("/import/url")
     async def import_url(request: Request) -> Any:
@@ -160,14 +166,14 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         author = form.get("author", "")
         if not url.strip():
             return _error_page("URL is empty.", status_code=400)
-        return _import_outcome_response(
-            import_url_content(
+        outcome = await run_in_threadpool(
+            import_url_content,
                 db_factory(),
                 url,
                 form_title=title,
                 author=author,
-            )
         )
+        return _import_outcome_response(outcome)
 
     def _import_outcome_response(outcome: ImportOutcome) -> Any:
         if outcome.is_duplicate:

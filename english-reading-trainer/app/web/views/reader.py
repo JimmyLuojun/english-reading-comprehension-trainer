@@ -8,7 +8,6 @@ from typing import Any
 
 from app.web.views.books import _section_label
 from app.web.views.layout import _escape
-from app.web.views.reader_script import _selection_script
 
 _INLINE_MARKDOWN_IMAGE_RE = re.compile(r"\[\[md-image:(\d+)\]\]")
 _WORD_BOUNDARY_CHARS = r"A-Za-z0-9"
@@ -530,7 +529,7 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
       <button id="toolbar-analysis-open" type="button" hidden>AI analysis</button>
     </div>
     <script id="word-card-index" type="application/json">{_json_script(word_index)}</script>
-    <script>{_selection_script()}</script>
+    <script src="/static/reader.js"></script>
     """
 
 

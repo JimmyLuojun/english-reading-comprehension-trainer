@@ -1,0 +1,20 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra browser --locked
+        working-directory: english-reading-trainer
+      - run: .venv/bin/python -m playwright install --with-deps chromium
+        working-directory: english-reading-trainer
+      - run: make verify

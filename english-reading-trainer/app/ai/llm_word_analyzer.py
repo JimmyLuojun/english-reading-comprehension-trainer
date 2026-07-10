@@ -170,6 +170,8 @@ def _call_llm(prompt: str, model: str) -> str:
         client = openai.OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url or None,
+            timeout=settings.timeout_seconds,
+            max_retries=settings.max_retries,
         )
         response = client.chat.completions.create(
             model=settings.model,

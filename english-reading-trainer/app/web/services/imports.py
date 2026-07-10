@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
+from typing import Any, Callable
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -134,37 +135,57 @@ def fetch_url_article(
     timeout_seconds: float = _URL_IMPORT_TIMEOUT_SECONDS,
     max_redirects: int = _URL_IMPORT_MAX_REDIRECTS,
     transport: httpx.BaseTransport | None = None,
+    resolve_host: Callable[[str], tuple[str, ...]] | None = None,
 ) -> FetchedUrlArticle:
     """Download a URL with size/type limits and return extracted article text."""
-    normalized_url = _validate_import_url(url)
+    resolver = resolve_host
+    if resolver is None and transport is None:
+        resolver = _resolve_public_host
+    normalized_url = _validate_import_url(url, resolve_host=resolver)
     headers = {
         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.1",
         "User-Agent": "EnglishReadingTrainer/0.1 URL Import",
     }
     try:
         with httpx.Client(
-            follow_redirects=True,
-            max_redirects=max_redirects,
+            follow_redirects=False,
             timeout=timeout_seconds,
             transport=transport,
+            trust_env=False,
         ) as client:
-            with client.stream("GET", normalized_url, headers=headers) as response:
-                _validate_import_url(str(response.url))
-                if response.status_code >= 400:
-                    raise UrlImportError(f"URL returned HTTP {response.status_code}.")
-                content_type = _response_content_type(response.headers.get("content-type", ""))
-                if content_type and content_type not in _ALLOWED_URL_CONTENT_TYPES:
-                    raise UrlImportError(
-                        "URL must return HTML or plain text content.",
-                    )
-                content_length = _parse_content_length(response.headers.get("content-length", ""))
-                if content_length is not None and content_length > max_bytes:
-                    raise UrlImportError(
-                        f"URL content exceeds {_format_byte_limit(max_bytes)} limit.",
-                        status_code=413,
-                    )
-                raw = _read_limited_response(response, max_bytes=max_bytes)
-                encoding = _response_charset(response.headers.get("content-type", ""))
+            redirects = 0
+            while True:
+                normalized_url = _validate_import_url(
+                    normalized_url,
+                    resolve_host=resolver,
+                )
+                with client.stream("GET", normalized_url, headers=headers) as response:
+                    _validate_import_url(str(response.url), resolve_host=resolver)
+                    if response.is_redirect:
+                        location = response.headers.get("location", "")
+                        if not location:
+                            raise UrlImportError("URL redirect is missing a location.")
+                        if redirects >= max_redirects:
+                            raise UrlImportError("URL redirected too many times.")
+                        normalized_url = urljoin(normalized_url, location)
+                        redirects += 1
+                        continue
+                    if response.status_code >= 400:
+                        raise UrlImportError(f"URL returned HTTP {response.status_code}.")
+                    content_type = _response_content_type(response.headers.get("content-type", ""))
+                    if content_type and content_type not in _ALLOWED_URL_CONTENT_TYPES:
+                        raise UrlImportError(
+                            "URL must return HTML or plain text content.",
+                        )
+                    content_length = _parse_content_length(response.headers.get("content-length", ""))
+                    if content_length is not None and content_length > max_bytes:
+                        raise UrlImportError(
+                            f"URL content exceeds {_format_byte_limit(max_bytes)} limit.",
+                            status_code=413,
+                        )
+                    raw = _read_limited_response(response, max_bytes=max_bytes)
+                    encoding = _response_charset(response.headers.get("content-type", ""))
+                    break
     except httpx.TooManyRedirects as exc:
         raise UrlImportError("URL redirected too many times.") from exc
     except httpx.TimeoutException as exc:
@@ -185,7 +206,11 @@ def fetch_url_article(
     return FetchedUrlArticle(title=title, text=text)
 
 
-def _validate_import_url(url: str) -> str:
+def _validate_import_url(
+    url: str,
+    *,
+    resolve_host: Callable[[str], tuple[str, ...]] | None = None,
+) -> str:
     normalized = str(url or "").strip()
     parsed = urlparse(normalized)
     if parsed.scheme.lower() not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
@@ -195,6 +220,10 @@ def _validate_import_url(url: str) -> str:
     host = parsed.hostname or ""
     if _is_blocked_host(host):
         raise UrlImportError("URL host is not allowed.")
+    if resolve_host is not None:
+        for address in resolve_host(host):
+            if _is_blocked_host(address):
+                raise UrlImportError("URL host is not allowed.")
     return normalized
 
 
@@ -206,13 +235,18 @@ def _is_blocked_host(host: str) -> bool:
         address = ipaddress.ip_address(lowered)
     except ValueError:
         return False
-    return (
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_unspecified
-    )
+    return not address.is_global
+
+
+def _resolve_public_host(host: str) -> tuple[str, ...]:
+    try:
+        results = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise UrlImportError("URL host could not be resolved.") from exc
+    addresses = tuple(sorted({str(result[4][0]) for result in results if result[4]}))
+    if not addresses:
+        raise UrlImportError("URL host could not be resolved.")
+    return addresses
 
 
 def _response_content_type(header: str) -> str:

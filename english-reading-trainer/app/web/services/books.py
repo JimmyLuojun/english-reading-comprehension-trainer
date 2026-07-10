@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.db_connection import DatabaseConnection
 from app.web.models import DeleteBookResult
-from app.web.queries import _delete_book, _purge_book_assets_dir
+from app.web.queries import _delete_book, _fetch_book, _purge_book_assets_dir
 
 
 def delete_book_and_assets(
@@ -12,8 +12,10 @@ def delete_book_and_assets(
     book_id: int,
 ) -> DeleteBookResult | None:
     """Delete a book and purge its asset directory after the DB commit."""
-    result = _delete_book(db, book_id)
-    if result is None:
+    if _fetch_book(db, book_id) is None:
         return None
+    db.create_backup(reason=f"pre-book-delete-{book_id}")
+    result = _delete_book(db, book_id)
+    assert result is not None
     _purge_book_assets_dir(db, book_id)
     return result

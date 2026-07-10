@@ -1,8 +1,8 @@
 CREATE TABLE schema_migrations (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename    TEXT    NOT NULL UNIQUE,
-                    applied_at  TEXT    NOT NULL
-                );
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename    TEXT    NOT NULL UNIQUE,
+                applied_at  TEXT    NOT NULL
+            , checksum TEXT);
 CREATE TABLE sqlite_sequence(name,seq);
 CREATE TABLE chapters (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,13 +164,13 @@ CREATE TABLE book_assets (
 );
 CREATE INDEX idx_book_assets_book
     ON book_assets(book_id);
-CREATE TABLE "error_types" (
+CREATE TABLE IF NOT EXISTS "error_types" (
     id    INTEGER PRIMARY KEY AUTOINCREMENT,
     code  TEXT    NOT NULL UNIQUE,
     name  TEXT    NOT NULL,
     layer TEXT    NOT NULL CHECK(layer IN ('grammar','lexical','discourse','inference'))
 );
-CREATE TABLE "books" (
+CREATE TABLE IF NOT EXISTS "books" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     title           TEXT    NOT NULL,
     author          TEXT    NOT NULL DEFAULT '',
@@ -181,7 +181,7 @@ CREATE TABLE "books" (
     total_chapters  INTEGER NOT NULL DEFAULT 0,
     total_sentences INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE "chapter_blocks" (
+CREATE TABLE IF NOT EXISTS "chapter_blocks" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     chapter_id      INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
@@ -201,7 +201,7 @@ CREATE INDEX idx_chapter_blocks_book
     ON chapter_blocks(book_id);
 CREATE INDEX idx_chapter_blocks_chapter
     ON chapter_blocks(chapter_id, idx);
-CREATE TABLE "word_card_sources" (
+CREATE TABLE IF NOT EXISTS "word_card_sources" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id         INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
     sentence_id     INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,

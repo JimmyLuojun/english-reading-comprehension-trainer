@@ -15,6 +15,7 @@ def test_delete_book_and_assets_purges_after_success(monkeypatch) -> None:
         review_logs_deleted=4,
     )
 
+    monkeypatch.setattr(books, "_fetch_book", lambda db, book_id: {"id": book_id})
     monkeypatch.setattr(books, "_delete_book", lambda db, book_id: result)
     monkeypatch.setattr(
         books,
@@ -22,16 +23,20 @@ def test_delete_book_and_assets_purges_after_success(monkeypatch) -> None:
         lambda db, book_id: calls.append((db, book_id)),
     )
 
-    db = object()
+    class FakeDb:
+        def create_backup(self, *, reason: str) -> None:
+            calls.append((reason, 0))
+
+    db = FakeDb()
 
     assert books.delete_book_and_assets(db, 42) == result
-    assert calls == [(db, 42)]
+    assert calls == [("pre-book-delete-42", 0), (db, 42)]
 
 
 def test_delete_book_and_assets_skips_purge_when_book_missing(monkeypatch) -> None:
     calls: list[tuple[object, int]] = []
 
-    monkeypatch.setattr(books, "_delete_book", lambda db, book_id: None)
+    monkeypatch.setattr(books, "_fetch_book", lambda db, book_id: None)
     monkeypatch.setattr(
         books,
         "_purge_book_assets_dir",

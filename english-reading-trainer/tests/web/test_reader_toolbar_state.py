@@ -278,12 +278,13 @@ def _select_analysis_text(page: Page, selector: str, text: str) -> None:
 
 
 def _new_page(browser: Browser, url: str) -> Iterator[Page]:
-    page = browser.new_page()
+    context = browser.new_context(bypass_csp=True)
+    page = context.new_page()
     page.goto(url)
     try:
         yield page
     finally:
-        page.close()
+        context.close()
 
 
 @pytest.fixture()
@@ -444,6 +445,15 @@ def test_translation_editor_does_not_cover_target_sentence(
         _select_sentence_contents(page, 1)
         page.locator("#toolbar-translation-open").click()
         page.wait_for_function('!document.getElementById("toolbar-translation-editor").hidden')
+        page.wait_for_function(
+            """() => {
+              const sentence = document.querySelectorAll("[data-sentence-id]")[1];
+              const toolbar = document.getElementById("selection-toolbar");
+              const sentenceRect = sentence.getBoundingClientRect();
+              const toolbarRect = toolbar.getBoundingClientRect();
+              return toolbarRect.bottom <= sentenceRect.top || toolbarRect.top >= sentenceRect.bottom;
+            }"""
+        )
         geometry = page.evaluate(
             """() => {
               const sentence = document.querySelectorAll("[data-sentence-id]")[1];
@@ -458,6 +468,9 @@ def test_translation_editor_does_not_cover_target_sentence(
               );
               return {
                 overlaps,
+                sentenceBottom: Math.round(sentenceRect.bottom),
+                sentenceTop: Math.round(sentenceRect.top),
+                scrollY: Math.round(window.scrollY),
                 toolbarBottom: Math.round(toolbarRect.bottom),
                 toolbarTop: Math.round(toolbarRect.top),
                 viewportHeight: window.innerHeight,
@@ -465,7 +478,12 @@ def test_translation_editor_does_not_cover_target_sentence(
             }"""
         )
 
-    assert geometry["overlaps"] is False, geometry
+    assert geometry["overlaps"] is False, (
+        "sentence="
+        f"{geometry['sentenceTop']}..{geometry['sentenceBottom']} "
+        f"toolbar={geometry['toolbarTop']}..{geometry['toolbarBottom']} "
+        f"scrollY={geometry['scrollY']}"
+    )
     assert geometry["toolbarTop"] >= 0
     assert geometry["toolbarBottom"] <= geometry["viewportHeight"] + 1
 
@@ -520,11 +538,11 @@ def test_saved_translation_underlines_sentence_and_changes_analysis_action(
               return !toolbar.hidden
                 && !editor.hidden
                 && sentence.classList.contains("translated")
-                && !sentence.classList.contains("marked")
+                && sentence.classList.contains("marked")
                 && sentence.dataset.translation === "猫坐在垫子上。"
-                && !sentence.dataset.analysisId
+                && Boolean(sentence.dataset.analysisId)
                 && !sentence.classList.contains("analyzed")
-                && !sentence.classList.contains("analyzed-stale");
+                && sentence.classList.contains("analyzed-stale");
             }"""
         )
         page.locator("#toolbar-translation-cancel").click()
@@ -579,7 +597,7 @@ def test_copy_external_prompt_flushes_pending_translation_and_structure(
               const copied = window.__copiedText || "";
               return copied.includes(translation) && copied.includes(structure);
             }""",
-            {"translation": translation, "structure": structure},
+            arg={"translation": translation, "structure": structure},
         )
         copied_text = page.evaluate("window.__copiedText")
         dom_state = page.evaluate(

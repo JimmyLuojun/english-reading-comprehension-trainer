@@ -19,11 +19,13 @@ from fastapi.testclient import TestClient
 from app.ai.ai_response_cache import compute_content_hash
 from app.ai.context_builder import get_sentence_info
 from app.ai.llm_sentence_analyzer import SentenceAnalysisResult
-from app.db_connection import DatabaseConnection
+from app.db_connection import DatabaseConnection, DatabaseIntegrityReport
 from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
 from app.review.sm2_scheduler import apply_review
 from app.web.fastapi_app import create_app
+from app.web import fastapi_app
+from app.web.views.reader_script import _selection_script
 from tests.importers.epub_builder import (
     PNG_1X1_BYTES,
     make_epub_with_image,
@@ -334,16 +336,68 @@ class TestBasicPages:
         response = client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        assert response.json() == {"status": "ok", "database": "ok"}
+
+    def test_reader_script_is_served_as_a_static_asset(self, client: TestClient) -> None:
+        response = client.get("/static/reader.js")
+
+        assert response.status_code == 200
+        assert "function positionToolbar(anchor)" in response.text
+        assert "script-src 'self' 'unsafe-inline'" in response.headers["content-security-policy"]
+
+    def test_default_factory_initializes_once_during_lifespan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db = DatabaseConnection(tmp_path / "lifespan.db")
+        db.apply_migrations(MIGRATIONS_DIR)
+        calls: list[bool] = []
+
+        def fake_get_db() -> DatabaseConnection:
+            calls.append(True)
+            return db
+
+        monkeypatch.setattr(fastapi_app, "_get_db", fake_get_db)
+        web_app = fastapi_app.create_app(request_token="lifespan-token")
+        with TestClient(web_app) as client:
+            assert client.get("/", headers={"X-Trainer-Token": "lifespan-token"}).status_code == 200
+            assert client.get("/health", headers={"X-Trainer-Token": "lifespan-token"}).status_code == 200
+
+        assert calls == [True]
+
+    def test_health_returns_503_for_failed_integrity_check(self) -> None:
+        class UnhealthyDatabase:
+            @staticmethod
+            def check_integrity() -> DatabaseIntegrityReport:
+                return DatabaseIntegrityReport(("corrupt",), ())
+
+        client = TestClient(create_app(lambda: UnhealthyDatabase()))
+
+        response = client.get("/health")
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "error", "database": "invalid"}
+
+    def test_health_returns_503_when_integrity_check_raises(self) -> None:
+        class FailingDatabase:
+            @staticmethod
+            def check_integrity() -> DatabaseIntegrityReport:
+                raise RuntimeError("database unavailable")
+
+        client = TestClient(create_app(lambda: FailingDatabase()))
+
+        response = client.get("/health")
+
+        assert response.status_code == 503
+        assert response.json() == {"status": "error", "database": "unavailable"}
 
     def test_default_db_factory_syncs_prompt_versions(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         db_path = tmp_path / "web.db"
         monkeypatch.setenv("TRAINER_DB", str(db_path))
-        client = TestClient(create_app())
+        client = TestClient(create_app(request_token="default-factory-test-token"))
 
-        response = client.get("/")
+        response = client.get("/", headers={"X-Trainer-Token": "default-factory-test-token"})
 
         assert response.status_code == 200
         db = DatabaseConnection(db_path)
@@ -871,14 +925,16 @@ class TestReadingAndMarking:
         assert "window.prompt" not in response.text
         assert "reader:progress:book:${bookId}" in response.text
         assert 'data-restore-progress="1"' in response.text
-        assert "top_sentence_id" in response.text
-        assert "/mark/word" in response.text
-        assert "selectedWordCardIds" in response.text
-        assert "captureReadingAnchor" in response.text
-        assert "restoreReadingAnchor" in response.text
-        assert "markReaderSelection" in response.text
-        assert "range.intersectsNode(span)" in response.text
-        assert "deleteWordCardsAndReload" in response.text
+        assert '<script src="/static/reader.js"></script>' in response.text
+        script = _selection_script()
+        assert "top_sentence_id" in script
+        assert "/mark/word" in script
+        assert "selectedWordCardIds" in script
+        assert "captureReadingAnchor" in script
+        assert "restoreReadingAnchor" in script
+        assert "markReaderSelection" in script
+        assert "range.intersectsNode(span)" in script
+        assert "deleteWordCardsAndReload" in script
         assert ".reader-sentence:target" in response.text
 
     def test_read_page_links_to_adjacent_chapter_boundaries(
@@ -967,13 +1023,14 @@ class TestReadingAndMarking:
 
         assert response.status_code == 200
         assert 'id="toolbar-cross-sentence-delete"' in response.text
-        assert "activeCrossSentenceIds" in response.text
-        assert "configureCrossSentenceActions(spans)" in response.text
-        assert "Unmark ${activeCrossSentenceIds.length} sentence" in response.text
-        assert "Promise.all(requests)" in response.text
-        assert 'classList.remove("marked", "analyzed", "analyzed-stale")' in response.text
-        assert 'sentence.dataset.marked = "0";' in response.text
-        assert 'sentence.dataset.analysisId = "";' in response.text
+        script = _selection_script()
+        assert "activeCrossSentenceIds" in script
+        assert "configureCrossSentenceActions(spans)" in script
+        assert "Unmark ${activeCrossSentenceIds.length} sentence" in script
+        assert "Promise.all(requests)" in script
+        assert 'classList.remove("marked", "analyzed", "analyzed-stale")' in script
+        assert 'sentence.dataset.marked = "0";' in script
+        assert 'sentence.dataset.analysisId = "";' in script
 
     def test_read_page_marks_active_sentence_in_metadata(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -1798,16 +1855,17 @@ class TestReadingAndMarking:
         assert 'id="toolbar-analysis-word-status"' in response.text
         assert 'id="analysis-word-sections"' in response.text
         assert 'id="analysis-sentence-sections"' in response.text
-        assert "requestWordAnalysis" in response.text
-        assert "markAnalysisSelection" in response.text
-        assert "context_text" in response.text
-        assert "analysisContextFromRange" in response.text
-        assert "registerWordCard" in response.text
-        assert "rebuildGlossaryRegex" in response.text
-        assert '"X-Requested-With": "fetch"' in response.text
-        assert "pushCurrentAnalysis" in response.text
-        assert "restorePreviousAnalysis" in response.text
-        assert "Back to ${previous.label} analysis" in response.text
+        script = _selection_script()
+        assert "requestWordAnalysis" in script
+        assert "markAnalysisSelection" in script
+        assert "context_text" in script
+        assert "analysisContextFromRange" in script
+        assert "registerWordCard" in script
+        assert "rebuildGlossaryRegex" in script
+        assert '"X-Requested-With": "fetch"' in script
+        assert "pushCurrentAnalysis" in script
+        assert "restorePreviousAnalysis" in script
+        assert "Back to ${previous.label} analysis" in script
         # §22 elements
         assert 'id="analysis-word-register"' in response.text
         assert 'id="analysis-word-why"' in response.text
@@ -1816,22 +1874,22 @@ class TestReadingAndMarking:
         assert 'id="word-panel-save"' in response.text
         assert 'id="analysis-word-pronunciation"' in response.text
         assert 'data-speak-text=""' in response.text
-        assert "ERROR_CODE_LABELS" in response.text
-        assert "word-analysis-active" in response.text
-        assert "renderVsSimpler" in response.text
-        assert "payload.surface_form || payload.lemma" in response.text
+        assert "ERROR_CODE_LABELS" in script
+        assert "word-analysis-active" in script
+        assert "renderVsSimpler" in script
+        assert "payload.surface_form || payload.lemma" in script
         assert "voiceschanged" in response.text
         assert "speechSynthesis.cancel()" in response.text
-        assert "function applyGlossaryHighlights(element)" in response.text
-        assert "glossaryEntries" in response.text
-        assert "glossary-word" in response.text
-        assert "function unregisterWordCard(cardId)" in response.text
-        assert "function deleteAnalysisWordCardInPlace(cardId)" in response.text
-        assert "showGlossaryWordDetail" in response.text
-        assert 'panel.addEventListener("mouseover"' not in response.text
-        assert "saveAnalysisMeaningIfEmpty" in response.text
-        assert "glossary_return_url" in response.text
-        assert "/cards#card-${cardId}" in response.text
+        assert "function applyGlossaryHighlights(element)" in script
+        assert "glossaryEntries" in script
+        assert "glossary-word" in script
+        assert "function unregisterWordCard(cardId)" in script
+        assert "function deleteAnalysisWordCardInPlace(cardId)" in script
+        assert "showGlossaryWordDetail" in script
+        assert 'panel.addEventListener("mouseover"' not in script
+        assert "saveAnalysisMeaningIfEmpty" in script
+        assert "glossary_return_url" in script
+        assert "/cards#card-${cardId}" in script
         assert "background: #fef3c7" in response.text
         assert "max-width: min(calc(100vw - 16px), 760px)" in response.text
         assert ".word-detail-actions button" in response.text
@@ -1876,22 +1934,23 @@ class TestReadingAndMarking:
         response = client.get(f"/read/{book_id}")
 
         assert response.status_code == 200
-        assert "function hideAllPanels(options = {})" in response.text
-        assert "function blurToolbarFocus()" in response.text
-        assert "function selectionInsideToolbar(range)" in response.text
-        assert "function selectionInsideAnalysisPanel(range)" in response.text
-        assert "function showAnalysisWordToolbar(range, selectedText)" in response.text
-        assert "if (toolbarContainsFocus()) return;" in response.text
-        assert "if (selectionInsideToolbar(range)) return;" in response.text
-        assert "if (selectionInsideAnalysisPanel(range))" in response.text
-        assert 'reader.addEventListener("mousedown", () => {' in response.text
-        assert "blurToolbarFocus();" in response.text
-        assert "(!toolbar.hidden && toolbarContainsFocus())" not in response.text
-        assert "let suppressNextUpdate = false;" in response.text
-        assert "suppressNextUpdate = true;" in response.text
-        assert "setVisible(wordDetail, true);" in response.text
-        assert "setVisible(wordExisting" not in response.text
-        assert "wordDelete.addEventListener" not in response.text
+        script = _selection_script()
+        assert "function hideAllPanels(options = {})" in script
+        assert "function blurToolbarFocus()" in script
+        assert "function selectionInsideToolbar(range)" in script
+        assert "function selectionInsideAnalysisPanel(range)" in script
+        assert "function showAnalysisWordToolbar(range, selectedText)" in script
+        assert "if (toolbarContainsFocus()) return;" in script
+        assert "if (selectionInsideToolbar(range)) return;" in script
+        assert "if (selectionInsideAnalysisPanel(range))" in script
+        assert 'reader.addEventListener("mousedown", () => {' in script
+        assert "blurToolbarFocus();" in script
+        assert "(!toolbar.hidden && toolbarContainsFocus())" not in script
+        assert "let suppressNextUpdate = false;" in script
+        assert "suppressNextUpdate = true;" in script
+        assert "setVisible(wordDetail, true);" in script
+        assert "setVisible(wordExisting" not in script
+        assert "wordDelete.addEventListener" not in script
 
     def test_mark_word_invalid_input_returns_400(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -3175,9 +3234,10 @@ class TestWordAnalysisPanelV2:
         book_id, _ = _seed_book(db, tmp_path)
         response = client.get(f"/read/{book_id}")
         assert response.status_code == 200
-        assert "ERROR_CODE_LABELS" in response.text
-        assert "L06" in response.text
-        assert "G01" in response.text
+        script = _selection_script()
+        assert "ERROR_CODE_LABELS" in script
+        assert "L06" in script
+        assert "G01" in script
 
     def test_js_has_render_vs_simpler(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -3185,8 +3245,9 @@ class TestWordAnalysisPanelV2:
         book_id, _ = _seed_book(db, tmp_path)
         response = client.get(f"/read/{book_id}")
         assert response.status_code == 200
-        assert "renderVsSimpler" in response.text
-        assert "vs-simpler-item" in response.text
+        script = _selection_script()
+        assert "renderVsSimpler" in script
+        assert "vs-simpler-item" in script
 
     def test_js_has_word_highlight_logic(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -3202,8 +3263,9 @@ class TestWordAnalysisPanelV2:
         book_id, _ = _seed_book(db, tmp_path)
         response = client.get(f"/read/{book_id}")
         assert response.status_code == 200
-        assert "wordPanelSave" in response.text
-        assert "wordPanelSaveStatus" in response.text
+        script = _selection_script()
+        assert "wordPanelSave" in script
+        assert "wordPanelSaveStatus" in script
 
     def test_js_renders_chinese_word_meaning(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -3211,9 +3273,10 @@ class TestWordAnalysisPanelV2:
         book_id, _ = _seed_book(db, tmp_path)
         response = client.get(f"/read/{book_id}")
         assert response.status_code == 200
-        assert "wordAnalysisMeaningZh" in response.text
-        assert "a.chinese_meaning || a.chinese_gloss" in response.text
-        assert "中文：" in response.text
+        script = _selection_script()
+        assert "wordAnalysisMeaningZh" in script
+        assert "a.chinese_meaning || a.chinese_gloss" in script
+        assert "中文：" in script
 
     def test_post_word_analysis_v2_payload_returned(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

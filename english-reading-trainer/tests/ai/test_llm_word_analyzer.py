@@ -121,7 +121,13 @@ def test_word_call_llm_returns_empty_string_for_empty_message(monkeypatch) -> No
     monkeypatch.setattr(
         llm_word_analyzer,
         "get_ai_provider_settings",
-        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-word"),
+        lambda _model: SimpleNamespace(
+            api_key="key",
+            base_url="",
+            model="provider-word",
+            timeout_seconds=12.5,
+            max_retries=2,
+        ),
     )
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -130,7 +136,12 @@ def test_word_call_llm_returns_empty_string_for_empty_message(monkeypatch) -> No
     )
 
     assert _call_llm("Prompt", "logical-model") == ""
-    assert captured["client_kwargs"] == {"api_key": "key", "base_url": None}
+    assert captured["client_kwargs"] == {
+        "api_key": "key",
+        "base_url": None,
+        "timeout": 12.5,
+        "max_retries": 2,
+    }
     assert captured["model"] == "provider-word"
     assert captured["messages"] == [{"role": "user", "content": "Prompt"}]
     assert captured["temperature"] == 0.0
@@ -144,7 +155,13 @@ def test_word_call_llm_wraps_provider_errors(monkeypatch) -> None:
     monkeypatch.setattr(
         llm_word_analyzer,
         "get_ai_provider_settings",
-        lambda _model: SimpleNamespace(api_key="key", base_url="", model="provider-word"),
+        lambda _model: SimpleNamespace(
+            api_key="key",
+            base_url="",
+            model="provider-word",
+            timeout_seconds=12.5,
+            max_retries=2,
+        ),
     )
     monkeypatch.setitem(
         __import__("sys").modules,

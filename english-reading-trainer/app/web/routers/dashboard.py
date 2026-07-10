@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.db_connection import DatabaseConnection
 from app.profile.learner_profile_generator import (
@@ -63,5 +63,11 @@ def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], Databas
         return _html_page("Dashboard", body, active="dashboard")
 
     @web_app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health() -> JSONResponse:
+        try:
+            report = db_factory().check_integrity()
+        except Exception:
+            return JSONResponse({"status": "error", "database": "unavailable"}, status_code=503)
+        if not report.is_healthy:
+            return JSONResponse({"status": "error", "database": "invalid"}, status_code=503)
+        return JSONResponse({"status": "ok", "database": "ok"})

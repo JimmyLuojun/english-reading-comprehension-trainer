@@ -10,16 +10,19 @@ From the repository root:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m uvicorn app.web.fastapi_app:app --host 127.0.0.1 --port 8001 --reload
+.venv/bin/python -m app.web.launcher run --port 8001
 ```
 
-Then open `http://127.0.0.1:8001`.
+Open the tokenized loopback URL printed by the launcher. The browser receives a
+strict local cookie after the first request; API automation can instead send the
+same token in `X-Trainer-Token`. The service intentionally binds only to
+`127.0.0.1` and is not a multi-user or network-facing deployment.
 
 The app uses `english-reading-trainer/data/reading_trainer.db` by default and
 applies migrations automatically on startup. To use another database:
 
 ```bash
-TRAINER_DB=/path/to/reading_trainer.db .venv/bin/python -m uvicorn app.web.fastapi_app:app --host 127.0.0.1 --port 8001 --reload
+TRAINER_DB=/path/to/reading_trainer.db .venv/bin/python -m app.web.launcher run --port 8001
 ```
 
 If `.venv` does not exist yet, run the setup step below first. Prefer the
@@ -53,7 +56,7 @@ the existing virtual environment directly:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m uvicorn app.web.fastapi_app:app --host 127.0.0.1 --port 8001 --reload
+.venv/bin/python -m app.web.launcher run --port 8001
 ```
 
 In shared handoff setups, logs may show the physical path under
@@ -78,6 +81,8 @@ OPENAI_BASE_URL=https://api.deepseek.com/v1
 TRAINER_MODEL=deepseek-v4-flash
 TRAINER_SENTENCE_MODEL=deepseek-v4-pro
 TRAINER_PRO_MODEL=deepseek-v4-pro
+TRAINER_LLM_TIMEOUT_SECONDS=45
+TRAINER_LLM_MAX_RETRIES=1
 ```
 
 The code also accepts real environment variables with the same names; exported
@@ -130,27 +135,40 @@ Review and profile:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m uvicorn app.web.fastapi_app:app --host 127.0.0.1 --port 8001 --reload
+.venv/bin/python -m app.web.launcher run --port 8001
 ```
 
-Then open `http://127.0.0.1:8001`.
+Open the tokenized URL printed by the launcher. Keep the service on the local
+machine; the launcher deliberately does not expose it on a LAN interface.
 
 The web UI supports TXT/Markdown/EPUB/PDF file import, URL import for
 HTML/plain-text pages, the dashboard, book browsing, chapter reading, sentence
 and word marking, card lists, review actions, profile prompt generation, profile
 saving, and latest profile viewing.
 
+## Database Recovery
+
+Migrations and destructive book deletes create SQLite backups in `data/backups/`.
+Run recovery commands while the web server is stopped:
+
+```bash
+cd english-reading-trainer
+.venv/bin/python -m app.cli_entry db backup
+.venv/bin/python -m app.cli_entry db integrity
+.venv/bin/python -m app.cli_entry db restore data/backups/reading_trainer.manual-*.db --yes
+```
+
 ## Tests
 
 ```bash
 cd english-reading-trainer
 .venv/bin/python -m pytest tests/
-.venv/bin/python -m pytest --cov=app --cov-report=term-missing tests/
+make verify
 ```
 
-Project coverage policy is configured in `pyproject.toml`: total line coverage
-must stay at or above 90%, and the key modules `sm2_scheduler`,
-`ai_response_cache`, and `json_output_validator` are expected to stay at 100%.
+`make verify` runs Ruff, branch coverage, per-module coverage gates, schema drift
+checks, and Playwright reader interaction tests. For a new development setup,
+install browser dependencies with `uv sync --extra dev --extra browser`.
 
 ## Project Layout
 

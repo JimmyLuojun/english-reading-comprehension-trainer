@@ -76,11 +76,16 @@ _MIGRATIONS   = _PROJECT_ROOT / "migrations"
 
 
 def _get_db() -> DatabaseConnection:
-    db_path = os.environ.get("TRAINER_DB", str(_DEFAULT_DB))
-    db = DatabaseConnection(db_path)
+    db = _open_db()
     db.apply_migrations(_MIGRATIONS)
     sync_prompt_versions(db, _PROJECT_ROOT / "prompts")
     return db
+
+
+def _open_db() -> DatabaseConnection:
+    """Open the configured database without applying migrations."""
+    db_path = os.environ.get("TRAINER_DB", str(_DEFAULT_DB))
+    return DatabaseConnection(db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +100,7 @@ cards_app   = typer.Typer(help="List and inspect cards.")
 review_app  = typer.Typer(help="Review due cards.")
 profile_app = typer.Typer(help="Learner profile snapshots.")
 ai_app      = typer.Typer(help="AI analysis: generate prompts and save results.")
+db_app      = typer.Typer(help="Backup, restore, and validate local SQLite data.")
 
 app.add_typer(books_app,  name="books")
 books_app.add_typer(import_app, name="import")
@@ -103,6 +109,46 @@ app.add_typer(cards_app,  name="cards")
 app.add_typer(review_app, name="review")
 app.add_typer(profile_app, name="profile")
 app.add_typer(ai_app,     name="ai")
+app.add_typer(db_app,     name="db")
+
+
+# ---------------------------------------------------------------------------
+# database recovery
+# ---------------------------------------------------------------------------
+
+@db_app.command("backup")
+def database_backup() -> None:
+    """Create a consistent SQLite backup in data/backups/."""
+    backup = _get_db().create_backup(reason="manual")
+    typer.echo(f"Backup created: {backup}")
+
+
+@db_app.command("integrity")
+def database_integrity() -> None:
+    """Validate SQLite integrity and foreign-key relationships."""
+    report = _get_db().check_integrity()
+    if report.is_healthy:
+        typer.echo("Database integrity: ok")
+        return
+    typer.echo("Database integrity: failed", err=True)
+    for message in report.integrity_messages:
+        typer.echo(f"integrity: {message}", err=True)
+    for violation in report.foreign_key_violations:
+        typer.echo(f"foreign key: {violation}", err=True)
+    raise typer.Exit(1)
+
+
+@db_app.command("restore")
+def database_restore(
+    backup: Path = typer.Argument(..., exists=True, readable=True, help="SQLite backup file to restore"),
+    yes: bool = typer.Option(False, "--yes", help="Confirm replacement of the active database"),
+) -> None:
+    """Restore a backup after stopping any running web server."""
+    if not yes:
+        typer.echo("Refusing restore without --yes. Stop the web server first.", err=True)
+        raise typer.Exit(2)
+    pre_restore_backup = _open_db().restore_backup(backup)
+    typer.echo(f"Database restored. Previous database backed up at: {pre_restore_backup}")
 
 
 # ---------------------------------------------------------------------------
@@ -924,12 +970,12 @@ def _strip_section_ordinal(title: str) -> str:
 
 
 def _appendix_letter(title: str) -> str:
-    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title)
+    match = re.match(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)", title, flags=re.I)
     return match.group(1) if match else ""
 
 
 def _strip_appendix_ordinal(title: str) -> str:
-    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title).strip()
+    return re.sub(r"^\s*(?:appendix\s+)?[A-Z](?:[\s.:)-]+)", "", title, flags=re.I).strip()
 
 
 # ---------------------------------------------------------------------------

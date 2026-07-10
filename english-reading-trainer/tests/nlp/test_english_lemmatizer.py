@@ -6,8 +6,6 @@ the model is missing. Covers: empty input, whitespace, single word, plural,
 verb forms, phrases, punctuation stripping, case normalisation, singleton reuse.
 """
 
-import pytest
-
 import app.nlp.english_lemmatizer as english_lemmatizer
 from app.nlp.english_lemmatizer import lemmatize
 

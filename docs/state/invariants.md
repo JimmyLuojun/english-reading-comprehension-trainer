@@ -15,6 +15,9 @@ These rules describe behavior that should not change accidentally. Each implemen
 
 - The current implemented `books.source_format` values are `txt`, `md`, `epub`, and `pdf`; URL import intentionally stores extracted web text as `txt` until a future source metadata migration exists.
 - Schema migrations and SQL schema changes must be tested with real SQLite, not mocks.
+- Applied migration files are immutable: their recorded SHA-256 checksums must match on every later startup.
+- Pending migrations run in one SQLite transaction, with a recoverable online backup created first; a failed migration must leave neither schema changes nor a migration record behind.
+- Backup restore requires the web service to be stopped and an explicit CLI `--yes`; restored databases must pass SQLite integrity checks before replacing the live file.
 - `sentences.id` is the stable anchor for reader selection, sentence cards, word card source links, AI analysis context, and review navigation.
 - `word_cards.lemma` remains globally unique for the current card model.
 
@@ -36,3 +39,10 @@ These rules describe behavior that should not change accidentally. Each implemen
 - Reader mark/unmark/save/analyze actions should preserve the current reading position.
 - AI analysis is an overlay drawer and should not change the reader text layout.
 - Source links from Cards and Review should jump to the card's source sentence when an anchor exists.
+- Reader interaction code is served from `/static/reader.js`; `reader_script._selection_script()` is test-only asset loading, not a second source of browser behavior.
+
+## Local Service And Imports
+
+- The supported web deployment is loopback-only, single-user access. The launcher issues a per-process token; requests need the token header or the strict local cookie created from the tokenized launcher URL.
+- State-changing browser requests must originate from the same local origin; cross-origin `Origin` or `Referer` values are rejected.
+- URL imports may follow only validated `http`/`https` redirects. Every resolved target host must have globally routable DNS addresses; loopback, private, link-local, multicast, reserved, and unspecified addresses are rejected.

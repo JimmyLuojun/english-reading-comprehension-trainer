@@ -23,6 +23,8 @@ class TestLoadAiProviderEnv:
         monkeypatch.delenv("TRAINER_MODEL", raising=False)
         monkeypatch.delenv("TRAINER_SENTENCE_MODEL", raising=False)
         monkeypatch.delenv("TRAINER_PRO_MODEL", raising=False)
+        monkeypatch.delenv("TRAINER_LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("TRAINER_LLM_MAX_RETRIES", raising=False)
         env_file = tmp_path / ".env"
         env_file.write_text(
             "\n".join([
@@ -83,6 +85,8 @@ class TestGetAiProviderSettings:
         assert settings.api_key == ""
         assert settings.base_url == "https://api.deepseek.com/v1"
         assert settings.model == "deepseek-v4-flash"
+        assert settings.timeout_seconds == 45.0
+        assert settings.max_retries == 1
         assert get_sentence_analysis_model() == "deepseek-v4-pro"
         assert get_pro_analysis_model() == "deepseek-v4-pro"
 
@@ -92,6 +96,33 @@ class TestGetAiProviderSettings:
         settings = get_ai_provider_settings("custom-model")
 
         assert settings.model == "custom-model"
+
+    def test_timeout_and_retry_settings_accept_valid_environment_values(self, monkeypatch) -> None:
+        monkeypatch.setenv("TRAINER_LLM_TIMEOUT_SECONDS", "12.5")
+        monkeypatch.setenv("TRAINER_LLM_MAX_RETRIES", "3")
+
+        settings = get_ai_provider_settings()
+
+        assert settings.timeout_seconds == 12.5
+        assert settings.max_retries == 3
+
+    def test_timeout_and_retry_settings_fall_back_for_invalid_values(self, monkeypatch) -> None:
+        monkeypatch.setenv("TRAINER_LLM_TIMEOUT_SECONDS", "0")
+        monkeypatch.setenv("TRAINER_LLM_MAX_RETRIES", "-1")
+
+        settings = get_ai_provider_settings()
+
+        assert settings.timeout_seconds == 45.0
+        assert settings.max_retries == 1
+
+    def test_timeout_and_retry_settings_fall_back_for_non_numeric_values(self, monkeypatch) -> None:
+        monkeypatch.setenv("TRAINER_LLM_TIMEOUT_SECONDS", "slow")
+        monkeypatch.setenv("TRAINER_LLM_MAX_RETRIES", "many")
+
+        settings = get_ai_provider_settings()
+
+        assert settings.timeout_seconds == 45.0
+        assert settings.max_retries == 1
 
     def test_sentence_model_falls_back_to_pro_model(self, monkeypatch) -> None:
         monkeypatch.delenv("TRAINER_SENTENCE_MODEL", raising=False)

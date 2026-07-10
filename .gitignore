@@ -81,6 +81,8 @@ venv/
 english-reading-trainer/data/*.db
 english-reading-trainer/data/*.db-*
 english-reading-trainer/data/assets/
+english-reading-trainer/data/backups/
+english-reading-trainer/data/logs/
 
 # =============================================================================
 # BUILD OUTPUTS
@@ -114,4 +116,5 @@ coverage/
 # Python
 .coverage
 coverage.json
+coverage*.xml
 htmlcov/

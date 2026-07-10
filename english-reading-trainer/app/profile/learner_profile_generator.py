@@ -20,7 +20,6 @@ from app.db_models import (
     PROFILE_REVIEW_TRIGGER,
     CardType,
     MasteryState,
-    ReviewOutcome,
 )
 
 

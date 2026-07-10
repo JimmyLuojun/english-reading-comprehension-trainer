@@ -91,6 +91,56 @@ def _insert_review_log(
 
 
 # ---------------------------------------------------------------------------
+# database recovery
+# ---------------------------------------------------------------------------
+
+class TestDatabaseRecovery:
+    def test_backup_command_creates_snapshot(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["db", "backup"])
+
+        assert result.exit_code == 0
+        assert "Backup created:" in result.output
+        assert list(db.backup_dir.glob("trainer_test.manual.*.db"))
+
+    def test_integrity_command_reports_healthy_database(self, db: DatabaseConnection) -> None:
+        result = runner.invoke(app, ["db", "integrity"])
+
+        assert result.exit_code == 0
+        assert result.output.strip() == "Database integrity: ok"
+
+    def test_restore_requires_explicit_confirmation(self, db: DatabaseConnection) -> None:
+        backup = db.create_backup(reason="cli-test")
+
+        result = runner.invoke(app, ["db", "restore", str(backup)])
+
+        assert result.exit_code == 2
+        assert "--yes" in result.output
+
+    def test_restore_replaces_active_database(self, db: DatabaseConnection) -> None:
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('Before restore', 'txt', 'cli-restore', '2026-01-01T00:00:00+00:00')"
+            )
+        backup = db.create_backup(reason="cli-restore")
+        with db.get_connection() as conn:
+            conn.execute("UPDATE books SET title = 'After backup'")
+
+        result = runner.invoke(app, ["db", "restore", str(backup), "--yes"])
+
+        assert result.exit_code == 0
+        assert "Database restored" in result.output
+        with db.get_connection() as conn:
+            assert conn.execute("SELECT title FROM books").fetchone()[0] == "Before restore"
+
+
+def test_appendix_helpers_cover_matched_and_unmatched_titles() -> None:
+    assert cli_entry._appendix_letter("Appendix C: Sources") == "C"
+    assert cli_entry._appendix_letter("Sources") == ""
+    assert cli_entry._strip_appendix_ordinal("Appendix C: Sources") == "Sources"
+
+
+# ---------------------------------------------------------------------------
 # books list
 # ---------------------------------------------------------------------------
 
