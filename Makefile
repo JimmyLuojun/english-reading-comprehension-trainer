@@ -16,7 +16,7 @@ ruff-web: env-check
 	@cd $(APP_DIR) && $(PYTHON) -m ruff check app/web
 
 serve: env-check
-	@cd $(APP_DIR) && $(PYTHON) -m app.web.launcher run
+	@cd $(APP_DIR) && $(PYTHON) -m app.web.launcher
 
 test-browser: env-check
 	@cd $(APP_DIR) && $(PYTHON) -m pytest tests/web/test_reader_toolbar_state.py -q

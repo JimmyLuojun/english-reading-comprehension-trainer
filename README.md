@@ -10,7 +10,7 @@ From the repository root:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m app.web.launcher run --port 8001
+.venv/bin/python -m app.web.launcher --port 8001
 ```
 
 Open the tokenized loopback URL printed by the launcher. The browser receives a
@@ -22,7 +22,7 @@ The app uses `english-reading-trainer/data/reading_trainer.db` by default and
 applies migrations automatically on startup. To use another database:
 
 ```bash
-TRAINER_DB=/path/to/reading_trainer.db .venv/bin/python -m app.web.launcher run --port 8001
+TRAINER_DB=/path/to/reading_trainer.db .venv/bin/python -m app.web.launcher --port 8001
 ```
 
 If `.venv` does not exist yet, run the setup step below first. Prefer the
@@ -56,7 +56,7 @@ the existing virtual environment directly:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m app.web.launcher run --port 8001
+.venv/bin/python -m app.web.launcher --port 8001
 ```
 
 In shared handoff setups, logs may show the physical path under
@@ -135,7 +135,7 @@ Review and profile:
 
 ```bash
 cd english-reading-trainer
-.venv/bin/python -m app.web.launcher run --port 8001
+.venv/bin/python -m app.web.launcher --port 8001
 ```
 
 Open the tokenized URL printed by the launcher. Keep the service on the local

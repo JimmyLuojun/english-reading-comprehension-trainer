@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typer.testing import CliRunner
+
 from app.web import launcher
 
 
@@ -15,8 +17,9 @@ def test_launcher_sets_token_prints_url_and_binds_loopback(monkeypatch) -> None:
         lambda target, **kwargs: calls.update(target=target, **kwargs),
     )
 
-    launcher.run(port=9123, reload=True)
+    result = CliRunner().invoke(launcher.app, ["--port", "9123", "--reload"])
 
+    assert result.exit_code == 0
     assert launcher.os.environ["TRAINER_REQUEST_TOKEN"] == "local-token"
     assert calls == {
         "echo": "Open: http://127.0.0.1:9123/?access_token=local-token",
