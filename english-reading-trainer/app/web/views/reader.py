@@ -552,7 +552,15 @@ def _analysis_panel() -> str:
       Analysis
     </button>
     <aside id="analysis-panel" class="analysis-panel" hidden aria-live="polite">
-      <header class="analysis-panel-header">
+      <button
+        id="analysis-tools-handle"
+        class="analysis-tools-handle"
+        type="button"
+        aria-controls="analysis-panel-header"
+        aria-label="Show analysis tools"
+        aria-expanded="false"
+        hidden>…</button>
+      <header id="analysis-panel-header" class="analysis-panel-header">
         <div>
           <p id="analysis-panel-kicker" class="panel-kicker">Sentence analysis</p>
           <div class="analysis-title-row">

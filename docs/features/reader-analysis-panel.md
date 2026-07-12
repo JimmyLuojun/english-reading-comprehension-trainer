@@ -60,6 +60,7 @@
 - 打开后显示为右侧覆盖式 drawer，而不是阅读布局中的右栏。
 - 阅读正文保持原宽度、原居中位置和当前滚动位置；drawer 只覆盖右侧可视区域。
 - drawer 内部独立滚动，正文滚动不被 drawer 内容撑开。
+- 标题/复制工具只有在完整 header 已自然滚出 drawer 视口后才折叠；折叠态只在右上角覆盖一个 `…` 句柄，不能保留与原 header 等高的空白区。
 - `Back to reading` 关闭 drawer；`Back to previous analysis` 继续在 drawer 内恢复上一层解释；`Reanalyze` 只刷新当前分析。
 - 打开 drawer 时关闭临时 selection toolbar / word detail 浮层，避免多个浮层重叠。
 - 移动端 drawer 使用接近全屏宽度，避免窄屏中出现横向滚动。
@@ -70,6 +71,7 @@
 - CSS 将 `.analysis-panel` 设为 `position: fixed`，右侧贴边，宽度 `min(520px, 92vw)`，`overflow-y: auto`。
 - `body.analysis-open` 只表达面板打开状态，不再改变 `.reader` 的 `max-width`、`margin-left` 或 `margin-right`。
 - 移动端使用 `inset: 0` / `width: 100%`，保留独立滚动。
+- 工具折叠阈值取实际 header 高度与最小阈值的较大值并加迟滞；折叠后 header 退出 sticky 定位但不改变自身尺寸，`#analysis-tools-handle` 作为真实、可聚焦的 sticky `…` 按钮直接触发 peeking，以同时避免空白占位、滚动尺寸抖动和伪元素 hover 漏失。
 - 面板层级高于正文和普通 toolbar，但不应高到遮住系统级浏览器 UI。
 
 ### §27.3 测试
@@ -77,6 +79,7 @@
 - 路由级测试断言 reader 页面包含 fixed analysis drawer 样式。
 - 路由级测试断言不存在 `.reader-page.analysis-open .reader` 的布局挤压规则。
 - 浏览器验证打开 analysis 后 `.reader` 宽度不变，`#analysis-panel` 可见且 fixed，关闭后隐藏。
+- 浏览器验证工具折叠后 header 已滚出 drawer 顶部，`…` 句柄仍可见，顶部不保留 sticky header 高度的空白。
 
 ---
 ---

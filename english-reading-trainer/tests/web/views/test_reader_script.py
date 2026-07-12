@@ -142,6 +142,7 @@ def test_analysis_panel_toolbar_auto_collapses_and_peeks() -> None:
     listeners = listeners[: listeners.index("if (panelUnmark)")]
 
     assert 'panel?.querySelector(".analysis-panel-header")' in script
+    assert 'document.getElementById("analysis-tools-handle")' in script
     assert "ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP" in script
     assert "ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX" in script
     assert "ANALYSIS_TOOLS_HOT_ZONE_PX" in script
@@ -152,14 +153,20 @@ def test_analysis_panel_toolbar_auto_collapses_and_peeks() -> None:
         'panel.classList.toggle("analysis-tools-peeking", shouldPeek);'
         in visibility
     )
+    assert "analysisToolsHandle.hidden = !shouldCollapse;" in visibility
+    assert 'analysisToolsHandle.setAttribute("aria-expanded", String(shouldPeek));' in visibility
     assert "function scheduleAnalysisToolsVisibility(peek)" in visibility
     assert "window.requestAnimationFrame(() => {" in visibility
+    assert "const headerHeight = Math.ceil(panelHeader?.offsetHeight || 0);" in visibility
+    assert "Math.max(ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP, headerHeight)" in visibility
     assert "pointerIsInAnalysisToolsHotZone(event)" in visibility
     assert 'target?.closest(".analysis-panel-header")' in visibility
     assert 'panel.addEventListener("scroll"' in listeners
     assert 'panel.addEventListener("mousemove", handleAnalysisPanelPointerMove);' in listeners
     assert 'panel.addEventListener("mouseleave"' in listeners
     assert 'panelHeader.addEventListener("pointerenter"' in listeners
+    assert 'analysisToolsHandle.addEventListener("pointerenter"' in listeners
+    assert 'analysisToolsHandle.addEventListener("focus"' in listeners
     assert 'panelHeader.addEventListener("pointerleave"' in listeners
     assert 'panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);' in listeners
     assert 'panelHeader.addEventListener("focusout"' in listeners

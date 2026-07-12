@@ -392,6 +392,161 @@ def test_analysis_panel_overlays_reader_without_layout_shift(
     assert after["panelWidth"] <= 520
 
 
+def test_external_prompt_panel_stays_a_drawer_at_tablet_width(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.set_viewport_size({"width": 1120, "height": 800})
+        page.evaluate(
+            """() => {
+              Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: { writeText: async () => {} },
+              });
+            }"""
+        )
+        _select_sentence_contents(page, 1)
+        page.locator("#toolbar-external-prompt").click()
+        page.wait_for_function(
+            '!document.getElementById("analysis-external-section").hidden'
+        )
+        geometry = page.evaluate(
+            """() => {
+              const panelRect = document.getElementById("analysis-panel").getBoundingClientRect();
+              return {
+                viewportWidth: window.innerWidth,
+                left: Math.round(panelRect.left),
+                right: Math.round(window.innerWidth - panelRect.right),
+                top: Math.round(panelRect.top),
+                width: Math.round(panelRect.width),
+              };
+            }"""
+        )
+
+    assert geometry == {
+        "viewportWidth": 1120,
+        "left": 600,
+        "right": 0,
+        "top": 49,
+        "width": 520,
+    }
+
+
+def test_analysis_panel_uses_full_screen_only_on_narrow_viewports(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.set_viewport_size({"width": 700, "height": 800})
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        geometry = page.evaluate(
+            """() => {
+              const panelRect = document.getElementById("analysis-panel").getBoundingClientRect();
+              return {
+                viewportWidth: window.innerWidth,
+                left: Math.round(panelRect.left),
+                right: Math.round(window.innerWidth - panelRect.right),
+                top: Math.round(panelRect.top),
+                width: Math.round(panelRect.width),
+              };
+            }"""
+        )
+
+    assert geometry == {
+        "viewportWidth": 700,
+        "left": 0,
+        "right": 0,
+        "top": 0,
+        "width": 700,
+    }
+
+
+def test_collapsed_analysis_tools_do_not_leave_a_sticky_header_gap(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.set_viewport_size({"width": 1120, "height": 800})
+        page.locator("[data-sentence-id]").first.click()
+        page.wait_for_function('!document.getElementById("analysis-panel").hidden')
+        page.evaluate(
+            """() => {
+              const panel = document.getElementById("analysis-panel");
+              const header = panel.querySelector(".analysis-panel-header");
+              panel.scrollTop = header.offsetHeight + 120;
+              panel.dispatchEvent(new Event("scroll"));
+            }"""
+        )
+        page.wait_for_function(
+            'document.getElementById("analysis-panel").classList.contains("analysis-tools-collapsed")'
+        )
+        page.wait_for_timeout(60)
+        collapsed_state = page.evaluate(
+            """() => {
+              const panel = document.getElementById("analysis-panel");
+              const header = panel.querySelector(".analysis-panel-header");
+              const panelRect = panel.getBoundingClientRect();
+              const headerRect = header.getBoundingClientRect();
+              return {
+                collapsed: panel.classList.contains("analysis-tools-collapsed"),
+                peeking: panel.classList.contains("analysis-tools-peeking"),
+                headerPosition: getComputedStyle(header).position,
+                headerBottom: Math.round(headerRect.bottom),
+                panelTop: Math.round(panelRect.top),
+                handleContent: getComputedStyle(panel, "::before").content,
+              };
+            }"""
+        )
+        panel_box = page.locator("#analysis-panel").bounding_box()
+        assert panel_box is not None
+        page.mouse.move(panel_box["x"] + panel_box["width"] - 6, panel_box["y"] + 20)
+        page.wait_for_function(
+            'document.getElementById("analysis-panel").classList.contains("analysis-tools-peeking")'
+        )
+        peek_state = page.evaluate(
+            """() => {
+              const panel = document.getElementById("analysis-panel");
+              const header = panel.querySelector(".analysis-panel-header");
+              return {
+                headerPosition: getComputedStyle(header).position,
+                headerTop: Math.round(header.getBoundingClientRect().top),
+                panelTop: Math.round(panel.getBoundingClientRect().top),
+                panelPaddingTop: Math.round(parseFloat(getComputedStyle(panel).paddingTop)),
+              };
+            }"""
+        )
+        page.mouse.move(panel_box["x"] + 80, panel_box["y"] + panel_box["height"] - 40)
+        page.wait_for_function(
+            '!document.getElementById("analysis-panel").classList.contains("analysis-tools-peeking")'
+        )
+        page.wait_for_timeout(60)
+        settled_state = page.evaluate(
+            """() => {
+              const panel = document.getElementById("analysis-panel");
+              const header = panel.querySelector(".analysis-panel-header");
+              return {
+                collapsed: panel.classList.contains("analysis-tools-collapsed"),
+                headerPosition: getComputedStyle(header).position,
+                headerBottom: Math.round(header.getBoundingClientRect().bottom),
+                panelTop: Math.round(panel.getBoundingClientRect().top),
+              };
+            }"""
+        )
+
+    assert collapsed_state["collapsed"] is True
+    assert collapsed_state["peeking"] is False
+    assert collapsed_state["headerPosition"] == "static"
+    assert collapsed_state["handleContent"] == '"..."'
+    assert collapsed_state["headerBottom"] <= collapsed_state["panelTop"]
+    assert peek_state["headerPosition"] == "sticky"
+    assert peek_state["headerTop"] == peek_state["panelTop"] + peek_state["panelPaddingTop"]
+    assert settled_state["collapsed"] is True
+    assert settled_state["headerPosition"] == "static"
+    assert settled_state["headerBottom"] <= settled_state["panelTop"]
+
+
 def test_click_marked_word_shows_only_word_detail(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         page.locator("[data-word-card]").click()

@@ -58,6 +58,7 @@
       const dismissButton = document.getElementById("toolbar-dismiss");
       const panel = document.getElementById("analysis-panel");
       const panelHeader = panel?.querySelector(".analysis-panel-header");
+      const analysisToolsHandle = document.getElementById("analysis-tools-handle");
       const panelTab = document.getElementById("analysis-panel-tab");
       const panelClose = document.getElementById("analysis-panel-close");
       const panelReturn = document.getElementById("analysis-panel-return");
@@ -2954,13 +2955,19 @@
         analysisToolsPeeking = shouldPeek;
         panel.classList.toggle("analysis-tools-collapsed", shouldCollapse);
         panel.classList.toggle("analysis-tools-peeking", shouldPeek);
+        if (analysisToolsHandle) {
+          analysisToolsHandle.hidden = !shouldCollapse;
+          analysisToolsHandle.setAttribute("aria-expanded", String(shouldPeek));
+        }
       }
 
       function updateAnalysisToolsVisibility(peek) {
         if (!panel || panel.hidden) return;
-        const collapseAt = ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP
+        const headerHeight = Math.ceil(panelHeader?.offsetHeight || 0);
+        const collapseBase = Math.max(ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP, headerHeight);
+        const collapseAt = collapseBase
           + ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX;
-        const expandAt = ANALYSIS_TOOLS_COLLAPSE_SCROLL_TOP
+        const expandAt = collapseBase
           - ANALYSIS_TOOLS_COLLAPSE_HYSTERESIS_PX;
         const shouldCollapse = analysisToolsCollapsed
           ? panel.scrollTop > expandAt
@@ -5545,6 +5552,17 @@
         panelHeader.addEventListener("focusin", syncAnalysisToolsFocusState);
         panelHeader.addEventListener("focusout", () => {
           window.setTimeout(syncAnalysisToolsFocusState, 0);
+        });
+      }
+      if (analysisToolsHandle) {
+        analysisToolsHandle.addEventListener("pointerenter", () => {
+          scheduleAnalysisToolsVisibility(true);
+        });
+        analysisToolsHandle.addEventListener("focus", () => {
+          scheduleAnalysisToolsVisibility(true);
+        });
+        analysisToolsHandle.addEventListener("click", () => {
+          scheduleAnalysisToolsVisibility(true);
         });
       }
       if (panelUnmark) {

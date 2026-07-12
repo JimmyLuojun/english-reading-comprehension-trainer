@@ -62,6 +62,11 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "top: 0;" in css
     assert "--analysis-panel-padding: 18px" in css
     assert "--analysis-panel-padding: 16px" in css
+    tablet_panel = _css_block(css, "@media (max-width: 1179px) {", "@media (max-width: 780px) {")
+    assert "inset: 0;" not in tablet_panel
+    assert "width: 100%;" not in tablet_panel
+    mobile_panel = css[css.index("@media (max-width: 780px) {") :]
+    assert ".analysis-panel {\n        inset: 0;\n        width: 100%;\n        border-left: 0;" in mobile_panel
     assert "--analysis-panel-tools-handle-width: 44px" in css
     assert ".analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)" in css
     assert ".analysis-panel-header:not(:focus-within)" in css
@@ -71,11 +76,15 @@ def test_css_contains_reader_and_popover_selectors() -> None:
         : css.index(".analysis-panel-header h2")
     ]
     assert "width: var(--analysis-panel-tools-handle-width);" in collapsed_header
+    assert "position: static;" in collapsed_header
     assert "min-height: var(--analysis-panel-tools-handle-width);" not in collapsed_header
     assert "max-height: var(--analysis-panel-tools-handle-width);" not in collapsed_header
     assert "padding: 0;" not in collapsed_header
     assert "margin: calc(-1 * var(--analysis-panel-padding))" not in collapsed_header
-    assert 'content: "...";' in css
+    assert ".analysis-tools-handle" in collapsed_header
+    assert "position: sticky;" in collapsed_header
+    assert ".analysis-tools-handle[hidden] { display: none; }" in css
+    assert ".analysis-tools-peeking .analysis-tools-handle:not(:focus)" in css
     assert "cursor: pointer;" in css
     assert "pointer-events: none;" in css
     assert "--reader-max-width: 840px" in css

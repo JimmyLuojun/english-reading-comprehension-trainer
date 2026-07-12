@@ -17,6 +17,14 @@ from app.web.views.reader import (
 )
 
 
+def test_analysis_panel_has_a_real_tools_handle() -> None:
+    html = _analysis_panel()
+
+    assert 'id="analysis-tools-handle"' in html
+    assert 'aria-controls="analysis-panel-header"' in html
+    assert 'id="analysis-panel-header"' in html
+
+
 def test_group_sentence_paragraphs_and_word_card_index() -> None:
     rows = [
         {"id": 1, "paragraph_id": 10},

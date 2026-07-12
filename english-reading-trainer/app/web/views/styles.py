@@ -713,6 +713,7 @@ def _css() -> str:
     }
     .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
       .analysis-panel-header:not(:focus-within) {
+      position: static;
       box-shadow: none;
       border-bottom-color: transparent;
       cursor: pointer;
@@ -722,16 +723,17 @@ def _css() -> str:
       opacity: 0;
       pointer-events: none;
     }
-    .analysis-panel.analysis-tools-collapsed:not(.analysis-tools-peeking)
-      .analysis-panel-header:not(:focus-within)::after {
-      content: "...";
-      position: absolute;
+    .analysis-tools-handle {
+      display: none;
+      position: sticky;
       top: 8px;
-      right: 8px;
+      z-index: 3;
       width: var(--analysis-panel-tools-handle-width);
       height: var(--analysis-panel-tools-handle-width);
       display: grid;
       place-items: center;
+      margin: 8px calc(-1 * var(--analysis-panel-padding))
+        calc(-1 * var(--analysis-panel-tools-handle-width) - 8px) auto;
       border: 1px solid var(--line);
       border-right: 0;
       border-radius: var(--radius-sm) 0 0 var(--radius-sm);
@@ -740,6 +742,15 @@ def _css() -> str:
       color: var(--accent-strong);
       font-size: 22px;
       line-height: 1;
+      cursor: pointer;
+    }
+    .analysis-tools-handle[hidden] { display: none; }
+    .analysis-panel.analysis-tools-collapsed .analysis-tools-handle:not([hidden]) {
+      display: grid;
+    }
+    .analysis-panel.analysis-tools-peeking .analysis-tools-handle:not(:focus) {
+      opacity: 0;
+      pointer-events: none;
     }
     .analysis-panel-header h2 {
       margin: 0;
@@ -1262,12 +1273,14 @@ def _css() -> str:
     @media (max-width: 1179px) {
       .analysis-panel {
         --analysis-panel-padding: 16px;
+      }
+    }
+    @media (max-width: 780px) {
+      .analysis-panel {
         inset: 0;
         width: 100%;
         border-left: 0;
       }
-    }
-    @media (max-width: 780px) {
       nav { overflow-x: auto; padding: 10px; }
       main { width: min(100vw - 20px, 1180px); margin-top: 16px; }
       .reader-page main {
