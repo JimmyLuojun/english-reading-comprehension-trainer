@@ -1,9 +1,10 @@
 # Project Status
 
-Updated: 2026-07-10
+Updated: 2026-07-13
 
 ## Current State
 
+- EPUB 2 chapter import now reads `toc.ncx` instead of discarding it, preserves publisher-supplied section titles, classifies unnumbered pre-body documents as frontmatter and common post-body documents as backmatter, and turns technical filename fallbacks such as `front1` into readable labels. The already imported `A Brief History of China` (book 30) was repaired in place after a SQLite backup: it now reports 11 body chapters instead of 23 while preserving all existing content row IDs. Verification used `english-reading-trainer/.venv/bin/python`: full pytest passed with `1854 passed, 34 skipped`; EPUB importer coverage was 99%; targeted Ruff, Web Ruff, `git diff --check`, and SQLite `PRAGMA integrity_check` passed.
 - Reader analysis-tool auto-collapse no longer leaves an invisible sticky-header shell above the analysis sections. Collapse waits until the complete measured header has naturally scrolled out, then switches that unchanged header from sticky to normal flow and exposes a real sticky right-edge `…` button; direct hover, focus, or click peeks the full header without resizing it.
 - Reader analysis panels now keep the 520px right-side drawer at intermediate/tablet viewport widths (781–1179px); only genuinely narrow viewports (≤780px) switch the panel to a full-screen overlay. This prevents external-prompt mode from reserving an entire screen while its controls occupy only drawer-width content.
 - Reader selection-panel exclusivity now holds at the rendered CSS level, not only in JavaScript state: the grid-specific `#toolbar-word-form` rule has a matching `#toolbar-word-form[hidden]` override, so a sentence selection cannot visually leak the Word/Phrase/Collocation controls or create a second `AI analysis` action. Browser regressions inspect computed visibility and the exact visible sentence-action list instead of trusting the `hidden` property alone.

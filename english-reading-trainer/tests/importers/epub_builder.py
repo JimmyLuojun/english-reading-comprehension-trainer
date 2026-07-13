@@ -131,6 +131,47 @@ def make_epub_no_toc(
     return out_path
 
 
+def make_epub_ncx_only(
+    tmp_path: Path,
+    filename: str,
+    *,
+    sections: list[dict],
+) -> Path:
+    """Build an EPUB 2 fixture whose only navigation source is toc.ncx."""
+    book = epub.EpubBook()
+    book.set_identifier(f"ncx-only-{filename}")
+    book.set_title("NCX Only Book")
+    book.set_language("en")
+
+    spine_items: list = []
+    toc_links: list = []
+    for idx, section in enumerate(sections, start=1):
+        file_name = section["file_name"]
+        item = epub.EpubHtml(
+            uid=f"section-{idx}",
+            title=section["title"],
+            file_name=file_name,
+            lang="en",
+        )
+        item.media_type = "application/xhtml+xml"
+        item.content = (
+            '<html xmlns="http://www.w3.org/1999/xhtml">'
+            f'<head><title>{section["title"]}</title></head>'
+            f'<body>{section["body_html"]}</body></html>'
+        ).encode("utf-8")
+        book.add_item(item)
+        spine_items.append(item)
+        toc_links.append(epub.Link(file_name, section["title"], f"nav-{idx}"))
+
+    book.toc = toc_links
+    book.add_item(epub.EpubNcx())
+    book.spine = spine_items
+
+    out_path = tmp_path / filename
+    epub.write_epub(str(out_path), book)
+    return out_path
+
+
 def make_epub_no_paragraphs(tmp_path: Path, filename: str) -> Path:
     """EPUB where body has no <p> tags — tests block-level fallback."""
     book = epub.EpubBook()

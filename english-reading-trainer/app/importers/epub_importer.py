@@ -124,6 +124,7 @@ _EXTRACTABLE_DESCENDANT_TAGS = (
 _TEXT_BACKED_BLOCK_KINDS = frozenset({_KIND_PROSE, _KIND_PRE, _KIND_TABLE})
 
 _CHAPTER_TITLE_RE = re.compile(r"^\s*(?:chapter\s+)?(\d+)(?:[\s.:)-]+|$)", re.I)
+_EXPLICIT_CHAPTER_TITLE_RE = re.compile(r"^\s*chapter\b", re.I)
 _PART_TITLE_RE = re.compile(
     r"^\s*part\s*(?:"
     r"\d+|[ivxlcdm]+|"
@@ -177,6 +178,17 @@ _FRONTMATTER_TITLES = {
     "titlepage",
 }
 _BACKMATTER_TITLES = {"index", "colophon", "copyright"}
+_BACKMATTER_TITLE_PREFIXES = (
+    "afterword",
+    "back cover",
+    "bibliography",
+    "colophon",
+    "credits",
+    "further reading",
+    "index",
+    "references",
+    "reviews",
+)
 
 _MIN_PARA_LEN = 20
 
@@ -432,6 +444,9 @@ def _build_toc_map(book: epub.EpubBook) -> dict[str, str]:
         result.setdefault(Path(href).name, clean_title)
 
     def _walk(items) -> None:
+        if isinstance(items, epub.Link):
+            _record(items.href, items.title)
+            return
         for item in items:
             if isinstance(item, epub.Link):
                 _record(item.href, item.title)
@@ -509,6 +524,9 @@ def _extract_chapters(
     """
     chapters: list[dict] = []
     body_chapter_count = 0
+    body_started = not any(
+        _is_explicit_chapter_title(title) for title in toc_map.values()
+    )
 
     for item_id, _linear in book.spine:
         item = book.get_item_with_id(item_id)
@@ -529,7 +547,7 @@ def _extract_chapters(
             toc_map.get(item.file_name)
             or toc_map.get(bare_name)
             or _heading_from_soup(soup)
-            or Path(item.file_name).stem
+            or _document_title_from_filename(item.file_name)
         )
 
         blocks = _extract_text_blocks(
@@ -540,9 +558,18 @@ def _extract_chapters(
         )
         if not blocks:
             continue
-        classification = _classify_chapter(title, soup, body_chapter_count + 1)
+        classification = _classify_chapter(
+            title,
+            soup,
+            body_chapter_count + 1,
+            body_started=body_started,
+        )
         if classification.section_kind == _SECTION_CHAPTER:
-            body_chapter_count += 1
+            body_started = True
+            body_chapter_count = max(
+                body_chapter_count + 1,
+                classification.chapter_number or 0,
+            )
         chapters.append(
             {
                 "title": title,
@@ -569,10 +596,42 @@ def _heading_from_soup(soup: BeautifulSoup) -> str:
     return ""
 
 
+def _document_title_from_filename(file_name: str) -> str:
+    """Return a readable title when an EPUB exposes only a technical filename."""
+    stem = Path(file_name).stem.strip()
+    normalized = re.sub(r"[\s_-]+", " ", stem).strip()
+    compact = normalized.replace(" ", "").lower()
+
+    front_match = re.fullmatch(r"front(\d*)", compact)
+    if front_match:
+        suffix = front_match.group(1)
+        ordinal = int(suffix) + 1 if suffix else 1
+        return "Front Matter" if ordinal == 1 else f"Front Matter {ordinal}"
+
+    chapter_match = re.fullmatch(r"chap(?:ter)?0*(\d+)", compact)
+    if chapter_match:
+        return f"Chapter {int(chapter_match.group(1))}"
+
+    aliases = {
+        "aut": "About",
+        "backcover": "Back Cover",
+        "copy": "Copyright Page",
+        "cover": "Cover",
+        "postreview": "Reviews",
+        "title": "Title Page",
+        "toc": "Contents",
+    }
+    if compact in aliases:
+        return aliases[compact]
+    return normalized or stem
+
+
 def _classify_chapter(
     title: str,
     soup: BeautifulSoup,
     next_chapter_number: int,
+    *,
+    body_started: bool = True,
 ) -> ChapterClassification:
     """Classify an EPUB spine document for display and chapter numbering."""
     epub_types = _epub_type_tokens(soup)
@@ -580,14 +639,16 @@ def _classify_chapter(
 
     if "part" in epub_types or _is_part_separator(title, soup, epub_types):
         return ChapterClassification(_SECTION_FRONTMATTER)
-    if "chapter" in epub_types or parsed_number is not None:
+    if "chapter" in epub_types or _is_explicit_chapter_title(title):
         return ChapterClassification(
             _SECTION_CHAPTER,
             parsed_number or next_chapter_number,
         )
     if "appendix" in epub_types or _APPENDIX_TITLE_RE.match(title):
         return ChapterClassification(_SECTION_APPENDIX)
-    if epub_types & _BACKMATTER_TYPES or title.strip().lower() in _BACKMATTER_TITLES:
+    if not body_started:
+        return ChapterClassification(_SECTION_FRONTMATTER)
+    if epub_types & _BACKMATTER_TYPES or _is_backmatter_title(title):
         return ChapterClassification(_SECTION_BACKMATTER)
     if epub_types & _FRONTMATTER_TYPES or _is_frontmatter_title(title):
         return ChapterClassification(_SECTION_FRONTMATTER)
@@ -621,6 +682,13 @@ def _chapter_number_from_title(title: str) -> int | None:
     return int(match.group(1))
 
 
+def _is_explicit_chapter_title(title: str) -> bool:
+    return bool(
+        _chapter_number_from_title(title) is not None
+        or _EXPLICIT_CHAPTER_TITLE_RE.match(title)
+    )
+
+
 def _is_part_separator(
     title: str,
     soup: BeautifulSoup,
@@ -645,6 +713,13 @@ def _is_part_title(title: str) -> bool:
 def _is_frontmatter_title(title: str) -> bool:
     normalized = title.strip().lower()
     return normalized in _FRONTMATTER_TITLES or normalized.startswith("praise for ")
+
+
+def _is_backmatter_title(title: str) -> bool:
+    normalized = title.strip().lower()
+    return normalized in _BACKMATTER_TITLES or normalized.startswith(
+        _BACKMATTER_TITLE_PREFIXES
+    )
 
 
 def _extract_text_blocks(
@@ -1296,7 +1371,9 @@ def import_epub(
     """
     original_path = Path(file_path)
     with _prepare_epub_source(original_path) as prepared:
-        book = epub.read_epub(str(prepared.path), options={"ignore_ncx": True})
+        # EPUB 2 books commonly expose their only usable navigation in toc.ncx.
+        # Ignoring NCX discards real section titles and leaves technical filenames.
+        book = epub.read_epub(str(prepared.path), options={"ignore_ncx": False})
 
         resolved_title = title or _extract_metadata(book, "title") or original_path.stem
         resolved_author = author or _extract_metadata(book, "creator") or ""

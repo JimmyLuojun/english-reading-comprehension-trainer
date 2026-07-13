@@ -35,6 +35,7 @@ from app.importers.epub_importer import (
     _coerce_text_block,
     _definition_block_from_dt,
     _direct_text,
+    _document_title_from_filename,
     _extract_chapters,
     _extract_paragraphs,
     _extract_text_blocks,
@@ -72,6 +73,7 @@ from tests.importers.epub_builder import (
     make_epub_with_image,
     make_epub_with_sections,
     make_epub_no_paragraphs,
+    make_epub_ncx_only,
     make_epub_no_toc,
 )
 
@@ -290,6 +292,53 @@ class TestTocAndChapterClassification:
 
         assert classification.section_kind == _SECTION_CHAPTER
         assert classification.chapter_number == 7
+
+    def test_classifies_word_numbered_chapter_without_epub_semantics(self) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter("Chapter One: Origins", soup, 1)
+
+        assert classification.section_kind == _SECTION_CHAPTER
+        assert classification.chapter_number == 1
+
+    def test_untyped_section_before_numbered_body_is_frontmatter(self) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter(
+            "Point of Departure",
+            soup,
+            1,
+            body_started=False,
+        )
+
+        assert classification.section_kind == _SECTION_FRONTMATTER
+        assert classification.chapter_number is None
+
+    @pytest.mark.parametrize("title", ["Further Reading", "Bibliography", "Back Cover"])
+    def test_common_post_body_titles_are_backmatter(self, title: str) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter(title, soup, 12, body_started=True)
+
+        assert classification.section_kind == _SECTION_BACKMATTER
+        assert classification.chapter_number is None
+
+    @pytest.mark.parametrize(
+        ("file_name", "expected"),
+        [
+            ("OEBPS/front.html", "Front Matter"),
+            ("OEBPS/front1.html", "Front Matter 2"),
+            ("Text/chap01.xhtml", "Chapter 1"),
+            ("postreview.html", "Reviews"),
+            ("odd_file-name.xhtml", "odd file name"),
+        ],
+    )
+    def test_technical_document_filenames_get_readable_titles(
+        self,
+        file_name: str,
+        expected: str,
+    ) -> None:
+        assert _document_title_from_filename(file_name) == expected
 
     def test_epub_type_tokens_reads_root_without_body(self) -> None:
         soup = BeautifulSoup('<section type="appendix"></section>', "xml")
@@ -887,6 +936,68 @@ class TestImportEpubChapters:
         titles = [r["title"] for r in rows]
         # Titles come from <h2> tags in the HTML
         assert any("Beginning" in t for t in titles)
+
+    def test_epub2_ncx_titles_and_section_boundaries_are_preserved(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        ep = make_epub_ncx_only(
+            tmp_path,
+            "ncx-only.epub",
+            sections=[
+                {
+                    "title": "Point of Departure: Before the Beginning",
+                    "file_name": "front5.html",
+                    "body_html": "<p>Introductory text with enough words to import here.</p>",
+                },
+                {
+                    "title": "Chapter 1: Origins",
+                    "file_name": "chap01.html",
+                    "body_html": "<p>First chapter text with enough words to import here.</p>",
+                },
+                {
+                    "title": "Chapter 2: Transformation",
+                    "file_name": "chap02.html",
+                    "body_html": "<p>Second chapter text with enough words to import here.</p>",
+                },
+                {
+                    "title": "Bibliography",
+                    "file_name": "back1.html",
+                    "body_html": "<p>Reference listing with enough words to import here.</p>",
+                },
+            ],
+        )
+
+        result = import_epub(db, ep)
+
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT title, section_kind, chapter_number
+                     FROM chapters
+                    WHERE book_id = ?
+                    ORDER BY idx""",
+                (result.book_id,),
+            ).fetchall()
+            total_chapters = conn.execute(
+                "SELECT total_chapters FROM books WHERE id = ?",
+                (result.book_id,),
+            ).fetchone()["total_chapters"]
+
+        assert [row["title"] for row in rows] == [
+            "Point of Departure: Before the Beginning",
+            "Chapter 1: Origins",
+            "Chapter 2: Transformation",
+            "Bibliography",
+        ]
+        assert [row["section_kind"] for row in rows] == [
+            _SECTION_FRONTMATTER,
+            _SECTION_CHAPTER,
+            _SECTION_CHAPTER,
+            _SECTION_BACKMATTER,
+        ]
+        assert [row["chapter_number"] for row in rows] == [None, 1, 2, None]
+        assert total_chapters == 2
 
     def test_single_chapter_epub(
         self, db: DatabaseConnection, tmp_path: Path
