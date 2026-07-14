@@ -275,6 +275,7 @@ def build_external_word_prompt_for_selection(
     lexical_type: str,
     start_offset: int | None = None,
     end_offset: int | None = None,
+    learner_note: str = "",
 ) -> dict[str, Any]:
     """Build an external word prompt from a fresh Reader selection."""
     selection = _validated_word_selection(
@@ -290,7 +291,7 @@ def build_external_word_prompt_for_selection(
         sentence_id=sentence_id,
         surface_form=selection["surface_form"],
         lexical_type=selection["lexical_type"],
-        learner_note="",
+        learner_note=learner_note,
     )
     return {
         "ok": True,
@@ -491,6 +492,7 @@ def save_external_word_analysis_for_selection(
     external_result: str,
     start_offset: int | None = None,
     end_offset: int | None = None,
+    learner_note: str = "",
 ) -> AnalysisOutcome:
     """Validate external JSON, create/update the selected word card, and render it."""
     try:
@@ -515,6 +517,7 @@ def save_external_word_analysis_for_selection(
             sentence_id,
             selection["surface_form"],
             LexicalType(selection["lexical_type"]),
+            user_note=learner_note,
             source_start_offset=selection["start_offset"],
             source_end_offset=selection["end_offset"],
             selected_text=selection["surface_form"],

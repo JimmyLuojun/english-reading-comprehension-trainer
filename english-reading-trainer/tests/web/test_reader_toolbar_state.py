@@ -928,6 +928,7 @@ def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
         )
 
         page.locator('#toolbar-word-form button[value="phrase"]').click()
+        page.locator("#toolbar-word-note").fill("明亮的；此处修饰 day")
         page.wait_for_function(
             """() => {
               const toolbar = document.getElementById("selection-toolbar");
@@ -957,7 +958,8 @@ def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
             """() => {
               const copied = window.__copiedText || "";
               return copied.includes("目标项：bright（phrase）")
-                && copied.includes("lexical_type 必须优先使用：phrase");
+                && copied.includes("lexical_type 必须优先使用：phrase")
+                && copied.includes("learner note: 明亮的；此处修饰 day");
             }"""
         )
         copied_text = page.evaluate("window.__copiedText")
@@ -968,6 +970,41 @@ def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
     assert after["scrollY"] > 0
     assert after["toolbarHidden"] is False
     assert "目标项：bright（phrase）" in copied_text
+    assert "learner note: 明亮的；此处修饰 day" in copied_text
+
+
+def test_quick_note_saves_collocation_directly_to_review(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        _select_text(page, 0, "sat on")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        page.locator('#toolbar-word-form button[value="collocation"]').click()
+        page.locator("#toolbar-word-note").fill("坐在……上；常与具体位置连用")
+        page.locator("#toolbar-word-save").click()
+        page.wait_for_function(
+            """() => {
+              const span = Array.from(document.querySelectorAll('[data-word-card]'))
+                .find((element) => element.textContent === 'sat on');
+              return span
+                && span.dataset.lexicalType === 'collocation'
+                && span.dataset.note === '坐在……上；常与具体位置连用';
+            }"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT id, lexical_type, user_note, due_at
+                 FROM word_cards
+                WHERE surface_form = 'sat on' AND archived_at IS NULL"""
+        ).fetchone()
+
+    assert row is not None
+    assert row["lexical_type"] == "collocation"
+    assert row["user_note"] == "坐在……上；常与具体位置连用"
+    assert row["due_at"] is not None
 
 
 def test_remove_word_card_keeps_reader_scroll_position(

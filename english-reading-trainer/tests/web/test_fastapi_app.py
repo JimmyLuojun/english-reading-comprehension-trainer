@@ -23,6 +23,7 @@ from app.db_connection import DatabaseConnection, DatabaseIntegrityReport
 from app.importers.epub_importer import import_epub
 from app.importers.txt_importer import import_txt
 from app.review.sm2_scheduler import apply_review
+from app.review.daily_review_queue import list_due_cards
 from app.web.fastapi_app import create_app
 from app.web import fastapi_app
 from app.web.views.reader_script import _selection_script
@@ -1580,6 +1581,7 @@ class TestReadingAndMarking:
                 "sentence_id": str(sentence_ids[0]),
                 "surface_form": "ice masses",
                 "lexical_type": "phrase",
+                "user_note": "冰块；强调聚集成块的形态",
                 "return_to": "/read/1",
             },
             headers={"X-Requested-With": "fetch", "Accept": "application/json"},
@@ -1596,8 +1598,16 @@ class TestReadingAndMarking:
             "surface_form": "ice masses",
             "lexical_type": "phrase",
             "current_meaning": "",
-            "user_note": "",
+            "user_note": "冰块；强调聚集成块的形态",
         }
+        due_items = list_due_cards(db, card_type="word")
+        assert [(item.card_id, item.prompt, item.answer) for item in due_items] == [
+            (
+                payload["card_id"],
+                "ice masses",
+                "冰块；强调聚集成块的形态",
+            )
+        ]
 
     def test_unmark_word_archives_word_card(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

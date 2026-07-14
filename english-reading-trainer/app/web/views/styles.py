@@ -488,6 +488,7 @@ def _css() -> str:
       grid-template-columns: max-content max-content max-content;
       grid-template-areas:
         "type copy analyze"
+        "note note save"
         "status status status";
       align-items: center;
       padding: 2px;
@@ -495,6 +496,19 @@ def _css() -> str:
     }
     #toolbar-word-form[hidden] { display: none; }
     #toolbar-word-form .word-toolbar-segment { grid-area: type; }
+    #toolbar-word-note {
+      grid-area: note;
+      box-sizing: border-box;
+      width: 100%;
+      min-width: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #f9fafb;
+      color: #111827;
+      font: inherit;
+    }
+    #toolbar-word-save { grid-area: save; }
     #toolbar-word-copy-prompt { grid-area: copy; }
     #toolbar-word-analyze { grid-area: analyze; }
     #toolbar-word-status {
@@ -1314,6 +1328,8 @@ def _css() -> str:
         grid-template-columns: 1fr 1fr;
         grid-template-areas:
           "type type"
+          "note note"
+          "save save"
           "copy analyze"
           "status status";
         align-items: stretch;

@@ -203,6 +203,7 @@ def create_or_update_word_card(
     surface_form = surface_form.strip()
     if not surface_form:
         raise ValueError("surface_form must not be empty.")
+    user_note = user_note.strip()
 
     lemma = _default_lemma(surface_form)
 
@@ -219,12 +220,21 @@ def create_or_update_word_card(
 
         if existing:
             card_id = int(existing["id"])
-            conn.execute(
-                """UPDATE word_cards
-                      SET archived_at = NULL
-                    WHERE id = ?""",
-                (card_id,),
-            )
+            if user_note:
+                conn.execute(
+                    """UPDATE word_cards
+                          SET archived_at = NULL,
+                              user_note = ?
+                        WHERE id = ?""",
+                    (user_note, card_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE word_cards
+                          SET archived_at = NULL
+                        WHERE id = ?""",
+                    (card_id,),
+                )
             _record_word_card_source_conn(
                 conn,
                 card_id=card_id,

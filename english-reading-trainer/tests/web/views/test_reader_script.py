@@ -1264,6 +1264,8 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
 
     assert 'document.getElementById("toolbar-word-analyze")' in refs
     assert 'document.getElementById("toolbar-word-copy-prompt")' in refs
+    assert 'document.getElementById("toolbar-word-note")' in refs
+    assert 'document.getElementById("toolbar-word-save")' in refs
     assert 'document.getElementById("toolbar-word-status")' in refs
     assert "analysisOpen.hidden = !wholeSentence;" in update_toolbar
     assert "function lexicalTypeForSelection(value)" in script
@@ -1287,10 +1289,12 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert "const selection = activeReaderWordSelectionSnapshot();" in mark_reader
     assert "const range = activeReaderWordSelectionRange?.cloneRange() || selectedReaderRangeClone();" in mark_reader
     assert 'setToolbarStatus(wordStatus, analyzeAfter ? "Saving and analyzing..." : "Saving...");' in mark_reader
-    assert "setToolbarStatus(wordStatus, `Marked ${lexicalTypeLabel(lexicalType)}`);" in mark_reader
+    assert 'user_note: wordNote?.value.trim() || ""' in mark_reader
+    assert "setToolbarStatus(wordStatus, `Saved ${lexicalTypeLabel(lexicalType)} to review`);" in mark_reader
     assert "scheduleToolbarHide(700);" in mark_reader
     assert "requestWordAnalysis(String(payload.card_id)" in mark_reader
     assert 'fetch("/analysis/selection/word-external-prompt"' in copy_word_prompt
+    assert 'body.set("learner_note", selection.learnerNote)' in script
     assert 'fetch("/analysis/selection/word-external"' in save_word_selection
     assert "prepareExternalWordResultBox({ selection }, \"Prompt copied. Paste external result here.\");" in copy_word_prompt
     assert "applyWordCardToSource(payload.source, payload.word_card);" in save_word_selection

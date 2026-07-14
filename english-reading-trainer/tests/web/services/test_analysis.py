@@ -593,6 +593,7 @@ def test_build_external_word_prompt_for_selection_uses_offsets_and_contract(
         lexical_type="word",
         start_offset=16,
         end_offset=25,
+        learner_note="证明；此处是被动语态",
     )
 
     assert payload["ok"] is True
@@ -608,6 +609,7 @@ def test_build_external_word_prompt_for_selection_uses_offsets_and_contract(
         "prompt"
     ]
     assert "PROJECT WORD 9 evidenced" in payload["prompt"]
+    assert "learner note: 证明；此处是被动语态" in payload["prompt"]
 
 
 def test_build_external_word_prompt_for_selection_rejects_bad_offsets(
@@ -740,6 +742,7 @@ def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
         lexical_type="word",
         start_offset=16,
         end_offset=25,
+        learner_note="证明；此处是被动语态",
         external_result='```json\n{"lemma":"evidence"}\n```',
     )
 
@@ -753,6 +756,7 @@ def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
         "source": {"id": 3, "sentence_id": 9},
     }
     assert captured["create_args"][0][1:4] == (9, "evidenced", analysis.LexicalType.WORD)
+    assert captured["create_args"][1]["user_note"] == "证明；此处是被动语态"
     assert captured["validate_args"][1]["surface_form"] == "evidenced"
     assert captured["attach_args"][1]["surface_form"] == "evidenced"
 

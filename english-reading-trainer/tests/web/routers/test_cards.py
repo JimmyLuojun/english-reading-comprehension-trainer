@@ -132,6 +132,7 @@ def test_mark_word_json_route_passes_and_returns_source_offsets(monkeypatch) -> 
 
     assert response.status_code == 200
     assert captured["kwargs"] == {
+        "user_note": "",
         "source_start_offset": 9,
         "source_end_offset": 15,
         "selected_text": "bright",

@@ -425,6 +425,7 @@ def test_external_word_selection_prompt_route_passes_offsets(monkeypatch) -> Non
             "lexical_type": "word",
             "start_offset": "16",
             "end_offset": "25",
+            "learner_note": "证明；此处是被动语态",
         },
     )
 
@@ -436,6 +437,7 @@ def test_external_word_selection_prompt_route_passes_offsets(monkeypatch) -> Non
         "lexical_type": "word",
         "start_offset": 16,
         "end_offset": 25,
+        "learner_note": "证明；此处是被动语态",
     }
 
 
@@ -553,6 +555,7 @@ def test_external_word_selection_analysis_route_passes_selection(monkeypatch) ->
             "lexical_type": "word",
             "start_offset": "16",
             "end_offset": "25",
+            "learner_note": "证明；此处是被动语态",
             "external_result": "full word reply",
         },
     )
@@ -564,6 +567,7 @@ def test_external_word_selection_analysis_route_passes_selection(monkeypatch) ->
         "lexical_type": "word",
         "start_offset": 16,
         "end_offset": 25,
+        "learner_note": "证明；此处是被动语态",
         "external_result": "full word reply",
     }
 

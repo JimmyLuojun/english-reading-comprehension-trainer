@@ -149,6 +149,17 @@ class TestCreateWordCard:
             ).fetchone()
         assert row["user_note"] == "confuses with claim"
 
+    def test_user_note_is_trimmed(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "h-trim")
+        card_id, _ = create_or_update_word_card(
+            db, sid, "infer", user_note="  根据线索推断；常与 from 连用  "
+        )
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT user_note FROM word_cards WHERE id = ?", (card_id,)
+            ).fetchone()
+        assert row["user_note"] == "根据线索推断；常与 from 连用"
+
     def test_first_sentence_id_stored(self, db: DatabaseConnection) -> None:
         sid = _seed_sentence(db, "i")
         card_id, _ = create_or_update_word_card(db, sid, "argue")
@@ -189,6 +200,32 @@ class TestUpdateWordCard:
         card_id1, _ = create_or_update_word_card(db, sid, "claim")
         card_id2, _ = create_or_update_word_card(db, sid, "claim")
         assert card_id1 == card_id2
+
+    def test_nonempty_note_updates_reused_card(self, db: DatabaseConnection) -> None:
+        sid = _seed_sentence(db, "m-note")
+        card_id, _ = create_or_update_word_card(
+            db, sid, "claim", user_note="声称，不一定已证实"
+        )
+
+        reused_id, created = create_or_update_word_card(
+            db, sid, "claim", user_note="声称；常暗示真实性待证"
+        )
+
+        assert reused_id == card_id
+        assert created is False
+        assert get_word_card(db, card_id)["user_note"] == "声称；常暗示真实性待证"
+
+    def test_blank_note_does_not_erase_reused_card_note(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "m-note-blank")
+        card_id, _ = create_or_update_word_card(
+            db, sid, "claim", user_note="声称，不一定已证实"
+        )
+
+        create_or_update_word_card(db, sid, "claim", user_note="   ")
+
+        assert get_word_card(db, card_id)["user_note"] == "声称，不一定已证实"
 
     def test_repeated_same_sentence_does_not_increment_occurrence_count(
         self, db: DatabaseConnection

@@ -490,6 +490,10 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
           <button type="button" name="lexical_type" value="phrase" data-word-lexical="phrase">Phrase</button>
           <button type="button" name="lexical_type" value="collocation" data-word-lexical="collocation">Collocation</button>
         </div>
+        <input id="toolbar-word-note" type="text" name="user_note"
+               aria-label="Meaning and usage note"
+               placeholder="Meaning / usage (optional)">
+        <button id="toolbar-word-save" type="submit" class="primary">Save to review</button>
         <button id="toolbar-word-copy-prompt" type="button" class="primary">Copy prompt</button>
         <button id="toolbar-word-analyze" type="button">AI analysis</button>
         <span id="toolbar-word-status" class="toolbar-status" aria-live="polite"></span>

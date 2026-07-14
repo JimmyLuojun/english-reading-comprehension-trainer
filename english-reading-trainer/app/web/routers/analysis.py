@@ -246,6 +246,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
                 end_offset=_optional_int_form_value(
                     form.get("end_offset") or form.get("source_end_offset")
                 ),
+                learner_note=form.get("learner_note", ""),
             )
         except ValueError as exc:
             return JSONResponse(
@@ -270,6 +271,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
                 end_offset=_optional_int_form_value(
                     form.get("end_offset") or form.get("source_end_offset")
                 ),
+                learner_note=form.get("learner_note", ""),
                 external_result=form.get("external_result", ""),
             )
         except ValueError as exc:

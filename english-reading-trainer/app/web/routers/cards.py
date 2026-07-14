@@ -193,6 +193,7 @@ def register_card_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
                 sentence_id,
                 surface_form,
                 lexical_type,
+                user_note=form.get("user_note", ""),
                 source_start_offset=source_start_offset,
                 source_end_offset=source_end_offset,
                 selected_text=form.get("selected_text"),

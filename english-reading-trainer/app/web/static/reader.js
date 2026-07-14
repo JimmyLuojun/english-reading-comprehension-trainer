@@ -38,6 +38,8 @@
       const wordForm = document.getElementById("toolbar-word-form");
       const wordSentenceId = document.getElementById("toolbar-word-sentence-id");
       const wordSurfaceForm = document.getElementById("toolbar-word-surface-form");
+      const wordNote = document.getElementById("toolbar-word-note");
+      const wordSave = document.getElementById("toolbar-word-save");
       const wordCopyPrompt = document.getElementById("toolbar-word-copy-prompt");
       const wordAnalyze = document.getElementById("toolbar-word-analyze");
       const wordStatus = document.getElementById("toolbar-word-status");
@@ -1368,7 +1370,10 @@
 
       function activeReaderWordSelectionSnapshot() {
         if (activeReaderWordSelection) {
-          return { ...activeReaderWordSelection };
+          return {
+            ...activeReaderWordSelection,
+            learnerNote: wordNote?.value.trim() || "",
+          };
         }
         const sentenceId = wordSentenceId.value;
         const surfaceForm = wordSurfaceForm.value.trim();
@@ -1384,6 +1389,7 @@
           endOffset: sourceOffsets?.end ?? null,
           selectedText: sourceOffsets?.selectedText || surfaceForm,
           contextText: sentence?.textContent || "",
+          learnerNote: wordNote?.value.trim() || "",
         };
       }
 
@@ -1463,6 +1469,7 @@
         body.set("sentence_id", selection.sentenceId);
         body.set("surface_form", selection.surfaceForm);
         body.set("lexical_type", selection.lexicalType);
+        if (selection.learnerNote) body.set("learner_note", selection.learnerNote);
         if (selection.startOffset !== null && selection.endOffset !== null) {
           body.set("start_offset", String(selection.startOffset));
           body.set("end_offset", String(selection.endOffset));
@@ -2165,6 +2172,7 @@
           sentence_id: sentenceId,
           surface_form: surfaceForm,
           lexical_type: lexicalType,
+          user_note: wordNote?.value.trim() || "",
           return_to: returnTo,
         });
         addSourceFields(body, sourceOffsets);
@@ -2186,6 +2194,7 @@
           }
           registerWordCard(payload.word_card);
           rebuildGlossaryRegex();
+          if (wordNote) wordNote.value = "";
           clearActiveReaderWordSelection();
           const marked = applyWordCardToRange(range, payload.word_card, payload.source)
             || applyWordCardToSource(payload.source, payload.word_card);
@@ -2202,7 +2211,7 @@
             });
             return;
           }
-          setToolbarStatus(wordStatus, `Marked ${lexicalTypeLabel(lexicalType)}`);
+          setToolbarStatus(wordStatus, `Saved ${lexicalTypeLabel(lexicalType)} to review`);
           suppressCollapsedToolbarHideUntil = Date.now() + 1200;
           window.getSelection()?.removeAllRanges();
           scheduleToolbarHide(700);
@@ -2296,6 +2305,7 @@
 
         wordSentenceId.value = activeSentenceId;
         wordSurfaceForm.value = selectedText;
+        if (wordNote) wordNote.value = "";
         setSelectedWordLexicalType(lexicalTypeForSelection(selectedText));
         configureCrossSentenceActions([]);
         if (wholeSentence) {
@@ -5575,8 +5585,7 @@
       }
       wordForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        const lexicalType = event.submitter?.value || "word";
-        markReaderSelection(lexicalType, event.submitter);
+        markReaderSelection(selectedWordLexicalType, event.submitter || wordSave);
       });
       wordForm.querySelectorAll("[data-word-lexical]").forEach((button) => {
         button.addEventListener("click", (event) => {

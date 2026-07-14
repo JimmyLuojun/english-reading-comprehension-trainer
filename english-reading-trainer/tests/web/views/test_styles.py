@@ -103,8 +103,15 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "max-width: min(calc(100vw - 16px), 760px)" in css
     assert "#toolbar-sentence-form" in css
     assert "#toolbar-word-form" in css
-    assert 'grid-template-areas:\n        "type copy analyze"\n        "status status status";' in css
+    assert (
+        'grid-template-areas:\n'
+        '        "type copy analyze"\n'
+        '        "note note save"\n'
+        '        "status status status";'
+    ) in css
     assert "#toolbar-word-form[hidden] { display: none; }" in css
+    assert "#toolbar-word-note {\n      grid-area: note;" in css
+    assert "#toolbar-word-save { grid-area: save; }" in css
     assert "#toolbar-word-status {\n      grid-area: status;\n      min-width: 0;\n      width: 100%;" in css
     assert ".word-toolbar-segment" in css
     assert "flex: 0 0 auto;" in css
