@@ -50,6 +50,7 @@ _JSON_FENCE_RE = re.compile(
 _EXTERNAL_MODEL_NAME = "external-ai"
 _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE = 0.8
 _MAX_SENTENCE_ERROR_CODES = 3
+_MAX_WORD_ERROR_CODES = 2
 _PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 
 
@@ -509,6 +510,7 @@ def save_external_word_analysis_for_selection(
             db,
             sentence_id=sentence_id,
             surface_form=selection["surface_form"],
+            lexical_type=selection["lexical_type"],
             external_result=external_result,
         )
         if validation.is_error:
@@ -567,6 +569,7 @@ def save_external_word_analysis_for_card(
         db,
         sentence_id=int(card["first_sentence_id"]),
         surface_form=str(card["surface_form"] or ""),
+        lexical_type=str(card.get("lexical_type") or LexicalType.WORD.value),
         external_result=external_result,
     )
     if validation.is_error:
@@ -595,10 +598,14 @@ def _validate_external_word_json(
     *,
     sentence_id: int,
     surface_form: str,
+    lexical_type: str = LexicalType.WORD.value,
     external_result: str,
 ) -> AnalysisOutcome:
     try:
-        raw_json = extract_external_json_block(external_result)
+        raw_json = _normalize_external_word_json(
+            extract_external_json_block(external_result),
+            lexical_type=lexical_type,
+        )
         prompt_version = _active_word_prompt_version(db)
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
@@ -707,6 +714,23 @@ def _normalize_external_sentence_json(raw_json: str) -> str:
         error_codes = data.get(field)
         if isinstance(error_codes, list):
             data[field] = error_codes[:_MAX_SENTENCE_ERROR_CODES]
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _normalize_external_word_json(raw_json: str, *, lexical_type: str) -> str:
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return raw_json
+    if not isinstance(data, dict):
+        return raw_json
+    try:
+        data["lexical_type"] = LexicalType(lexical_type).value
+    except ValueError:
+        return raw_json
+    error_codes = data.get("predicted_error_types")
+    if isinstance(error_codes, list):
+        data["predicted_error_types"] = error_codes[:_MAX_WORD_ERROR_CODES]
     return json.dumps(data, ensure_ascii=False)
 
 

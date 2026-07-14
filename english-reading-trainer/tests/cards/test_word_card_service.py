@@ -227,6 +227,34 @@ class TestUpdateWordCard:
 
         assert get_word_card(db, card_id)["user_note"] == "声称，不一定已证实"
 
+    def test_reactivated_card_uses_newly_selected_lexical_type(
+        self, db: DatabaseConnection
+    ) -> None:
+        sid = _seed_sentence(db, "m-reclassify")
+        card_id, _ = create_or_update_word_card(
+            db,
+            sid,
+            "get away with",
+            lexical_type=LexicalType.WORD,
+            user_note="old word note",
+        )
+        archive_word_card(db, card_id)
+
+        reused_id, created = create_or_update_word_card(
+            db,
+            sid,
+            "get away with",
+            lexical_type=LexicalType.PHRASE,
+            user_note="蒙混过关；做了坏事却未受罚",
+        )
+
+        card = get_word_card(db, card_id)
+        assert reused_id == card_id
+        assert created is False
+        assert card is not None
+        assert card["lexical_type"] == "phrase"
+        assert card["user_note"] == "蒙混过关；做了坏事却未受罚"
+
     def test_repeated_same_sentence_does_not_increment_occurrence_count(
         self, db: DatabaseConnection
     ) -> None:

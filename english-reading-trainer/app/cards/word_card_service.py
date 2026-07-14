@@ -224,16 +224,18 @@ def create_or_update_word_card(
                 conn.execute(
                     """UPDATE word_cards
                           SET archived_at = NULL,
+                              lexical_type = ?,
                               user_note = ?
                         WHERE id = ?""",
-                    (user_note, card_id),
+                    (lexical_type.value, user_note, card_id),
                 )
             else:
                 conn.execute(
                     """UPDATE word_cards
-                          SET archived_at = NULL
+                          SET archived_at = NULL,
+                              lexical_type = ?
                         WHERE id = ?""",
-                    (card_id,),
+                    (lexical_type.value, card_id),
                 )
             _record_word_card_source_conn(
                 conn,

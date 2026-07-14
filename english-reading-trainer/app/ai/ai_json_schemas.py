@@ -425,7 +425,15 @@ WORD_ANALYSIS_SCHEMA_V2: dict = {
         "meaning_in_context": {"type": "string", "minLength": 1},
         "register": {
             "type": "string",
-            "enum": ["academic", "formal", "literary", "neutral", "colloquial", "technical"],
+            "enum": [
+                "academic",
+                "formal",
+                "historical",
+                "literary",
+                "neutral",
+                "colloquial",
+                "technical",
+            ],
         },
         "why_this_word": {"type": "string", "minLength": 1},
         "vs_simpler": {

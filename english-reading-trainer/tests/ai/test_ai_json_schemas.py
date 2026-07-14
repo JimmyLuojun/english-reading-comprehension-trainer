@@ -658,7 +658,15 @@ class TestWordSchemaV2Structure:
 
     def test_v2_register_enum(self) -> None:
         enum = set(WORD_ANALYSIS_SCHEMA_V2["properties"]["register"]["enum"])
-        assert enum == {"academic", "formal", "literary", "neutral", "colloquial", "technical"}
+        assert enum == {
+            "academic",
+            "formal",
+            "historical",
+            "literary",
+            "neutral",
+            "colloquial",
+            "technical",
+        }
 
     def test_v2_error_codes_match_db(self) -> None:
         enum = set(
@@ -689,7 +697,15 @@ class TestWordSchemaV2ValidInstances:
         _validate(data, WORD_ANALYSIS_SCHEMA_V2)
 
     def test_all_register_values_accepted(self) -> None:
-        for reg in ["academic", "formal", "literary", "neutral", "colloquial", "technical"]:
+        for reg in [
+            "academic",
+            "formal",
+            "historical",
+            "literary",
+            "neutral",
+            "colloquial",
+            "technical",
+        ]:
             _validate({**VALID_WORD_V2, "register": reg}, WORD_ANALYSIS_SCHEMA_V2)
 
 

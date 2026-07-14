@@ -1054,6 +1054,47 @@ def test_remove_word_card_keeps_reader_scroll_position(
     assert after["remainingWordCards"] == 0
 
 
+def test_removed_word_can_be_resaved_as_phrase_with_phrase_color(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.locator('[data-word-card][data-lexical-type="word"]').click()
+        page.locator("#toolbar-word-detail-remove").click()
+        page.wait_for_function('document.querySelectorAll("[data-word-card]").length === 0')
+
+        _select_text(page, 0, "cat")
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        page.locator('#toolbar-word-form button[value="phrase"]').click()
+        page.locator("#toolbar-word-note").fill("此处按 phrase 复习")
+        page.locator("#toolbar-word-save").click()
+        page.wait_for_function(
+            """() => {
+              const span = document.querySelector('[data-word-card]');
+              return span && span.dataset.lexicalType === 'phrase';
+            }"""
+        )
+        visual_state = page.locator('[data-word-card][data-lexical-type="phrase"]').evaluate(
+            """element => ({
+              lexicalType: element.dataset.lexicalType,
+              backgroundImage: getComputedStyle(element).backgroundImage,
+              decorationColor: getComputedStyle(element).textDecorationColor,
+            })"""
+        )
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT lexical_type FROM word_cards WHERE lemma = 'cat'"
+        ).fetchone()
+
+    assert row is not None
+    assert row["lexical_type"] == "phrase"
+    assert visual_state["lexicalType"] == "phrase"
+    assert "168, 85, 247" in visual_state["backgroundImage"]
+    assert visual_state["decorationColor"] == "rgba(126, 34, 206, 0.74)"
+
+
 def test_sentence_boundary_touch_does_not_count_as_cross_sentence(
     browser: Browser,
     reader_url: str,

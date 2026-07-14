@@ -1104,6 +1104,74 @@ def test_save_external_word_selection_preserves_selected_card_when_lemma_differs
     ]
 
 
+def test_save_external_word_selection_accepts_exact_iquan_analysis(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "external_proper_name.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    sentence_id = _seed_sentence_text(
+        db,
+        "Zheng Zhilong, also known as Nicholas Iquan, became a maritime leader.",
+    )
+    pasted = {
+        "lemma": "iquan",
+        "lexical_type": "word",
+        "pos": "noun",
+        "meaning_in_context": (
+            "The historical name 'Iquan' (Yiguan), referring to Zheng Zhilong, "
+            "a prominent 17th-century Chinese military leader, pirate, and "
+            "merchant from Fujian."
+        ),
+        "chinese_meaning": "一官（即郑芝龙，明末清初闽海领袖）",
+        "role_in_sentence": (
+            "It serves as the proper noun subject of the sentence, paired with "
+            "the appositive 'the future Lord of the Straits' to introduce the "
+            "central historical figure of the narrative."
+        ),
+        "register": "historical",
+        "why_this_word": (
+            "The author used 'Iquan'—the romanized Southern Min pronunciation "
+            "of 'Yiguan'—rather than his official name 'Zheng Zhilong' to align "
+            "with 17th-century Western historical archives and Dutch East India "
+            "Company records."
+        ),
+        "vs_simpler": [
+            {
+                "simpler": "Zheng Zhilong",
+                "difference": (
+                    "Zheng Zhilong is the formal, standard pinyin name used in "
+                    "modern Chinese historiography."
+                ),
+            }
+        ],
+        "learner_note_check": {
+            "status": "not_provided",
+            "feedback": "",
+            "corrected_understanding": "",
+        },
+        "morphology": {"root": "", "family": []},
+        "predicted_error_types": ["L02", "L06"],
+        "confidence": 0.98,
+    }
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        db,
+        sentence_id=sentence_id,
+        surface_form="Iquan",
+        lexical_type="word",
+        start_offset=38,
+        end_offset=43,
+        external_result=json.dumps(pasted, ensure_ascii=False),
+    )
+
+    assert outcome.is_error is False
+    assert outcome.payload is not None
+    assert outcome.payload["analysis"]["lexical_type"] == "word"
+    assert outcome.payload["analysis"]["register"] == "historical"
+    assert outcome.payload["analysis"]["predicted_error_types"] == ["L02", "L06"]
+    assert outcome.payload["word_card"]["surface_form"] == "Iquan"
+
+
 def test_save_external_word_selection_rejects_invalid_json_before_card_create(
     tmp_path: Path,
 ) -> None:
@@ -1181,6 +1249,34 @@ def test_normalize_external_sentence_json_preserves_invalid_json() -> None:
 
 def test_normalize_external_sentence_json_preserves_non_object_json() -> None:
     assert analysis._normalize_external_sentence_json("[1, 2]") == "[1, 2]"
+
+
+def test_normalize_external_word_json_preserves_invalid_or_non_object_json() -> None:
+    assert analysis._normalize_external_word_json('{"bad"', lexical_type="word") == '{"bad"'
+    assert analysis._normalize_external_word_json("[1, 2]", lexical_type="word") == "[1, 2]"
+
+
+def test_normalize_external_word_json_preserves_unknown_selection_type() -> None:
+    raw_json = json.dumps({"lexical_type": "proper_noun"})
+
+    assert analysis._normalize_external_word_json(raw_json, lexical_type="name") == raw_json
+
+
+def test_normalize_external_word_json_uses_selection_type_and_limits_errors() -> None:
+    normalized = analysis._normalize_external_word_json(
+        json.dumps(
+            {
+                "lexical_type": "proper_noun",
+                "predicted_error_types": ["L01", "L02", "L06"],
+            }
+        ),
+        lexical_type="word",
+    )
+
+    assert json.loads(normalized) == {
+        "lexical_type": "word",
+        "predicted_error_types": ["L01", "L02"],
+    }
 
 
 def test_normalize_external_sentence_json_limits_error_codes_to_top_three() -> None:
