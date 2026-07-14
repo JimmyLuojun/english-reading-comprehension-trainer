@@ -161,7 +161,8 @@ def make_epub_ncx_only(
         ).encode("utf-8")
         book.add_item(item)
         spine_items.append(item)
-        toc_links.append(epub.Link(file_name, section["title"], f"nav-{idx}"))
+        if section.get("include_in_toc", True):
+            toc_links.append(epub.Link(file_name, section["title"], f"nav-{idx}"))
 
     book.toc = toc_links
     book.add_item(epub.EpubNcx())

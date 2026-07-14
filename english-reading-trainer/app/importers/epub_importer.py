@@ -143,7 +143,10 @@ _PART_SEPARATOR_TEXT_RE = re.compile(
     r")\b",
     re.I,
 )
-_APPENDIX_TITLE_RE = re.compile(r"^\s*(?:appendix\s+)?([A-Z])(?:[\s.:)-]+|$)")
+_APPENDIX_TITLE_RE = re.compile(
+    r"^\s*(?:appendix\s+)?(?:[ivxlcdm]+|[A-Z]|\d+)(?:[\s.:)-]+|$)",
+    re.I,
+)
 _FRONTMATTER_TYPES = {
     "acknowledgments",
     "dedication",
@@ -166,10 +169,12 @@ _BACKMATTER_TYPES = {
     "index",
 }
 _FRONTMATTER_TITLES = {
+    "acknowledgements",
     "acknowledgments",
     "cover",
     "dedication",
     "foreword",
+    "front matter",
     "glossary",
     "preface",
     "prologue",
@@ -177,7 +182,9 @@ _FRONTMATTER_TITLES = {
     "title page",
     "titlepage",
 }
-_BACKMATTER_TITLES = {"index", "colophon", "copyright"}
+_FRONTMATTER_TITLE_PREFIXES = ("prologue ",)
+_APPENDIX_TITLES = {"family tree", "family trees"}
+_BACKMATTER_TITLES = {"index", "colophon", "copyright", "notes"}
 _BACKMATTER_TITLE_PREFIXES = (
     "afterword",
     "back cover",
@@ -188,6 +195,7 @@ _BACKMATTER_TITLE_PREFIXES = (
     "index",
     "references",
     "reviews",
+    "sources",
 )
 
 _MIN_PARA_LEN = 20
@@ -602,6 +610,13 @@ def _document_title_from_filename(file_name: str) -> str:
     normalized = re.sub(r"[\s_-]+", " ", stem).strip()
     compact = normalized.replace(" ", "").lower()
 
+    # Some publishers prefix every spine filename with its sequence number and
+    # an ISBN-like identifier (for example ``04_97807524_FM.html``).  The
+    # trailing FM still denotes front matter; treating the leading 04 as a
+    # chapter number starts the body too early and shifts every following row.
+    if re.fullmatch(r"\d*fm", compact):
+        return "Front Matter"
+
     front_match = re.fullmatch(r"front(\d*)", compact)
     if front_match:
         suffix = front_match.group(1)
@@ -644,7 +659,11 @@ def _classify_chapter(
             _SECTION_CHAPTER,
             parsed_number or next_chapter_number,
         )
-    if "appendix" in epub_types or _APPENDIX_TITLE_RE.match(title):
+    if (
+        "appendix" in epub_types
+        or _APPENDIX_TITLE_RE.match(title)
+        or title.strip().lower() in _APPENDIX_TITLES
+    ):
         return ChapterClassification(_SECTION_APPENDIX)
     if not body_started:
         return ChapterClassification(_SECTION_FRONTMATTER)
@@ -712,7 +731,11 @@ def _is_part_title(title: str) -> bool:
 
 def _is_frontmatter_title(title: str) -> bool:
     normalized = title.strip().lower()
-    return normalized in _FRONTMATTER_TITLES or normalized.startswith("praise for ")
+    return (
+        normalized in _FRONTMATTER_TITLES
+        or normalized.startswith(_FRONTMATTER_TITLE_PREFIXES)
+        or normalized.startswith("praise for ")
+    )
 
 
 def _is_backmatter_title(title: str) -> bool:

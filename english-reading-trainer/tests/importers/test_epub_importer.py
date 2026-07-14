@@ -239,6 +239,41 @@ class TestTocAndChapterClassification:
         assert classification.section_kind == _SECTION_APPENDIX
         assert classification.chapter_number is None
 
+    def test_classifies_roman_numbered_appendix_case_insensitively(self) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter(
+            "Appendix III: The Rise of the Manchus",
+            soup,
+            14,
+        )
+
+        assert classification.section_kind == _SECTION_APPENDIX
+        assert classification.chapter_number is None
+
+    @pytest.mark.parametrize(
+        "title",
+        ["Acknowledgements", "Prologue 1644: Brightness Falls"],
+    )
+    def test_common_descriptive_frontmatter_titles_remain_frontmatter_after_body(
+        self,
+        title: str,
+    ) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter(title, soup, 14, body_started=True)
+
+        assert classification.section_kind == _SECTION_FRONTMATTER
+        assert classification.chapter_number is None
+
+    def test_family_trees_are_appendix_material(self) -> None:
+        soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
+
+        classification = _classify_chapter("Family Trees", soup, 14)
+
+        assert classification.section_kind == _SECTION_APPENDIX
+        assert classification.chapter_number is None
+
     def test_classifies_backmatter_from_title(self) -> None:
         soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
 
@@ -314,7 +349,16 @@ class TestTocAndChapterClassification:
         assert classification.section_kind == _SECTION_FRONTMATTER
         assert classification.chapter_number is None
 
-    @pytest.mark.parametrize("title", ["Further Reading", "Bibliography", "Back Cover"])
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Further Reading",
+            "Bibliography",
+            "Back Cover",
+            "Notes",
+            "Sources and Further Reading",
+        ],
+    )
     def test_common_post_body_titles_are_backmatter(self, title: str) -> None:
         soup = BeautifulSoup("<html><body><section></section></body></html>", "lxml")
 
@@ -328,6 +372,7 @@ class TestTocAndChapterClassification:
         [
             ("OEBPS/front.html", "Front Matter"),
             ("OEBPS/front1.html", "Front Matter 2"),
+            ("OEBPS/04_97807524_FM.html", "Front Matter"),
             ("Text/chap01.xhtml", "Chapter 1"),
             ("postreview.html", "Reviews"),
             ("odd_file-name.xhtml", "odd file name"),
@@ -998,6 +1043,94 @@ class TestImportEpubChapters:
         ]
         assert [row["chapter_number"] for row in rows] == [None, 1, 2, None]
         assert total_chapters == 2
+
+    def test_epub2_technical_fm_does_not_start_or_renumber_body(
+        self,
+        db: DatabaseConnection,
+        tmp_path: Path,
+    ) -> None:
+        ep = make_epub_ncx_only(
+            tmp_path,
+            "publisher-fm.epub",
+            sections=[
+                {
+                    "title": "04 97807524 FM",
+                    "file_name": "04_97807524_FM.html",
+                    "include_in_toc": False,
+                    "body_html": "<p>Front matter text with enough words to import.</p>",
+                },
+                {
+                    "title": "Acknowledgements",
+                    "file_name": "05_97807524_Acknowledgements.html",
+                    "body_html": "<p>Acknowledgement text with enough words to import.</p>",
+                },
+                {
+                    "title": "Prologue 1644: Brightness Falls",
+                    "file_name": "06_97807524_Prologue.html",
+                    "body_html": "<p>Prologue text with enough words to import here.</p>",
+                },
+                {
+                    "title": "1. The First Body Chapter",
+                    "file_name": "07_97807524_CH01.html",
+                    "body_html": "<p>First body chapter text with enough words to import.</p>",
+                },
+                {
+                    "title": "2. The Second Body Chapter",
+                    "file_name": "08_97807524_CH02.html",
+                    "body_html": "<p>Second body chapter text with enough words to import.</p>",
+                },
+                {
+                    "title": "Appendix I: Supporting Material",
+                    "file_name": "09_97807524_Appendix1.html",
+                    "body_html": "<p>Appendix text with enough words to import here.</p>",
+                },
+                {
+                    "title": "Notes",
+                    "file_name": "10_97807524_Notes.html",
+                    "body_html": "<p>Notes text with enough words to import here.</p>",
+                },
+            ],
+        )
+
+        result = import_epub(db, ep)
+
+        with db.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT title, section_kind, chapter_number
+                     FROM chapters
+                    WHERE book_id = ?
+                    ORDER BY idx""",
+                (result.book_id,),
+            ).fetchall()
+
+        assert result.chapter_count == 2
+        assert [row["title"] for row in rows] == [
+            "Front Matter",
+            "Acknowledgements",
+            "Prologue 1644: Brightness Falls",
+            "1. The First Body Chapter",
+            "2. The Second Body Chapter",
+            "Appendix I: Supporting Material",
+            "Notes",
+        ]
+        assert [row["section_kind"] for row in rows] == [
+            _SECTION_FRONTMATTER,
+            _SECTION_FRONTMATTER,
+            _SECTION_FRONTMATTER,
+            _SECTION_CHAPTER,
+            _SECTION_CHAPTER,
+            _SECTION_APPENDIX,
+            _SECTION_BACKMATTER,
+        ]
+        assert [row["chapter_number"] for row in rows] == [
+            None,
+            None,
+            None,
+            1,
+            2,
+            None,
+            None,
+        ]
 
     def test_single_chapter_epub(
         self, db: DatabaseConnection, tmp_path: Path
