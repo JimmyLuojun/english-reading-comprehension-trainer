@@ -509,7 +509,17 @@ def _selection_toolbar(return_to: str, word_cards: list[dict[str, Any]]) -> str:
         <span id="toolbar-analysis-word-status" class="toolbar-status" aria-live="polite"></span>
       </form>
       <div id="toolbar-word-detail" class="toolbar-group word-detail-panel" hidden>
-        <strong id="toolbar-word-detail-surface" class="word-detail-surface"></strong>
+        <div class="word-detail-heading">
+          <strong id="toolbar-word-detail-surface" class="word-detail-surface"></strong>
+          <button
+            id="toolbar-word-detail-pronunciation"
+            class="speak-button word-detail-pronunciation"
+            type="button"
+            data-speak-text=""
+            title="Play pronunciation"
+            aria-label="Play pronunciation"
+            hidden>▶ Listen</button>
+        </div>
         <div class="word-detail-fields">
           <label class="word-detail-label">Meaning
             <input id="toolbar-word-detail-meaning" type="text" placeholder="Definition…">

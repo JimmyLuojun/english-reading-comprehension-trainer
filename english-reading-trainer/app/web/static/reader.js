@@ -49,6 +49,7 @@
       const analysisWordStatus = document.getElementById("toolbar-analysis-word-status");
       const wordDetail = document.getElementById("toolbar-word-detail");
       const wordDetailSurface = document.getElementById("toolbar-word-detail-surface");
+      const wordDetailPronunciation = document.getElementById("toolbar-word-detail-pronunciation");
       const wordDetailMeaning = document.getElementById("toolbar-word-detail-meaning");
       const wordDetailNote = document.getElementById("toolbar-word-detail-note");
       const wordDetailSave = document.getElementById("toolbar-word-detail-save");
@@ -1638,8 +1639,13 @@
 
       function fillWordDetail(cardId, surface, meaning, note) {
         activeWordDetailCardId = String(cardId || "");
+        const speakText = (surface || "").trim();
         const cleanMeaning = meaning || "";
-        wordDetailSurface.textContent = surface || "";
+        wordDetailSurface.textContent = speakText;
+        if (wordDetailPronunciation) {
+          wordDetailPronunciation.dataset.speakText = speakText;
+          wordDetailPronunciation.hidden = !speakText;
+        }
         wordDetailMeaning.value = cleanMeaning;
         wordDetailNote.value = distinctUserNote(note, cleanMeaning);
         wordDetailRemove.dataset.cardId = activeWordDetailCardId;

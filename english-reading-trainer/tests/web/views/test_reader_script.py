@@ -1569,6 +1569,17 @@ def test_translated_sentence_double_click_shortcut_preserves_word_card_priority(
     assert "openTranslatedSentenceShortcut(sentence);" in double_click
 
 
+def test_word_detail_pronunciation_tracks_word_phrase_or_collocation_surface() -> None:
+    script = _selection_script()
+    fill_detail = script[script.index("function fillWordDetail") :]
+    fill_detail = fill_detail[: fill_detail.index("function analysisButtonLabel")]
+
+    assert 'document.getElementById("toolbar-word-detail-pronunciation")' in script
+    assert 'const speakText = (surface || "").trim();' in fill_detail
+    assert "wordDetailPronunciation.dataset.speakText = speakText;" in fill_detail
+    assert "wordDetailPronunciation.hidden = !speakText;" in fill_detail
+
+
 def test_reader_script_defaults_new_reader_selections_to_word() -> None:
     script = _selection_script()
     lexical_type = script[script.index("function lexicalTypeForSelection(value)"):]

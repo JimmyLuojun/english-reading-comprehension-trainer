@@ -1183,6 +1183,35 @@ def test_normalize_external_sentence_json_preserves_non_object_json() -> None:
     assert analysis._normalize_external_sentence_json("[1, 2]") == "[1, 2]"
 
 
+def test_normalize_external_sentence_json_limits_error_codes_to_top_three() -> None:
+    normalized = analysis._normalize_external_sentence_json(
+        json.dumps(
+            {
+                "predicted_error_types": ["G01", "G02", "G03", "G04"],
+                "diagnosed_error_types": ["L05", "D03", "L01", "G06"],
+                "diagnosis_evidence": [
+                    {"error_type": "L05", "evidence": "missed idiom"},
+                    {"error_type": "D03", "evidence": "misread connector"},
+                    {"error_type": "L01", "evidence": "misread word"},
+                    {"error_type": "G06", "evidence": "missed substitution"},
+                ],
+            }
+        )
+    )
+
+    assert json.loads(normalized) == {
+        "predicted_error_types": ["G01", "G02", "G03"],
+        "diagnosed_error_types": ["L05", "D03", "L01"],
+        "diagnosis_evidence": [
+            {"error_type": "L05", "evidence": "missed idiom"},
+            {"error_type": "D03", "evidence": "misread connector"},
+            {"error_type": "L01", "evidence": "misread word"},
+            {"error_type": "G06", "evidence": "missed substitution"},
+        ],
+        "confidence": 0.8,
+    }
+
+
 def test_sentence_context_text_returns_empty_on_error(monkeypatch) -> None:
     def fail_info(db, sentence_id):
         raise RuntimeError("context unavailable")

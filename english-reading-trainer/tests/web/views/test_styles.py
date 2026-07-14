@@ -126,6 +126,9 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "[data-sentence-id].translated" in css
     assert "text-decoration-style: dotted" in css
     assert ".speak-button" in css
+    assert ".word-detail-heading" in css
+    assert "justify-content: space-between;" in css
+    assert ".word-detail-pronunciation" in css
     assert ".word-card-delete" in css
     assert ".metric-link:hover" in css
     assert ".reader-header-actions" in css

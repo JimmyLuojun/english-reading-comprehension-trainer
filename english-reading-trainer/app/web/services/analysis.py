@@ -49,6 +49,7 @@ _JSON_FENCE_RE = re.compile(
 )
 _EXTERNAL_MODEL_NAME = "external-ai"
 _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE = 0.8
+_MAX_SENTENCE_ERROR_CODES = 3
 _PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
 
 
@@ -702,6 +703,10 @@ def _normalize_external_sentence_json(raw_json: str) -> str:
         return raw_json
     if "confidence" not in data:
         data["confidence"] = _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE
+    for field in ("predicted_error_types", "diagnosed_error_types"):
+        error_codes = data.get(field)
+        if isinstance(error_codes, list):
+            data[field] = error_codes[:_MAX_SENTENCE_ERROR_CODES]
     return json.dumps(data, ensure_ascii=False)
 
 

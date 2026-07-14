@@ -603,9 +603,21 @@ def _css() -> str:
       width: min(420px, calc(100vw - 32px));
     }
     .word-detail-panel[hidden] { display: none; }
+    .word-detail-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
     .word-detail-surface {
       color: #f1f5f9;
       font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+    .word-detail-pronunciation {
+      flex: 0 0 auto;
+      color: #d1fae5;
     }
     .word-detail-fields {
       display: grid;

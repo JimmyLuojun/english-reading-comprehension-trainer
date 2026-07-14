@@ -410,6 +410,11 @@ def test_selection_toolbar_contains_translation_editor_without_delete_action() -
 def test_selection_toolbar_word_detail_uses_takeaway_label() -> None:
     html = _selection_toolbar("/read/1", [])
 
+    assert 'class="word-detail-heading"' in html
+    assert 'id="toolbar-word-detail-pronunciation"' in html
+    assert 'data-speak-text=""' in html
+    assert 'aria-label="Play pronunciation"' in html
+    assert "▶ Listen</button>" in html
     assert ">Takeaway\n" in html
     assert 'id="toolbar-word-detail-note"' in html
     assert "What I should remember" in html
