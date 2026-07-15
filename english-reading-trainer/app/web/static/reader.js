@@ -5471,6 +5471,18 @@
           }
         });
       }
+      if (analysisExternalResult) {
+        analysisExternalResult.addEventListener("keydown", (event) => {
+          if (
+            event.key !== "Enter"
+            || event.shiftKey
+            || event.isComposing
+            || event.keyCode === 229
+          ) return;
+          event.preventDefault();
+          analysisExternalSave?.click();
+        });
+      }
       if (analysisExternalClear) {
         analysisExternalClear.addEventListener("click", clearExternalResultBox);
       }

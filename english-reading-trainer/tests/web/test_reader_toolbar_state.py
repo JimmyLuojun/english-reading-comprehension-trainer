@@ -973,6 +973,68 @@ def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
     assert "learner note: 明亮的；此处修饰 day" in copied_text
 
 
+def test_external_word_analysis_enter_saves_and_shift_enter_adds_newline(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    requests: list[dict[str, list[str]]] = []
+
+    def fulfill_external_word_analysis(route) -> None:  # type: ignore[no-untyped-def]
+        requests.append(parse_qs(route.request.post_data or ""))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "ok": True,
+                "card_id": 999,
+                "sentence_id": 1,
+                "lemma": "bright",
+                "surface_form": "bright",
+                "lexical_type": "word",
+                "analysis": {
+                    "meaning_in_context": "giving off plenty of light",
+                    "chinese_meaning": "明亮的",
+                    "register": "common",
+                    "role_in_sentence": "adjective modifying day",
+                    "why_this_word": "It describes the day.",
+                    "vs_simpler": [],
+                    "morphology": {"root": "bright", "family": ["brightness"]},
+                    "predicted_error_types": [],
+                },
+                "prompt_version": "word.v5",
+                "model": "external-ai",
+                "from_cache": False,
+                "is_stale": False,
+            }),
+        )
+
+    external_result = json.dumps({"lemma": "bright", "lexical_type": "word"})
+    for page in _new_page(browser, reader_url):
+        page.route(
+            "**/analysis/selection/word-external",
+            fulfill_external_word_analysis,
+        )
+        _select_text_until_panel(page, 1, "bright", "toolbar-word-form")
+        page.locator("#toolbar-word-copy-prompt").click()
+        page.wait_for_function(
+            '!document.getElementById("analysis-external-section").hidden'
+        )
+        textarea = page.locator("#analysis-external-result")
+        textarea.fill(external_result)
+        textarea.press("Shift+Enter")
+        assert requests == []
+        assert textarea.input_value() == f"{external_result}\n"
+
+        textarea.fill(external_result)
+        textarea.press("Enter")
+        page.wait_for_function(
+            'document.getElementById("analysis-external-status").textContent === "Saved"'
+        )
+
+    assert len(requests) == 1
+    assert requests[0]["external_result"] == [external_result]
+
+
 def test_quick_note_saves_collocation_directly_to_review(
     browser: Browser,
     reader_url: str,
