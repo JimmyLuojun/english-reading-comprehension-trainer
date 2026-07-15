@@ -57,6 +57,7 @@ def test_highlight_word_cards_uses_exact_source_offsets() -> None:
                 "end_offset": 21,
                 "surface_form": "long",
                 "lexical_type": "word",
+                "has_analysis": 1,
                 "current_meaning": "",
                 "user_note": "",
             },
@@ -67,6 +68,7 @@ def test_highlight_word_cards_uses_exact_source_offsets() -> None:
     assert html.count('data-word-card="1"') == 1
     assert 'data-source-id="11"' in html
     assert 'data-source-start="17"' in html
+    assert 'data-has-analysis="1"' in html
     assert ">long</span>" in html
 
 
@@ -89,6 +91,7 @@ def test_highlight_word_cards_infers_unique_source_without_offsets() -> None:
     assert html.count('data-word-card="1"') == 1
     assert 'data-source-start="23"' in html
     assert 'data-source-end="33"' in html
+    assert 'data-has-analysis="0"' in html
     assert ">indictment</span>..." in html
 
 

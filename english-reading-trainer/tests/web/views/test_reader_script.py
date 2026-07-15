@@ -1568,11 +1568,27 @@ def test_translated_sentence_double_click_shortcut_preserves_word_card_priority(
     assert "showMarkedSentenceToolbar(sentence);" in shortcut
     assert "openTranslationEditor();" in shortcut
     assert 'const wordSpan = event.target.closest("[data-word-card]");' in double_click
-    assert "showWordDetail(wordSpan);" in double_click
+    assert 'if (wordSpan.dataset.hasAnalysis !== "1") showWordDetail(wordSpan);' in double_click
     assert 'const sentence = event.target.closest("[data-sentence-id]");' in double_click
     assert "!sentence.dataset.translation?.trim()" in double_click
     assert "window.getSelection()?.removeAllRanges();" in double_click
     assert "openTranslatedSentenceShortcut(sentence);" in double_click
+
+
+def test_reader_click_opens_saved_word_analysis_before_word_detail() -> None:
+    script = _selection_script()
+    open_word = script[script.index("function openReaderWordCard") :]
+    open_word = open_word[: open_word.index("function showMarkedSentenceToolbar")]
+    click_handler = script[script.index('reader.addEventListener("click"') :]
+    click_handler = click_handler[: click_handler.index('reader.addEventListener("pointerdown"')]
+
+    assert 'span.dataset.hasAnalysis === "1"' in open_word
+    assert "loadSavedWordAnalysis(cardId);" in open_word
+    assert open_word.index("loadSavedWordAnalysis(cardId);") < open_word.index(
+        "showWordDetail(span);"
+    )
+    assert "if (event.detail > 1) return;" in click_handler
+    assert "openReaderWordCard(wordSpan);" in click_handler
 
 
 def test_word_detail_pronunciation_tracks_word_phrase_or_collocation_surface() -> None:

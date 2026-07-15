@@ -12,6 +12,7 @@ from app.cards.sentence_card_service import (
     save_sentence_structure,
     save_sentence_translation,
 )
+from app.cards.word_card_service import create_or_update_word_card
 from app.db_connection import DatabaseConnection
 from app.importers.txt_importer import import_txt
 from app.web.queries.reader import (
@@ -59,6 +60,47 @@ def test_reader_queries_fetch_sentences_and_blocks(tmp_path: Path) -> None:
     assert sentences[0]["user_note"] == "先找主谓"
     assert blocks[0]["kind"] == "prose"
     assert _fetch_active_word_cards(db) == []
+
+
+def test_active_word_cards_report_only_valid_saved_analysis(tmp_path: Path) -> None:
+    db = DatabaseConnection(tmp_path / "test.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    source = tmp_path / "book.txt"
+    source.write_text("The reins guided the horse.", encoding="utf-8")
+    book = import_txt(db, source, title="Book", author="")
+    with db.get_connection() as conn:
+        sentence_id = conn.execute(
+            "SELECT id FROM sentences WHERE book_id = ?",
+            (book.book_id,),
+        ).fetchone()["id"]
+    card_id, _ = create_or_update_word_card(
+        db,
+        sentence_id,
+        "reins",
+        source_start_offset=4,
+        source_end_offset=9,
+    )
+
+    assert _fetch_active_word_cards(db)[0]["has_analysis"] == 0
+
+    with db.get_connection() as conn:
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES ('reins-analysis', 'word.v1', 'manual', '{}', 0,
+                       '2026-07-13T00:00:00+00:00')"""
+        ).lastrowid
+        conn.execute(
+            "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+
+    assert _fetch_active_word_cards(db)[0]["has_analysis"] == 0
+
+    with db.get_connection() as conn:
+        conn.execute("UPDATE ai_cache SET is_valid = 1 WHERE id = ?", (cache_id,))
+
+    assert _fetch_active_word_cards(db)[0]["has_analysis"] == 1
 
 
 def test_reader_query_preserves_archived_translation_without_active_card(

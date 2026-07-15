@@ -133,6 +133,40 @@ def _attach_sentence_analysis(db: DatabaseConnection, sentence_id: int) -> int:
     return int(cache_id)
 
 
+def _attach_word_analysis(db: DatabaseConnection, lemma: str = "cat") -> int:
+    payload = {
+        "meaning_in_context": "a small domestic feline",
+        "chinese_meaning": "猫",
+        "register": "common",
+        "role_in_sentence": "subject",
+        "why_this_word": "It names the animal.",
+        "vs_simpler": [],
+        "morphology": {"root": "cat", "family": ["catlike"]},
+        "predicted_error_types": ["L01"],
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    with db.get_connection() as conn:
+        card_id = conn.execute(
+            "SELECT id FROM word_cards WHERE lemma = ?",
+            (lemma,),
+        ).fetchone()["id"]
+        cache_id = conn.execute(
+            """INSERT INTO ai_cache
+               (content_hash, prompt_version, model, response_json, is_valid, created_at)
+               VALUES (?, 'word.v1', 'manual', ?, 1, ?)""",
+            (
+                f"toolbar-word-analysis-{card_id}",
+                json.dumps(payload),
+                now,
+            ),
+        ).lastrowid
+        conn.execute(
+            "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+            (cache_id, card_id),
+        )
+    return int(cache_id)
+
+
 def _visible_panels(page: Page) -> dict[str, bool]:
     return page.evaluate(
         """(panelIds) => {
@@ -553,6 +587,37 @@ def test_click_marked_word_shows_only_word_detail(browser: Browser, reader_url: 
         page.wait_for_function('!document.getElementById("toolbar-word-detail").hidden')
 
         _assert_only_panel(page, "word_detail")
+
+
+def test_click_marked_word_with_saved_analysis_opens_analysis_panel(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    _attach_word_analysis(db)
+
+    for page in _new_page(browser, reader_url):
+        word = page.locator("[data-word-card]").first
+        assert word.get_attribute("data-has-analysis") == "1"
+        word.click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent '
+            '=== "a small domestic feline"'
+        )
+        state = page.evaluate(
+            """() => ({
+              panelHidden: document.getElementById("analysis-panel").hidden,
+              toolbarHidden: document.getElementById("selection-toolbar").hidden,
+              activeWord: document.querySelector("[data-word-card]")
+                .classList.contains("word-analysis-active"),
+            })"""
+        )
+
+    assert state == {
+        "panelHidden": False,
+        "toolbarHidden": True,
+        "activeWord": True,
+    }
 
 
 def test_double_click_marked_word_shows_only_word_detail(browser: Browser, reader_url: str) -> None:

@@ -1227,6 +1227,7 @@
         const meaning = card.current_meaning || "";
         element.dataset.wordCard = String(card.id || "");
         element.dataset.lexicalType = card.lexical_type || "";
+        element.dataset.hasAnalysis = card.has_analysis ? "1" : "0";
         element.dataset.meaning = meaning;
         element.dataset.note = distinctUserNote(card.user_note, meaning);
         if (source?.id) element.dataset.sourceId = String(source.id);
@@ -1249,6 +1250,7 @@
         element.removeAttribute("data-note");
         element.removeAttribute("data-lemma");
         element.removeAttribute("data-lexical-type");
+        element.removeAttribute("data-has-analysis");
         element.classList.remove("glossary-word", "marked-word", "word-analysis-active");
       }
 
@@ -1960,6 +1962,16 @@
         );
         setVisible(wordDetail, true);
         positionToolbar(span.getBoundingClientRect());
+      }
+
+      function openReaderWordCard(span) {
+        const cardId = span?.dataset.wordCard || "";
+        if (cardId && span.dataset.hasAnalysis === "1") {
+          window.getSelection()?.removeAllRanges();
+          loadSavedWordAnalysis(cardId);
+          return;
+        }
+        showWordDetail(span);
       }
 
       function showMarkedSentenceToolbar(sentence) {
@@ -5073,6 +5085,11 @@
         activeAnalysisPayload = payload;
         activeAnalysisLabel = (payload.surface_form || payload.lemma || "word").trim();
         activeAnalysisWordCardId = String(payload.card_id || "");
+        if (activeAnalysisWordCardId) {
+          reader.querySelectorAll(`[data-word-card="${activeAnalysisWordCardId}"]`).forEach((span) => {
+            span.dataset.hasAnalysis = "1";
+          });
+        }
         activeAnalysisSourceSentenceId = String(payload.sentence_id || "");
         activeExternalPromptWordCardId = null;
         activeExternalPromptWordSelection = null;
@@ -5764,7 +5781,9 @@
         const selection = window.getSelection();
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan && !selectionIntersectsElement(selection, wordSpan)) {
-          showWordDetail(wordSpan);
+          event.preventDefault();
+          if (event.detail > 1) return;
+          openReaderWordCard(wordSpan);
           return;
         }
         const sentence = event.target.closest("[data-sentence-id]");
@@ -5787,7 +5806,7 @@
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan) {
           event.preventDefault();
-          showWordDetail(wordSpan);
+          if (wordSpan.dataset.hasAnalysis !== "1") showWordDetail(wordSpan);
           return;
         }
         if (showCurrentReaderWordSelection()) {

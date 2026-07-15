@@ -224,12 +224,15 @@ def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
         rows = conn.execute(
             """SELECT wc.id, wc.lemma, wc.surface_form, wc.lexical_type,
                       wc.first_sentence_id, wc.current_meaning, wc.user_note,
+                      CASE WHEN ac.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
                       wcs.id AS source_id,
                       wcs.sentence_id AS source_sentence_id,
                       wcs.start_offset,
                       wcs.end_offset,
                       wcs.selected_text
                  FROM word_cards wc
+                 LEFT JOIN ai_cache ac
+                   ON ac.id = wc.ai_analysis_id AND ac.is_valid = 1
                  LEFT JOIN word_card_sources wcs
                    ON wcs.card_id = wc.id
                 WHERE wc.archived_at IS NULL

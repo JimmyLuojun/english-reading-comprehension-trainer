@@ -367,11 +367,13 @@ def _highlight_word_cards(
         note = _escape(str(card.get("user_note") or ""))
         lexical_type = _escape(str(card.get("lexical_type") or ""))
         source_id = _escape(str(card.get("source_id") or ""))
+        has_analysis = "1" if card.get("has_analysis") else "0"
         pieces.append(
             f'<span data-word-card="{card["id"]}"'
             f' data-source-id="{source_id}"'
             f' data-source-start="{start}" data-source-end="{end}"'
             f' data-lexical-type="{lexical_type}"'
+            f' data-has-analysis="{has_analysis}"'
             f' data-meaning="{meaning}" data-note="{note}"'
             f'>{_escape(text[start:end])}</span>'
         )
