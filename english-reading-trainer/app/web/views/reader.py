@@ -604,7 +604,9 @@ def _analysis_panel() -> str:
       <div id="analysis-panel-status" class="analysis-status"></div>
       <section id="analysis-external-section" class="analysis-section analysis-external-section" hidden>
         <h3><span class="section-label-zh">外部 AI</span><span class="section-label-en">External AI</span></h3>
-        <label class="analysis-external-label" for="analysis-external-result">Paste external result</label>
+        <label class="analysis-external-label" for="analysis-external-result">
+          Paste external result <span class="analysis-external-shortcut">Enter saves · Shift+Enter adds a line</span>
+        </label>
         <textarea id="analysis-external-result" rows="7" placeholder="Paste the full external AI reply here"></textarea>
         <div class="word-notes-actions">
           <button id="analysis-external-save" type="button">Save analysis</button>

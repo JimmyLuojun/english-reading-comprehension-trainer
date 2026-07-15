@@ -5479,29 +5479,31 @@
           }
         });
       }
+      function saveExternalAnalysis() {
+        if (activeExternalPromptWordSelection) {
+          saveExternalWordSelectionAnalysis();
+        } else if (panelMode === "word" || activeExternalPromptWordCardId) {
+          saveExternalWordCardAnalysis();
+        } else if (panelMode === "paragraph" || activeExternalPromptParagraphId) {
+          saveExternalParagraphAnalysis();
+        } else {
+          saveExternalSentenceAnalysis();
+        }
+      }
       if (analysisExternalSave) {
-        analysisExternalSave.addEventListener("click", () => {
-          if (activeExternalPromptWordSelection) {
-            saveExternalWordSelectionAnalysis();
-          } else if (panelMode === "word" || activeExternalPromptWordCardId) {
-            saveExternalWordCardAnalysis();
-          } else if (panelMode === "paragraph" || activeExternalPromptParagraphId) {
-            saveExternalParagraphAnalysis();
-          } else {
-            saveExternalSentenceAnalysis();
-          }
-        });
+        analysisExternalSave.addEventListener("click", saveExternalAnalysis);
       }
       if (analysisExternalResult) {
         analysisExternalResult.addEventListener("keydown", (event) => {
           if (
-            event.key !== "Enter"
-            || event.shiftKey
+            event.shiftKey
             || event.isComposing
-            || event.keyCode === 229
+            || event.repeat
+            || (event.key !== "Enter" && event.code !== "Enter")
           ) return;
           event.preventDefault();
-          analysisExternalSave?.click();
+          event.stopPropagation();
+          saveExternalAnalysis();
         });
       }
       if (analysisExternalClear) {

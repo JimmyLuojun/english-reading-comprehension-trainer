@@ -440,6 +440,7 @@ def test_analysis_panel_wraps_optional_structure_sections() -> None:
     assert 'id="analysis-external-result"' in html
     assert 'id="analysis-external-save"' in html
     assert "Paste external result" in html
+    assert "Enter saves · Shift+Enter adds a line" in html
     assert "Copy all" in html
     assert "Copy source" in html
     assert "Copy analysis" in html

@@ -472,13 +472,16 @@ def test_external_sentence_analysis_prompt_and_paste_flow() -> None:
     assert "await flushPendingToolbarEdits();" in boot
     assert "refreshActiveSentenceSnapshot(sentenceId);" in boot
     assert "copyExternalSentencePrompt(sentenceId);" in boot
-    assert 'analysisExternalSave.addEventListener("click", () =>' in panel_buttons
+    assert "function saveExternalAnalysis()" in panel_buttons
+    assert 'analysisExternalSave.addEventListener("click", saveExternalAnalysis);' in panel_buttons
     assert 'analysisExternalResult.addEventListener("keydown", (event) =>' in panel_buttons
-    assert 'event.key !== "Enter"' in panel_buttons
     assert "event.shiftKey" in panel_buttons
     assert "event.isComposing" in panel_buttons
-    assert "event.keyCode === 229" in panel_buttons
-    assert "analysisExternalSave?.click();" in panel_buttons
+    assert "event.repeat" in panel_buttons
+    assert 'event.code !== "Enter"' in panel_buttons
+    assert "event.keyCode === 229" not in panel_buttons
+    assert "event.stopPropagation();" in panel_buttons
+    assert "saveExternalAnalysis();" in panel_buttons
     assert "saveExternalSentenceAnalysis();" in panel_buttons
     assert "saveExternalParagraphAnalysis();" in panel_buttons
     assert (

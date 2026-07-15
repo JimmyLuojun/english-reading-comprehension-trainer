@@ -1153,7 +1153,18 @@ def test_external_word_analysis_enter_saves_and_shift_enter_adds_newline(
         assert textarea.input_value() == f"{external_result}\n"
 
         textarea.fill(external_result)
-        textarea.press("Enter")
+        textarea.evaluate(
+            """(element) => {
+              const event = new KeyboardEvent("keydown", {
+                key: "Enter",
+                code: "Enter",
+                bubbles: true,
+                cancelable: true,
+              });
+              Object.defineProperty(event, "keyCode", { value: 229 });
+              element.dispatchEvent(event);
+            }"""
+        )
         page.wait_for_function(
             'document.getElementById("analysis-external-status").textContent === "Saved"'
         )
