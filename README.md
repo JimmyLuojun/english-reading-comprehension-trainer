@@ -167,6 +167,32 @@ HTML/plain-text pages, the dashboard, book browsing, chapter reading, sentence
 and word marking, card lists, review actions, profile prompt generation, profile
 saving, and latest profile viewing.
 
+## NotebookLM Companion Workflow
+
+NotebookLM can complement the trainer as a source-grounded oral examiner and
+cross-chapter synthesis tool. The trainer remains the system of record for close
+reading, error diagnosis, sentence/word cards, and SM-2 review; NotebookLM should
+not create a second long-term card system or replace independent reading.
+
+The recommended first experiment is one Reading Lab notebook for the current
+book, containing the original source, exported takeaways, and a closed-book
+English recall after each chapter. Only errors confirmed against source citations
+should flow back into the trainer. See the full workflow, prompt templates,
+weekly evidence-pack proposal, and four-week success criteria in
+[NotebookLM 协同学习方案](docs/features/notebooklm-integration.md).
+
+## Mobile Reading and App Roadmap
+
+The recommended path to Mac/iPhone continuity is deliberately incremental:
+first move Reader progress from browser-only localStorage into the existing
+SQLite system of record and expose the loopback service through private
+Tailscale HTTPS; then make the current Reader an installable Web App. A native
+SwiftUI plus CloudKit/cloud-backend build is reserved for a later, explicitly
+validated need to read offline while the Mac is asleep or powered off. See the
+complete scope, conflict rules, security boundary, sleep/lock behavior, decision
+gates, and acceptance criteria in
+[Mac 与 iPhone 三阶段移动阅读/App 化路线](docs/features/mobile-app-roadmap.md).
+
 ## Database Recovery
 
 Migrations and destructive book deletes create SQLite backups in `data/backups/`.
