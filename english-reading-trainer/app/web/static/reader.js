@@ -1123,7 +1123,7 @@
         return walker.nextNode();
       }
 
-      function showCurrentReaderWordSelection() {
+      function showCurrentReaderWordSelection(options = {}) {
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
         const range = selection.getRangeAt(0);
@@ -1134,7 +1134,7 @@
         const sentenceText = normalizeText(spans[0].textContent || "");
         if (normalizeText(selectedText) === sentenceText) return false;
         setSelectedWordLexicalType("word");
-        updateToolbar();
+        updateToolbar({ forceReaderWordSelection: Boolean(options.forceWordSelection) });
         setSelectedWordLexicalType("word");
         return !toolbar.hidden && !wordForm.hidden;
       }
@@ -1151,7 +1151,7 @@
         if (!selection) return false;
         selection.removeAllRanges();
         selection.addRange(wordRange);
-        return showCurrentReaderWordSelection();
+        return showCurrentReaderWordSelection({ forceWordSelection: true });
       }
 
       function readerShortcutMatches(event, code, key) {
@@ -1172,7 +1172,7 @@
         if (!isSelect && !isTranslate && !isParagraph && !isWord) return;
         event.preventDefault();
         if (isWord) {
-          if (!selectHoveredWord()) showCurrentReaderWordSelection();
+          if (!selectHoveredWord()) showCurrentReaderWordSelection({ forceWordSelection: true });
           return;
         }
         if (isParagraph) {
@@ -2241,6 +2241,7 @@
       }
 
       function updateToolbar() {
+        const options = arguments[0] || {};
         if (suppressNextUpdate) {
           suppressNextUpdate = false;
           return;
@@ -2303,8 +2304,11 @@
         activeSentenceStructure = sentence.dataset.structure || "";
         const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
         const markedSentence = sentence.dataset.marked === "1";
-        const selectedCardIds = selectedWordCardIds(range);
-        const existingWord = selectedCardIds.length ? null : wordCards[lemmaKey(selectedText)];
+        const forceReaderWordSelection = Boolean(options.forceReaderWordSelection);
+        const selectedCardIds = forceReaderWordSelection ? [] : selectedWordCardIds(range);
+        const existingWord = selectedCardIds.length || forceReaderWordSelection
+          ? null
+          : wordCards[lemmaKey(selectedText)];
         activeWordCardIds = selectedCardIds.length
           ? selectedCardIds
           : (existingWord ? [String(existingWord.id)] : []);
@@ -5805,6 +5809,10 @@
       reader.addEventListener("dblclick", (event) => {
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan) {
+          if (showCurrentReaderWordSelection({ forceWordSelection: true })) {
+            event.preventDefault();
+            return;
+          }
           event.preventDefault();
           if (wordSpan.dataset.hasAnalysis !== "1") showWordDetail(wordSpan);
           return;

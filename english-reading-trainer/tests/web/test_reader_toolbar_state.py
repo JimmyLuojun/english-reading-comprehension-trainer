@@ -628,6 +628,68 @@ def test_double_click_marked_word_shows_only_word_detail(browser: Browser, reade
         _assert_only_panel(page, "word_detail")
 
 
+def test_w_and_double_click_select_a_word_inside_a_marked_phrase(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    with db.get_connection() as conn:
+        sentence_id = conn.execute(
+            "SELECT id FROM sentences ORDER BY id LIMIT 1"
+        ).fetchone()["id"]
+    response = TestClient(create_app(lambda: db)).post(
+        "/mark/word",
+        data={
+            "sentence_id": str(sentence_id),
+            "surface_form": "cat sat",
+            "lexical_type": "phrase",
+            "start_offset": "4",
+            "end_offset": "11",
+        },
+    )
+    assert response.status_code == 200
+
+    for interaction in ("shortcut", "double_click"):
+        for page in _new_page(browser, reader_url):
+            if interaction == "shortcut":
+                point = page.evaluate(
+                    """() => {
+                      const span = document.querySelector('[data-word-card]');
+                      const node = span.firstChild;
+                      const range = document.createRange();
+                      range.setStart(node, 0);
+                      range.setEnd(node, 3);
+                      const rect = range.getBoundingClientRect();
+                      return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) };
+                    }"""
+                )
+                page.mouse.move(point["x"], point["y"])
+                page.keyboard.press("w")
+            else:
+                page.evaluate(
+                    """() => {
+                      const span = document.querySelector('[data-word-card]');
+                      const node = span.firstChild;
+                      const range = document.createRange();
+                      range.setStart(node, 0);
+                      range.setEnd(node, 3);
+                      const selection = window.getSelection();
+                      selection.removeAllRanges();
+                      selection.addRange(range);
+                      span.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+                    }"""
+                )
+            page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+            state = page.evaluate(
+                """() => ({
+                  surfaceForm: document.getElementById("toolbar-word-surface-form").value,
+                  detailHidden: document.getElementById("toolbar-word-detail").hidden,
+                })"""
+            )
+
+        assert state == {"surfaceForm": "cat", "detailHidden": True}
+
+
 def test_double_click_unmarked_word_opens_word_toolbar_with_word_default(
     browser: Browser,
     reader_url: str,

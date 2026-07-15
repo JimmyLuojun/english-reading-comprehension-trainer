@@ -1521,7 +1521,7 @@ def test_reader_script_supports_bare_key_sentence_shortcut() -> None:
     assert 'readerShortcutMatches(event, "KeyT", "t")' in shortcut
     assert 'readerShortcutMatches(event, "KeyW", "w")' in shortcut
     assert "selectHoveredWord()" in shortcut
-    assert "showCurrentReaderWordSelection()" in shortcut
+    assert "showCurrentReaderWordSelection({ forceWordSelection: true })" in shortcut
     assert 'setToolbarStatus(wordStatus, `Using ${lexicalTypeLabel(selectedWordLexicalType)}`);' in script
     assert "function textNodeNearCaret(container, offset)" in script
     assert 'reader.addEventListener("mousemove", recordReaderPointerMove);' in script
@@ -1573,6 +1573,27 @@ def test_translated_sentence_double_click_shortcut_preserves_word_card_priority(
     assert "!sentence.dataset.translation?.trim()" in double_click
     assert "window.getSelection()?.removeAllRanges();" in double_click
     assert "openTranslatedSentenceShortcut(sentence);" in double_click
+
+
+def test_word_shortcuts_can_select_a_word_inside_an_existing_phrase_card() -> None:
+    script = _selection_script()
+    shortcut = script[script.index("function handleReaderShortcut") :]
+    shortcut = shortcut[: shortcut.index("function captureReadingAnchor")]
+    hover_word = script[script.index("function selectHoveredWord") :]
+    hover_word = hover_word[: hover_word.index("function readerShortcutMatches")]
+    update_toolbar = script[script.index("function updateToolbar") :]
+    update_toolbar = update_toolbar[: update_toolbar.index("function scheduleToolbarUpdateFromSelectionChange")]
+    double_click = script[script.index('reader.addEventListener("dblclick"') :]
+    double_click = double_click[: double_click.index('document.addEventListener("keydown"')]
+
+    assert "function showCurrentReaderWordSelection(options = {})" in script
+    assert "function updateToolbar()" in script
+    assert "const options = arguments[0] || {};" in update_toolbar
+    assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in shortcut
+    assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in hover_word
+    assert "const forceReaderWordSelection = Boolean(options.forceReaderWordSelection);" in update_toolbar
+    assert "const selectedCardIds = forceReaderWordSelection ? [] : selectedWordCardIds(range);" in update_toolbar
+    assert "showCurrentReaderWordSelection({ forceWordSelection: true })" in double_click
 
 
 def test_reader_click_opens_saved_word_analysis_before_word_detail() -> None:
