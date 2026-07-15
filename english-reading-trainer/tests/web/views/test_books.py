@@ -76,7 +76,7 @@ def test_chapter_labels_and_primary_read_idx() -> None:
     assert _primary_read_idx([]) is None
 
 
-def test_chapters_table_renders_read_links() -> None:
+def test_chapters_table_makes_every_readable_section_row_clickable() -> None:
     assert _chapters_table(7, []) == '<p class="empty">No chapters found.</p>'
 
     html = _chapters_table(
@@ -89,9 +89,48 @@ def test_chapters_table_renders_read_links() -> None:
                 "chapter_number": 1,
                 "sentence_start": 0,
                 "sentence_end": 2,
+            },
+            {
+                "idx": 2,
+                "title": "Appendix A: Sources",
+                "section_kind": "appendix",
+                "chapter_number": None,
+                "sentence_start": 2,
+                "sentence_end": 3,
+            },
+        ],
+    )
+
+    assert 'class="chapter-table"' in html
+    assert '<th>Sentences</th></tr>' in html
+    assert html.count('class="chapter-row chapter-row-readable"') == 2
+    assert '<a class="chapter-row-link" href="/read/7?chapter=1">Chapter 1</a>' in html
+    assert (
+        '<a class="chapter-row-link" href="/read/7?chapter=2">'
+        "Appendix A: Sources</a>"
+    ) in html
+    assert ">Read</a>" not in html
+    assert "<td>2</td>" in html
+
+
+def test_chapters_table_disables_sections_without_sentences() -> None:
+    html = _chapters_table(
+        7,
+        [
+            {
+                "idx": 1,
+                "title": "Cover",
+                "section_kind": "frontmatter",
+                "chapter_number": None,
+                "sentence_start": 0,
+                "sentence_end": 0,
             }
         ],
     )
 
-    assert "/read/7?chapter=1" in html
-    assert "<td>2</td>" in html
+    assert (
+        '<tr class="chapter-row chapter-row-unavailable" aria-disabled="true">'
+        "<td>Cover</td><td>frontmatter</td><td>0</td></tr>"
+    ) in html
+    assert "/read/7?chapter=1" not in html
+    assert "chapter-row-link" not in html

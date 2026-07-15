@@ -450,7 +450,9 @@ class TestBasicPages:
         response = client.get(f"/books/{book_id}")
 
         assert response.status_code == 200
-        assert "Read" in response.text
+        assert 'class="chapter-row chapter-row-readable"' in response.text
+        assert 'class="chapter-row-link"' in response.text
+        assert ">Read</a>" not in response.text
         assert f"/read/{book_id}?chapter=1" in response.text
 
     def test_epub_frontmatter_does_not_become_chapter_one(

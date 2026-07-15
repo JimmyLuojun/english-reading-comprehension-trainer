@@ -221,6 +221,36 @@ def _css() -> str:
     }
     tbody tr:hover { background: var(--surface-alt); }
     tr:last-child td { border-bottom: 0; }
+    .chapter-row {
+      position: relative;
+    }
+    .chapter-row-readable {
+      cursor: pointer;
+    }
+    .chapter-row-readable:hover .chapter-row-link {
+      color: var(--accent-strong);
+      text-decoration: underline;
+      text-underline-offset: 0.16em;
+    }
+    .chapter-row-readable:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+      background: var(--accent-soft);
+    }
+    .chapter-row-link {
+      color: inherit;
+      text-decoration: none;
+    }
+    .chapter-row-link::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+    .chapter-row-unavailable {
+      color: var(--muted);
+      cursor: default;
+    }
     .review-item-col { width: 40%; }
     .reader {
       width: min(100%, var(--reader-max-width));

@@ -53,21 +53,31 @@ def _delete_book_form(book_id: int) -> str:
 def _chapters_table(book_id: int, rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No chapters found.</p>'
-    body = "\n".join(
-        "<tr>"
-        f"<td>{_escape(_section_label(row))}</td>"
-        f"<td>{_escape(row['section_kind'])}</td>"
-        f"<td>{row['sentence_end'] - row['sentence_start']}</td>"
-        f"<td><a class=\"button small\" href=\"/read/{book_id}?chapter={row['idx']}\">Read</a></td>"
-        "</tr>"
-        for row in rows
-    )
+    body = "\n".join(_chapter_row(book_id, row) for row in rows)
     return f"""
-    <table>
-      <thead><tr><th>Section</th><th>Kind</th><th>Sentences</th><th></th></tr></thead>
+    <table class="chapter-table">
+      <thead><tr><th>Section</th><th>Kind</th><th>Sentences</th></tr></thead>
       <tbody>{body}</tbody>
     </table>
     """
+
+
+def _chapter_row(book_id: int, row: dict[str, Any]) -> str:
+    sentence_count = row["sentence_end"] - row["sentence_start"]
+    label = _escape(_section_label(row))
+    kind = _escape(row["section_kind"])
+    if sentence_count <= 0:
+        return (
+            '<tr class="chapter-row chapter-row-unavailable" aria-disabled="true">'
+            f"<td>{label}</td><td>{kind}</td><td>{sentence_count}</td></tr>"
+        )
+
+    href = f"/read/{book_id}?chapter={row['idx']}"
+    return (
+        '<tr class="chapter-row chapter-row-readable">'
+        f'<td><a class="chapter-row-link" href="{href}">{label}</a></td>'
+        f"<td>{kind}</td><td>{sentence_count}</td></tr>"
+    )
 
 def _primary_read_idx(rows: list[dict[str, Any]]) -> int | None:
     for row in rows:
