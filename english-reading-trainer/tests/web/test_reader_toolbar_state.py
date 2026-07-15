@@ -628,6 +628,39 @@ def test_double_click_marked_word_shows_only_word_detail(browser: Browser, reade
         _assert_only_panel(page, "word_detail")
 
 
+def test_selection_spanning_marked_word_opens_a_new_phrase_toolbar(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.evaluate(
+            """() => {
+              const span = document.querySelector('[data-word-card]');
+              const range = document.createRange();
+              range.setStart(span.firstChild, 0);
+              range.setEnd(span.nextSibling, 4);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              document.dispatchEvent(new Event("selectionchange"));
+            }"""
+        )
+        page.wait_for_function('!document.getElementById("toolbar-word-form").hidden')
+        state = page.evaluate(
+            """() => ({
+              selectedText: window.getSelection().toString(),
+              surfaceForm: document.getElementById("toolbar-word-surface-form").value,
+              detailHidden: document.getElementById("toolbar-word-detail").hidden,
+            })"""
+        )
+
+    assert state == {
+        "selectedText": "cat sat",
+        "surfaceForm": "cat sat",
+        "detailHidden": True,
+    }
+
+
 def test_w_and_double_click_select_a_word_inside_a_marked_phrase(
     browser: Browser,
     reader_url: str,

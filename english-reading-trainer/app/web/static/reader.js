@@ -977,11 +977,16 @@
         renderSentenceStudyPanel(sentence, message, toolbarInteractionSeq - 1);
       }
 
-      function selectedWordCardIds(range) {
+      function selectedExactWordCardIds(range) {
         const ids = Array.from(reader.querySelectorAll("[data-word-card]"))
           .filter((span) => {
             try {
-              return range.intersectsNode(span);
+              const cardRange = document.createRange();
+              cardRange.selectNodeContents(span);
+              return (
+                range.compareBoundaryPoints(Range.START_TO_START, cardRange) === 0
+                && range.compareBoundaryPoints(Range.END_TO_END, cardRange) === 0
+              );
             } catch {
               return false;
             }
@@ -2305,7 +2310,7 @@
         const wholeSentence = normalizedSelection === normalizeText(sentence.textContent || "");
         const markedSentence = sentence.dataset.marked === "1";
         const forceReaderWordSelection = Boolean(options.forceReaderWordSelection);
-        const selectedCardIds = forceReaderWordSelection ? [] : selectedWordCardIds(range);
+        const selectedCardIds = forceReaderWordSelection ? [] : selectedExactWordCardIds(range);
         const existingWord = selectedCardIds.length || forceReaderWordSelection
           ? null
           : wordCards[lemmaKey(selectedText)];

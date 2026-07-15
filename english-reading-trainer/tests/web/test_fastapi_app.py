@@ -932,11 +932,11 @@ class TestReadingAndMarking:
         script = _selection_script()
         assert "top_sentence_id" in script
         assert "/mark/word" in script
-        assert "selectedWordCardIds" in script
+        assert "selectedExactWordCardIds" in script
         assert "captureReadingAnchor" in script
         assert "restoreReadingAnchor" in script
         assert "markReaderSelection" in script
-        assert "range.intersectsNode(span)" in script
+        assert "range.compareBoundaryPoints(Range.START_TO_START, cardRange)" in script
         assert "deleteWordCardsAndReload" in script
         assert ".reader-sentence:target" in response.text
 

@@ -972,7 +972,7 @@ def test_open_toolbar_editor_switches_only_on_whole_sentence_selection() -> None
     selection_helper = script[script.index("function selectedWholeSentenceFromCurrentSelection"):]
     selection_helper = selection_helper[: selection_helper.index("function switchOpenEditorToSentence")]
     switch_helper = script[script.index("function switchOpenEditorToSentence"):]
-    switch_helper = switch_helper[: switch_helper.index("function selectedWordCardIds")]
+    switch_helper = switch_helper[: switch_helper.index("function selectedExactWordCardIds")]
     update_toolbar = script[script.index("function updateToolbar()"):]
     update_toolbar = update_toolbar[: update_toolbar.index("function readProgress")]
 
@@ -1382,7 +1382,7 @@ def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -
 def test_open_sentence_panel_follows_whole_sentence_selection_without_hiding_toolbar() -> None:
     script = _selection_script()
     helper = script[script.index("function syncOpenSentencePanelToSentence"):]
-    helper = helper[: helper.index("function selectedWordCardIds")]
+    helper = helper[: helper.index("function selectedExactWordCardIds")]
     switch_helper = script[script.index("function switchOpenEditorToSentence"):]
     switch_helper = switch_helper[: switch_helper.index("function maybeSwitchOpenEditorToSelectedSentence")]
     marked_toolbar = script[script.index("function showMarkedSentenceToolbar"):]
@@ -1595,7 +1595,10 @@ def test_word_shortcuts_can_select_a_word_inside_an_existing_phrase_card() -> No
     assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in shortcut
     assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in hover_word
     assert "const forceReaderWordSelection = Boolean(options.forceReaderWordSelection);" in update_toolbar
-    assert "const selectedCardIds = forceReaderWordSelection ? [] : selectedWordCardIds(range);" in update_toolbar
+    assert "function selectedExactWordCardIds(range)" in script
+    assert "cardRange.selectNodeContents(span);" in script
+    assert "range.compareBoundaryPoints(Range.START_TO_START, cardRange) === 0" in script
+    assert "const selectedCardIds = forceReaderWordSelection ? [] : selectedExactWordCardIds(range);" in update_toolbar
     assert "showCurrentReaderWordSelection({ forceWordSelection: true })" in double_click
 
 
