@@ -521,6 +521,7 @@ def test_collapsed_analysis_tools_do_not_leave_a_sticky_header_gap(
             """() => {
               const panel = document.getElementById("analysis-panel");
               const header = panel.querySelector(".analysis-panel-header");
+              const handle = document.getElementById("analysis-tools-handle");
               const panelRect = panel.getBoundingClientRect();
               const headerRect = header.getBoundingClientRect();
               return {
@@ -529,7 +530,9 @@ def test_collapsed_analysis_tools_do_not_leave_a_sticky_header_gap(
                 headerPosition: getComputedStyle(header).position,
                 headerBottom: Math.round(headerRect.bottom),
                 panelTop: Math.round(panelRect.top),
-                handleContent: getComputedStyle(panel, "::before").content,
+                handleHidden: handle.hidden,
+                handleText: handle.textContent,
+                handleExpanded: handle.getAttribute("aria-expanded"),
               };
             }"""
         )
@@ -572,7 +575,9 @@ def test_collapsed_analysis_tools_do_not_leave_a_sticky_header_gap(
     assert collapsed_state["collapsed"] is True
     assert collapsed_state["peeking"] is False
     assert collapsed_state["headerPosition"] == "static"
-    assert collapsed_state["handleContent"] == '"..."'
+    assert collapsed_state["handleHidden"] is False
+    assert collapsed_state["handleText"] == "…"
+    assert collapsed_state["handleExpanded"] == "false"
     assert collapsed_state["headerBottom"] <= collapsed_state["panelTop"]
     assert peek_state["headerPosition"] == "sticky"
     assert peek_state["headerTop"] == peek_state["panelTop"] + peek_state["panelPaddingTop"]

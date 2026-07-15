@@ -282,6 +282,7 @@
       let activeSelectionAnalysisContextText = "";
       let activeReaderWordSelection = null;
       let activeReaderWordSelectionRange = null;
+      let pendingForcedReaderWordSelection = false;
       let selectedWordLexicalType = "word";
       let copyStatusTimer = null;
       let translationSaveChain = Promise.resolve();
@@ -1141,7 +1142,12 @@
         setSelectedWordLexicalType("word");
         updateToolbar({ forceReaderWordSelection: Boolean(options.forceWordSelection) });
         setSelectedWordLexicalType("word");
-        return !toolbar.hidden && !wordForm.hidden;
+        const shown = !toolbar.hidden && !wordForm.hidden;
+        // A browser can dispatch selectionchange after dblclick/w has opened
+        // this forced inner-word selection. Preserve it for that one queued
+        // update instead of letting normal existing-card matching replace it.
+        pendingForcedReaderWordSelection = Boolean(options.forceWordSelection && shown);
+        return shown;
       }
 
       function selectHoveredWord() {
@@ -1278,6 +1284,7 @@
       function clearActiveReaderWordSelection() {
         activeReaderWordSelection = null;
         activeReaderWordSelectionRange = null;
+        pendingForcedReaderWordSelection = false;
         if (window.CSS?.highlights) {
           window.CSS.highlights.delete(ACTIVE_READER_WORD_HIGHLIGHT);
         }
@@ -2282,6 +2289,14 @@
         if (!normalizedSelection) {
           hideToolbar();
           return;
+        }
+
+        if (pendingForcedReaderWordSelection) {
+          pendingForcedReaderWordSelection = false;
+          if (selectionMatchesActiveReaderWordRange(range, selectedText)) {
+            restoreActiveReaderWordToolbar();
+            return;
+          }
         }
 
         if (selectionInsideAnalysisPanel(range)) {

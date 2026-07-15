@@ -1595,6 +1595,10 @@ def test_word_shortcuts_can_select_a_word_inside_an_existing_phrase_card() -> No
     assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in shortcut
     assert "showCurrentReaderWordSelection({ forceWordSelection: true });" in hover_word
     assert "const forceReaderWordSelection = Boolean(options.forceReaderWordSelection);" in update_toolbar
+    assert "let pendingForcedReaderWordSelection = false;" in script
+    assert "pendingForcedReaderWordSelection = Boolean(options.forceWordSelection && shown);" in script
+    assert "if (pendingForcedReaderWordSelection)" in update_toolbar
+    assert "restoreActiveReaderWordToolbar();" in update_toolbar
     assert "function selectedExactWordCardIds(range)" in script
     assert "cardRange.selectNodeContents(span);" in script
     assert "range.compareBoundaryPoints(Range.START_TO_START, cardRange) === 0" in script
