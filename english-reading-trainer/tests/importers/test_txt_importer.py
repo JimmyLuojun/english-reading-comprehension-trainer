@@ -84,6 +84,7 @@ class TestIsHeading:
         "1234567890",
         "a",
         "This is a normal sentence that happens to be long.",
+        "2. No foreign-trade layer — this is the biggest fit gap. The system",
         "AVERYLONGALLCAPSHEADINGTHATSHOULDNOTMATCH" * 2,  # over 60 chars
     ])
     def test_rejects_non_heading(self, line: str) -> None:
@@ -141,6 +142,18 @@ class TestSplitChapters:
         chapters = _split_chapters(text)
         assert "Alpha" in chapters[0]["body"]
         assert "Beta" in chapters[1]["body"]
+
+    def test_long_numbered_finding_remains_in_reader_body(self) -> None:
+        text = (
+            "2. No foreign-trade layer — this is the biggest fit gap. The system\n"
+            "models the qualification cycle well but says nothing about the export\n"
+            "reality:\n"
+            "• No Incoterms, payment terms, or credit-insurance tracking."
+        )
+
+        chapters = _split_chapters(text)
+
+        assert chapters == [{"title": "Chapter 1", "body": text}]
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +289,73 @@ class TestImportTxtParagraphs:
     def test_short_blocks_are_not_line_based(self) -> None:
         assert _looks_like_line_based_text(["One.", "Two."]) is False
 
+    def test_bulleted_blocks_are_line_based(self) -> None:
+        assert _looks_like_line_based_text(
+            ["Summary:", "• A wrapped bullet starts here", "and continues here."]
+        ) is True
+
     def test_line_based_paragraphs_flush_pending_before_standalone_break(self) -> None:
         assert _line_based_paragraphs(["Jax has got", "12"]) == ["Jax has got", "12"]
 
     def test_line_based_paragraphs_flush_pending_at_end(self) -> None:
         assert _line_based_paragraphs(["Jax has got"]) == ["Jax has got"]
+
+    def test_wrapped_bullet_items_start_separate_paragraphs(self) -> None:
+        lines = [
+            "2. No foreign-trade layer is the biggest fit gap. The system",
+            "models the qualification cycle but misses export reality:",
+            "• No Incoterms, payment terms, currency risk, or",
+            "credit-insurance tracking.",
+            "• No export or delivery milestones, customs, or",
+            "freight tracking.",
+        ]
+
+        assert _line_based_paragraphs(lines) == [
+            "2. No foreign-trade layer is the biggest fit gap. The system "
+            "models the qualification cycle but misses export reality:",
+            "• No Incoterms, payment terms, currency risk, or "
+            "credit-insurance tracking.",
+            "• No export or delivery milestones, customs, or freight tracking.",
+        ]
+
+    def test_imported_numbered_finding_preserves_intro_and_bullet_layout(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        text = (
+            "2. No foreign-trade layer — this is the biggest fit gap. The system\n"
+            "models the qualification cycle well but says nothing about the export\n"
+            "reality:\n"
+            "• No Incoterms, payment terms (T/T, L/C), currency-risk, or\n"
+            "credit-insurance tracking.\n"
+            "• No export/delivery milestones: export declaration, customs, or\n"
+            "freight tracking."
+        )
+        result = import_txt(
+            db,
+            write_txt(tmp_path, "finding.txt", text),
+            title="Foreign-trade finding",
+        )
+
+        with db.get_connection() as conn:
+            chapter = conn.execute(
+                "SELECT title FROM chapters WHERE book_id = ?", (result.book_id,)
+            ).fetchone()
+            paragraphs = conn.execute(
+                """SELECT p.id, GROUP_CONCAT(s.text, ' ') AS text
+                     FROM paragraphs p
+                     JOIN chapters c ON c.id = p.chapter_id
+                     JOIN sentences s ON s.paragraph_id = p.id
+                    WHERE c.book_id = ?
+                    GROUP BY p.id
+                    ORDER BY p.idx""",
+                (result.book_id,),
+            ).fetchall()
+
+        assert chapter["title"] == "Chapter 1"
+        assert len(paragraphs) == 3
+        assert paragraphs[0]["text"].startswith("2. No foreign-trade layer")
+        assert paragraphs[1]["text"].startswith("• No Incoterms")
+        assert paragraphs[2]["text"].startswith("• No export/delivery milestones")
 
     def test_blank_line_splits_paragraphs(self, db: DatabaseConnection, tmp_path: Path) -> None:
         text = "First paragraph sentence.\n\nSecond paragraph sentence."

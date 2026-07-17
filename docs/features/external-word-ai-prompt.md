@@ -40,6 +40,16 @@ need to create a saved word card before copying the external prompt.
 The same feature should also work from an existing Word Analysis panel, so a
 saved word/phrase/collocation can be re-analyzed by a stronger external model.
 
+Prompt target ownership follows the learner's latest visible Reader action. If
+the right analysis panel is still waiting for an older external reply while a
+new word/phrase/collocation floating toolbar is open, the panel-level `Copy
+prompt` action uses that new Reader selection (or newly opened saved card), not
+the older temporary prompt target. When no Reader word toolbar is visible, the
+displayed analysis/paste-back target remains authoritative. Concurrent word
+prompt-copy requests are sequenced so a slower older response cannot overwrite
+the newer prompt, and the status line names the copied target and reports a real
+clipboard failure instead of leaving an old clipboard value looking current.
+
 ## What To Avoid
 
 - Do not force internal `AI analysis` before external prompt copy.

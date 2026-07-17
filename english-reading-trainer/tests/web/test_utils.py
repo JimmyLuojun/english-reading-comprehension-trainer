@@ -18,6 +18,17 @@ def test_resolve_title_uses_first_line_or_fallback() -> None:
     assert _resolve_title("", b"   \n") == "Imported Text"
 
 
+def test_resolve_title_stops_at_first_sentence_within_wrapped_source_line() -> None:
+    raw = (
+        "2. No foreign-trade layer — this is the biggest fit gap. The system\n"
+        "continues on the next source line."
+    ).encode()
+
+    assert _resolve_title("", raw) == (
+        "2. No foreign-trade layer — this is the biggest fit gap."
+    )
+
+
 def test_resolve_title_prefers_meaningful_filename_fallback_before_first_line() -> None:
     assert _resolve_title(
         "",

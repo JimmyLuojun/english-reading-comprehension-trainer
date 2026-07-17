@@ -1138,6 +1138,61 @@ def test_word_type_selector_keeps_toolbar_available_for_prompt_copy(
     assert "learner note: 明亮的；此处修饰 day" in copied_text
 
 
+def test_panel_prompt_copy_follows_latest_word_selection_after_takeaway_only_save(
+    browser: Browser,
+    reader_url: str,
+) -> None:
+    for page in _new_page(browser, reader_url):
+        page.evaluate(
+            """() => {
+              window.__copiedText = "";
+              Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: {
+                  writeText: async (text) => {
+                    window.__copiedText = text;
+                  },
+                },
+              });
+            }"""
+        )
+
+        _select_text_until_panel(page, 0, "sat on", "toolbar-word-form")
+        page.locator('#toolbar-word-form button[value="phrase"]').click()
+        page.locator("#toolbar-word-copy-prompt").click()
+        page.wait_for_function(
+            'document.getElementById("analysis-external-status").textContent.includes("sat on")'
+        )
+
+        _select_text_until_panel(page, 0, "sat on", "toolbar-word-form")
+        page.locator("#toolbar-word-note").fill("动作搭配")
+        page.locator("#toolbar-word-save").click()
+        page.wait_for_function(
+            """() => Array.from(document.querySelectorAll("[data-word-card]"))
+              .some((node) => node.textContent === "sat on" && node.dataset.note === "动作搭配")"""
+        )
+
+        _select_text_until_panel(page, 1, "bright", "toolbar-word-form")
+        page.evaluate('document.getElementById("analysis-copy-prompt").click()')
+        page.wait_for_function(
+            """() => {
+              const copied = window.__copiedText || "";
+              const status = document.getElementById("analysis-external-status").textContent;
+              return copied.includes("目标项：bright（word）") && status.includes("“bright”");
+            }"""
+        )
+        state = page.evaluate(
+            """() => ({
+              copiedText: window.__copiedText,
+              status: document.getElementById("analysis-external-status").textContent,
+            })"""
+        )
+
+    assert "目标项：bright（word）" in state["copiedText"]
+    assert "目标项：sat on（phrase）" not in state["copiedText"]
+    assert "“bright”" in state["status"]
+
+
 def test_external_word_analysis_enter_saves_and_shift_enter_adds_newline(
     browser: Browser,
     reader_url: str,

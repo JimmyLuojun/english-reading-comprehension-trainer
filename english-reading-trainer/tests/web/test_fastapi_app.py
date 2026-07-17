@@ -2884,6 +2884,37 @@ class TestImportRoutes:
             row = conn.execute("SELECT title FROM books LIMIT 1").fetchone()
         assert row["title"] == "Auto Title Line"
 
+    def test_import_paste_renders_numbered_finding_and_wrapped_bullets(
+        self, client: TestClient
+    ) -> None:
+        text = (
+            "2. No foreign-trade layer — this is the biggest fit gap. The system\n"
+            "models the qualification cycle well but says nothing about the export\n"
+            "reality:\n"
+            "• No Incoterms, payment terms (T/T, L/C), currency-risk, or\n"
+            "credit-insurance tracking.\n"
+            "• No export/delivery milestones: export declaration, customs, or\n"
+            "freight tracking."
+        )
+        imported = client.post(
+            "/import/paste",
+            data={"title": "", "author": "", "text": text},
+            follow_redirects=False,
+        )
+
+        response = client.get(imported.headers["location"])
+
+        assert response.status_code == 200
+        assert (
+            '<h1 class="reader-title">2. No foreign-trade layer — '
+            "this is the biggest fit gap.</h1>"
+        ) in response.text
+        assert '<h2 class="reader-chapter">Chapter 1</h2>' in response.text
+        assert response.text.count('class="reader-para"') == 3
+        assert "2. No foreign-trade layer" in response.text
+        assert "• No Incoterms" in response.text
+        assert "• No export/delivery milestones" in response.text
+
     def test_import_paste_empty_text_returns_400(self, client: TestClient) -> None:
         response = client.post(
             "/import/paste",

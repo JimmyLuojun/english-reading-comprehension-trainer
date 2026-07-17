@@ -1305,7 +1305,10 @@ def test_reader_word_selection_uses_word_analysis_action_not_sentence_panel() ->
     assert 'fetch("/analysis/selection/word-external-prompt"' in copy_word_prompt
     assert 'body.set("learner_note", selection.learnerNote)' in script
     assert 'fetch("/analysis/selection/word-external"' in save_word_selection
-    assert "prepareExternalWordResultBox({ selection }, \"Prompt copied. Paste external result here.\");" in copy_word_prompt
+    assert "const copySeq = ++externalWordPromptCopySeq;" in copy_word_prompt
+    assert "if (copySeq !== externalWordPromptCopySeq) return;" in copy_word_prompt
+    assert "Prompt for “${targetLabel}” copied." in copy_word_prompt
+    assert "Prompt for “${targetLabel}” was not copied." in copy_word_prompt
     assert "applyWordCardToSource(payload.source, payload.word_card);" in save_word_selection
     assert "function highlightActiveWordAnalysisTarget(cardId)" in script
     assert "highlightActiveWordAnalysisTarget(activeAnalysisWordCardId);" in loading_word
@@ -1332,6 +1335,8 @@ def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> Non
     word_builder = word_builder[: word_builder.index("function buildWordCopyText")]
     clipboard = script[script.index("async function writeClipboard"):]
     clipboard = clipboard[: clipboard.index("function copyAnalysisPayload")]
+    prompt_listener = script[script.index("if (copyPrompt)") :]
+    prompt_listener = prompt_listener[: prompt_listener.index("function saveExternalAnalysis")]
 
     assert 'document.getElementById("analysis-copy-all")' in script
     assert 'document.getElementById("analysis-copy-source")' in script
@@ -1341,7 +1346,12 @@ def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> Non
     assert 'copySource.addEventListener("click", () => copyAnalysisPayload("source"))' in script
     assert 'copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"))' in script
     assert 'copyPrompt.addEventListener("click"' in script
+    assert "function visibleReaderWordPromptTarget()" in script
+    assert "const readerWordTarget = visibleReaderWordPromptTarget();" in prompt_listener
+    assert "copyExternalWordSelectionPrompt(readerWordTarget.selection);" in prompt_listener
+    assert "copyExternalWordCardPrompt(readerWordTarget.cardId);" in prompt_listener
     assert "copyExternalWordCardPrompt(activeAnalysisWordCardId);" in script
+    assert "copyExternalWordSelectionPrompt(activeExternalPromptWordSelection);" in prompt_listener
     assert "activeAnalysisPayload" in copy_helper
     assert "buildWordCopyText(activeAnalysisPayload, kind)" in copy_helper
     assert "buildSentenceCopyText(activeAnalysisPayload, kind)" in copy_helper
@@ -1355,6 +1365,8 @@ def test_analysis_panel_copy_buttons_use_payload_and_clipboard_fallback() -> Non
     assert "analysis.learner_note_check" in word_builder
     assert "navigator.clipboard?.writeText" in clipboard
     assert 'document.execCommand("copy")' in clipboard
+    assert "return true;" in clipboard
+    assert "return copied;" in clipboard
 
 
 def test_marked_sentence_click_toolbar_is_separate_from_saved_analysis_click() -> None:

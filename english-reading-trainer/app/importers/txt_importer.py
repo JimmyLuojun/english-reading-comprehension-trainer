@@ -34,11 +34,12 @@ _HEADING_PATTERNS: list[re.Pattern] = [
     re.compile(r"^prologue\b", re.IGNORECASE),
     re.compile(r"^introduction\b", re.IGNORECASE),
     re.compile(r"^conclusion\b", re.IGNORECASE),
-    re.compile(r"^\d+\.\s+\S"),           # "1. Title"
-    re.compile(r"^[IVX]{1,5}\.\s+\S"),   # "IV. The Storm"
 ]
+_NUMBERED_HEADING_RE = re.compile(r"^(?:\d+|[IVX]{1,5})\.\s+\S", re.IGNORECASE)
+_LIST_ITEM_RE = re.compile(r"^(?:[-+*•]\s+|\d{1,4}[.)]\s+)\S")
 
 _MAX_ALLCAPS_HEADING_LEN = 60
+_MAX_NUMBERED_HEADING_LEN = 60
 
 
 @dataclass
@@ -129,6 +130,13 @@ def _is_heading(line: str) -> bool:
     for pat in _HEADING_PATTERNS:
         if pat.match(stripped):
             return True
+    # Bare ordinals are ambiguous in pasted text. Only accept a short
+    # title-like line; long numbered findings/list items belong in the body.
+    if (
+        len(stripped) <= _MAX_NUMBERED_HEADING_LEN
+        and _NUMBERED_HEADING_RE.match(stripped)
+    ):
+        return True
     # ALL-CAPS short line (e.g. "THE STORM")
     if (stripped == stripped.upper()
             and len(stripped) <= _MAX_ALLCAPS_HEADING_LEN
@@ -200,6 +208,8 @@ def _normalize_paragraph_text(text: str) -> str:
 
 def _looks_like_line_based_text(lines: list[str]) -> bool:
     """Detect script/subtitle-style TXT blocks where physical lines are semantic."""
+    if len(lines) >= 2 and any(_LIST_ITEM_RE.match(line) for line in lines):
+        return True
     if len(lines) < 6:
         return False
     short_lines = sum(1 for line in lines if len(line) <= 64)
@@ -211,6 +221,9 @@ def _line_based_paragraphs(lines: list[str]) -> list[str]:
     paragraphs: list[str] = []
     pending: list[str] = []
     for line in lines:
+        if _LIST_ITEM_RE.match(line) and pending:
+            paragraphs.append(_normalize_paragraph_text(" ".join(pending)))
+            pending = []
         if _line_is_standalone_break(line):
             if pending:
                 paragraphs.append(_normalize_paragraph_text(" ".join(pending)))

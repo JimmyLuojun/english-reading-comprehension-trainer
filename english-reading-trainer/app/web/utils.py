@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.nlp.sentence_segmenter import segment_sentences
 from app.web.config import _AUTO_TITLE_MAX_LEN
 
 
@@ -18,6 +19,9 @@ def _resolve_title(form_title: str, raw: bytes, fallback_title: str = "") -> str
         return fallback[:_AUTO_TITLE_MAX_LEN]
     first_line = raw.decode("utf-8", errors="ignore").strip().splitlines()[0:1]
     candidate = first_line[0].strip() if first_line else "Imported Text"
+    first_sentence = segment_sentences(candidate)
+    if len(first_sentence) > 1:
+        candidate = first_sentence[0].text
     return candidate[:_AUTO_TITLE_MAX_LEN] or "Imported Text"
 
 

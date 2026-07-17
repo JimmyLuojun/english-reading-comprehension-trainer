@@ -671,8 +671,19 @@ def _attach_external_word_analysis(
 
 
 def extract_external_json_block(external_result: str) -> str:
-    """Return the last fenced JSON block, or raw JSON when only JSON was pasted."""
+    """Return JSON from a fenced, raw, or accidentally quote-wrapped paste."""
     text = str(external_result or "").strip()
+    # Some chat UIs copy a JSON reply as a quoted value (or users wrap it in
+    # quotes before pasting). Accept both a proper JSON string and the common
+    # display form `"{...}"`, then let the normal strict schema validation run.
+    try:
+        quoted_value = json.loads(text)
+    except json.JSONDecodeError:
+        quoted_value = None
+    if isinstance(quoted_value, str):
+        text = quoted_value.strip()
+    elif text.startswith('"{') and text.endswith('}"'):
+        text = text[1:-1].strip()
     matches = [match.strip() for match in _JSON_FENCE_RE.findall(text) if match.strip()]
     if matches:
         return matches[-1]

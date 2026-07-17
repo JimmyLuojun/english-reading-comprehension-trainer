@@ -98,6 +98,18 @@ def test_analysis_outcome_error_payload_omits_retry_when_unspecified() -> None:
     assert outcome.error_payload() == {"ok": False, "error": "missing"}
 
 
+def test_extract_external_json_block_accepts_quote_wrapped_json() -> None:
+    analysis_json = '{"subject_skeleton":"Alignment features enable registration"}'
+
+    assert analysis.extract_external_json_block(f'"{analysis_json}"') == analysis_json
+
+
+def test_extract_external_json_block_accepts_json_encoded_string() -> None:
+    analysis_json = '{"subject_skeleton":"Alignment features enable registration"}'
+
+    assert analysis.extract_external_json_block(json.dumps(analysis_json)) == analysis_json
+
+
 def test_analyze_word_card_for_reader_returns_404_for_missing_card(monkeypatch) -> None:
     monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
 

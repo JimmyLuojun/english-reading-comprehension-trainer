@@ -284,6 +284,7 @@
       let activeReaderWordSelectionRange = null;
       let pendingForcedReaderWordSelection = false;
       let selectedWordLexicalType = "word";
+      let externalWordPromptCopySeq = 0;
       let copyStatusTimer = null;
       let translationSaveChain = Promise.resolve();
       let structureSaveChain = Promise.resolve();
@@ -1408,6 +1409,18 @@
         };
       }
 
+      function visibleReaderWordPromptTarget() {
+        if (toolbar.hidden) return null;
+        if (!wordForm.hidden && activeReaderWordSelection) {
+          const selection = activeReaderWordSelectionSnapshot();
+          return selection ? { selection } : null;
+        }
+        if (!wordDetail.hidden && activeWordDetailCardId) {
+          return { cardId: String(activeWordDetailCardId) };
+        }
+        return null;
+      }
+
       function pointInsideActiveReaderWordSelection(event) {
         if (!event || !activeReaderWordSelectionRange) return false;
         const padding = 3;
@@ -1925,12 +1938,13 @@
       async function writeClipboard(text) {
         if (!text.trim()) {
           setCopyStatus("Nothing to copy");
-          return;
+          return false;
         }
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
           await navigator.clipboard.writeText(text);
           setCopyStatus("Copied");
+          return true;
         } catch {
           const textarea = document.createElement("textarea");
           textarea.value = text;
@@ -1941,6 +1955,7 @@
           const copied = document.execCommand("copy");
           textarea.remove();
           setCopyStatus(copied ? "Copied" : "Copy failed");
+          return copied;
         }
       }
 
@@ -4485,13 +4500,15 @@
 
       async function copyExternalWordSelectionPrompt(selection) {
         if (!selection) return;
+        const copySeq = ++externalWordPromptCopySeq;
+        const targetLabel = selection.surfaceForm.trim();
         activeAnalysisWordCardId = null;
         activeAnalysisSourceSentenceId = selection.sentenceId;
         activeAnalysisPayload = null;
         activeAnalysisLabel = "";
         clearAnalysisHistory();
-        setPanelLoadingWord("Waiting for external word result.");
-        prepareExternalWordResultBox({ selection }, "Copying prompt...");
+        setPanelLoadingWord(`Waiting for external word result for “${targetLabel}”.`);
+        prepareExternalWordResultBox({ selection }, `Copying prompt for “${targetLabel}”...`);
         try {
           const body = new URLSearchParams();
           addSelectionFields(body, selection);
@@ -4501,16 +4518,24 @@
             body: body.toString(),
           });
           const payload = await response.json();
+          if (copySeq !== externalWordPromptCopySeq) return;
           if (!response.ok || !payload.ok) {
             if (analysisExternalStatus) {
               analysisExternalStatus.textContent = payload.error || "Prompt copy failed.";
             }
             return;
           }
-          await writeClipboard(payload.prompt || "");
-          prepareExternalWordResultBox({ selection }, "Prompt copied. Paste external result here.");
-          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+          const copied = await writeClipboard(payload.prompt || "");
+          if (copySeq !== externalWordPromptCopySeq) return;
+          prepareExternalWordResultBox(
+            { selection },
+            copied
+              ? `Prompt for “${targetLabel}” copied. Paste external result here.`
+              : `Prompt for “${targetLabel}” was not copied. Try Copy prompt again.`,
+          );
+          if (copied) window.requestAnimationFrame(() => analysisExternalResult?.focus());
         } catch (error) {
+          if (copySeq !== externalWordPromptCopySeq) return;
           if (analysisExternalStatus) {
             analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
           }
@@ -4519,6 +4544,7 @@
 
       async function copyExternalWordCardPrompt(cardId) {
         if (!cardId) return;
+        const copySeq = ++externalWordPromptCopySeq;
         activeExternalPromptWordCardId = String(cardId);
         if (panelMode !== "word") setWordMode();
         if (panel.hidden) openPanel();
@@ -4526,19 +4552,25 @@
         try {
           const response = await fetch(`/analysis/word/${cardId}/external-prompt`);
           const payload = await response.json();
+          if (copySeq !== externalWordPromptCopySeq) return;
           if (!response.ok || !payload.ok) {
             if (analysisExternalStatus) {
               analysisExternalStatus.textContent = payload.error || "Prompt copy failed.";
             }
             return;
           }
-          await writeClipboard(payload.prompt || "");
+          const copied = await writeClipboard(payload.prompt || "");
+          if (copySeq !== externalWordPromptCopySeq) return;
+          const targetLabel = String(payload.surface_form || activeAnalysisLabel || "word").trim();
           prepareExternalWordResultBox(
             { cardId: String(cardId) },
-            "Prompt copied. Paste external result here.",
+            copied
+              ? `Prompt for “${targetLabel}” copied. Paste external result here.`
+              : `Prompt for “${targetLabel}” was not copied. Try Copy prompt again.`,
           );
-          window.requestAnimationFrame(() => analysisExternalResult?.focus());
+          if (copied) window.requestAnimationFrame(() => analysisExternalResult?.focus());
         } catch (error) {
+          if (copySeq !== externalWordPromptCopySeq) return;
           if (analysisExternalStatus) {
             analysisExternalStatus.textContent = `Prompt copy failed: ${error}`;
           }
@@ -5488,8 +5520,15 @@
       if (copyAnalysis) copyAnalysis.addEventListener("click", () => copyAnalysisPayload("analysis"));
       if (copyPrompt) {
         copyPrompt.addEventListener("click", () => {
-          if (panelMode === "word" && activeAnalysisWordCardId) {
+          const readerWordTarget = visibleReaderWordPromptTarget();
+          if (readerWordTarget?.selection) {
+            copyExternalWordSelectionPrompt(readerWordTarget.selection);
+          } else if (readerWordTarget?.cardId) {
+            copyExternalWordCardPrompt(readerWordTarget.cardId);
+          } else if (panelMode === "word" && activeAnalysisWordCardId) {
             copyExternalWordCardPrompt(activeAnalysisWordCardId);
+          } else if (panelMode === "word" && activeExternalPromptWordSelection) {
+            copyExternalWordSelectionPrompt(activeExternalPromptWordSelection);
           } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
             copyParagraphPrompt(activeAnalysisParagraphId);
           } else if (activeAnalysisSentenceId) {
