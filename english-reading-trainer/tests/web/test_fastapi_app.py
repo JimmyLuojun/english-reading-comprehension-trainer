@@ -430,7 +430,7 @@ class TestBasicPages:
     def test_books_page_lists_imported_book(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
-        _seed_book(db, tmp_path)
+        book_id, _ = _seed_book(db, tmp_path)
 
         response = client.get("/books")
 
@@ -441,6 +441,54 @@ class TestBasicPages:
         assert "reader:last-book-id" in response.text
         assert "?chapter=${chapter}&restore=1" in response.text
         assert "Continue reading" not in response.text
+        assert f'id="library-item-form-{book_id}"' in response.text
+        assert 'name="content_kind"' in response.text
+        assert 'name="library_status"' in response.text
+        assert 'name="tags"' in response.text
+
+    def test_library_item_classification_can_be_edited_inline(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Test Book",
+                "author": "Test Author",
+                "content_kind": "article",
+                "library_status": "reading",
+                "tags": "Trade, Siemens",
+                "return_to": "/books?library_status=inbox",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/books?library_status=inbox"
+        with db.get_connection() as conn:
+            item = conn.execute(
+                """SELECT title, author, content_kind, library_status
+                     FROM books WHERE id = ?""",
+                (book_id,),
+            ).fetchone()
+            tags = {
+                row["name"]
+                for row in conn.execute(
+                    """SELECT t.name
+                         FROM tags t
+                         JOIN book_tags bt ON bt.tag_id = t.id
+                        WHERE bt.book_id = ?""",
+                    (book_id,),
+                ).fetchall()
+            }
+        assert dict(item) == {
+            "title": "Test Book",
+            "author": "Test Author",
+            "content_kind": "article",
+            "library_status": "reading",
+        }
+        assert tags == {"Trade", "Siemens"}
 
     def test_book_detail_lists_chapters(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

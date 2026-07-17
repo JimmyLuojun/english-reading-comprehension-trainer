@@ -1327,6 +1327,37 @@ def _css() -> str:
       color: var(--muted);
       font-size: 12px;
     }
+    .library-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+    }
+    .library-table {
+      min-width: 1120px;
+    }
+    .library-inline-select,
+    .library-inline-tags {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+    }
+    .library-inline-select {
+      min-width: 118px;
+    }
+    .library-inline-tags {
+      min-width: 150px;
+    }
+    .library-row-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .library-inline-form {
+      display: contents;
+    }
     .source-metadata {
       display: grid;
       grid-template-columns: max-content minmax(0, 1fr);

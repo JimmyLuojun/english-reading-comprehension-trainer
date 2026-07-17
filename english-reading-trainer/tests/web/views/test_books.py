@@ -31,13 +31,24 @@ def test_books_table_renders_rows_and_empty_state() -> None:
                 "total_chapters": 2,
                 "total_sentences": 3,
             }
-        ]
+        ],
+        return_to="/books?content_kind=article&tag=%3Cunsafe%3E",
     )
 
     assert "&lt;Book&gt;" in html
-    assert "Article" in html
-    assert "Reading" in html
-    assert "Trade" in html
+    assert 'class="library-table"' in html
+    assert 'id="library-item-form-1"' in html
+    assert 'name="content_kind" form="library-item-form-1"' in html
+    assert 'value="article" selected' in html
+    assert 'name="library_status" form="library-item-form-1"' in html
+    assert 'value="reading" selected' in html
+    assert 'name="tags" form="library-item-form-1" value="Trade"' in html
+    assert 'name="title" value="&lt;Book&gt;"' in html
+    assert (
+        'name="return_to" '
+        'value="/books?content_kind=article&amp;tag=%3Cunsafe%3E"'
+    ) in html
+    assert ">Save</button>" in html
     assert "/books/1/delete" in html
 
 

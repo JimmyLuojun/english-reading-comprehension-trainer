@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -10,6 +11,7 @@ from app.web.http_utils import (
     _error_page,
     _read_form,
     _redirect,
+    _safe_return_to,
 )
 from app.web.queries import (
     _fetch_book,
@@ -50,7 +52,18 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             selected_status=library_status,
             selected_tag=tag,
         )
-        body += _books_table(rows)
+        filters = {
+            key: value
+            for key, value in (
+                ("content_kind", content_kind),
+                ("library_status", library_status),
+                ("tag", tag),
+            )
+            if value
+        }
+        query = urlencode(filters)
+        return_to = f"/books?{query}" if query else "/books"
+        body += _books_table(rows, return_to=return_to)
         return _html_page("Library", body, active="library")
 
     @web_app.post("/books/{book_id}/delete")
@@ -79,7 +92,8 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             return _error_page(str(exc), status_code=400)
         if not updated:
             return _error_page("Library Item not found", status_code=404)
-        return _redirect(f"/books/{book_id}")
+        return_to = _safe_return_to(form.get("return_to", f"/books/{book_id}"))
+        return _redirect(return_to)
 
     @web_app.get("/books/{book_id}", response_class=HTMLResponse)
     def book_detail(book_id: int) -> HTMLResponse:

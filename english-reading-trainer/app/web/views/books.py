@@ -17,29 +17,79 @@ _CHAPTER_ORDINAL_RE = re.compile(
     re.I,
 )
 
-def _books_table(rows: list[dict[str, Any]]) -> str:
+def _books_table(
+    rows: list[dict[str, Any]],
+    *,
+    return_to: str = "/books",
+) -> str:
     if not rows:
         return '<p class="empty">No Library Items found.</p>'
-    body = "\n".join(
-        "<tr>"
-        f"<td><a href=\"/books/{row['id']}\">{_escape(row['title'])}</a></td>"
-        f"<td>{_escape(_display_value(row.get('content_kind')))}</td>"
-        f"<td>{_escape(_display_value(row.get('library_status')))}</td>"
-        f"<td>{_escape(row.get('tags') or '')}</td>"
-        f"<td>{_escape(row['author'] or '')}</td>"
-        f"<td>{_escape(str(row['source_format']).upper())}</td>"
-        f"<td>{row['total_chapters']}</td>"
-        f"<td>{row['total_sentences']}</td>"
-        f"<td>{_delete_book_form(row['id'])}</td>"
-        "</tr>"
-        for row in rows
-    )
+    body = "\n".join(_library_item_row(row, return_to=return_to) for row in rows)
     return f"""
-    <table>
+    <div class="library-table-wrap">
+    <table class="library-table">
       <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Tags</th><th>Author</th><th>Source</th><th>Sections</th><th>Sentences</th><th>Actions</th></tr></thead>
       <tbody>{body}</tbody>
     </table>
+    </div>
     """
+
+
+def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
+    book_id = int(row["id"])
+    form_id = f"library-item-form-{book_id}"
+    title = str(row["title"])
+    author = str(row.get("author") or "")
+    content_kind = str(row.get("content_kind") or "unclassified")
+    library_status = str(row.get("library_status") or "inbox")
+    tags = str(row.get("tags") or "")
+    classification_form = (
+        f'<form id="{form_id}" method="post" action="/books/{book_id}/metadata" '
+        'class="library-inline-form">'
+        f'<input type="hidden" name="title" value="{_escape(title)}">'
+        f'<input type="hidden" name="author" value="{_escape(author)}">'
+        f'<input type="hidden" name="return_to" value="{_escape(return_to)}">'
+        '<button class="primary small" type="submit">Save</button>'
+        "</form>"
+    )
+    type_select = f"""
+      <select name="content_kind" form="{form_id}"
+              aria-label="Content type for {_escape(title)}" class="library-inline-select">
+        <option value="book"{_selected('book', content_kind)}>Book</option>
+        <option value="article"{_selected('article', content_kind)}>Article</option>
+        <option value="excerpt"{_selected('excerpt', content_kind)}>Excerpt</option>
+        <option value="unclassified"{_selected('unclassified', content_kind)}>Unclassified</option>
+      </select>
+    """
+    status_select = f"""
+      <select name="library_status" form="{form_id}"
+              aria-label="Library status for {_escape(title)}" class="library-inline-select">
+        <option value="inbox"{_selected('inbox', library_status)}>Inbox</option>
+        <option value="reading"{_selected('reading', library_status)}>Reading</option>
+        <option value="finished"{_selected('finished', library_status)}>Finished</option>
+        <option value="archived"{_selected('archived', library_status)}>Archived</option>
+      </select>
+    """
+    tags_input = (
+        f'<input name="tags" form="{form_id}" value="{_escape(tags)}" '
+        f'aria-label="Tags for {_escape(title)}" class="library-inline-tags" '
+        'placeholder="Comma-separated">'
+    )
+    return (
+        "<tr>"
+        f'<td><a href="/books/{book_id}">{_escape(title)}</a></td>'
+        f"<td>{type_select}</td>"
+        f"<td>{status_select}</td>"
+        f"<td>{tags_input}</td>"
+        f"<td>{_escape(author)}</td>"
+        f"<td>{_escape(str(row['source_format']).upper())}</td>"
+        f"<td>{row['total_chapters']}</td>"
+        f"<td>{row['total_sentences']}</td>"
+        '<td><div class="library-row-actions">'
+        f"{classification_form}{_delete_book_form(book_id)}"
+        "</div></td>"
+        "</tr>"
+    )
 
 
 def _library_filters(

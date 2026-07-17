@@ -21,7 +21,7 @@
 
 `library_status` 是手工整理状态，不是阅读位置。Reader 位置仍由当前 browser localStorage 负责，未引入第二个进度事实源。
 
-Library 详情页可编辑 title、author、content type、library status 和逗号分隔的 item tags；Library 列表可按 type、status、tag 过滤。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。
+Library 详情页可编辑 title、author、content type、library status 和逗号分隔的 item tags；Library 列表可按 type、status、tag 过滤。列表中的每一行也可直接修改 content type、library status 和逗号分隔的 tags，并通过该行的 Save 单独保存；保存后保留当前筛选条件。行内编辑不修改 title、author、内容结构、卡片、标注或阅读位置。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。
 
 ## 3. 导入规则
 
