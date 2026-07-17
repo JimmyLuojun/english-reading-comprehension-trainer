@@ -35,11 +35,11 @@ def register_dashboard_routes(web_app: FastAPI, db_factory: Callable[[], Databas
         body = f"""
         {_page_header(
             "Reading Trainer",
-            "Books, cards, review queue, and learner profile.",
+            "Library Items, cards, review queue, and learner profile.",
             '<a class="button primary" href="/review">Start review</a>',
         )}
         <section class="metrics">
-          {_metric("Books", stats["books"], href="/books")}
+          {_metric("Library Items", stats["books"], href="/books")}
           {_metric("Sentences", stats["sentences"])}
           {_metric("Sentence cards", stats["sentence_cards"], href="/cards#sentence-cards")}
           {_metric("Word cards", stats["word_cards"], href="/cards#word-cards")}

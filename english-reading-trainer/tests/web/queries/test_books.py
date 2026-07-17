@@ -14,12 +14,14 @@ from app.web.queries.books import (
     _fetch_books,
     _fetch_chapter_by_idx,
     _fetch_chapters,
+    _fetch_library_tags,
     _find_reanchor_sentence_id,
     _find_phrase_reanchor_sentence_id,
     _find_word_reanchor_sentence_id,
     _normalize_phrase_text,
     _phrase_card_terms,
     _sql_placeholders,
+    _update_library_item,
     _word_card_terms,
     _word_tokens,
 )
@@ -46,6 +48,9 @@ def test_book_and_chapter_queries_return_expected_shapes(tmp_path: Path) -> None
     chapters = _fetch_chapters(db, result.book_id)
 
     assert books[0]["title"] == "Book"
+    assert books[0]["content_kind"] == "unclassified"
+    assert books[0]["library_status"] == "inbox"
+    assert books[0]["tags"] == ""
     assert _fetch_book(db, result.book_id)["author"] == "Author"
     assert _fetch_book(db, 999) is None
     assert [chapter["idx"] for chapter in chapters] == [1, 2]
@@ -55,6 +60,82 @@ def test_book_and_chapter_queries_return_expected_shapes(tmp_path: Path) -> None
     adjacent = _fetch_adjacent_chapters(db, result.book_id, 1)
     assert adjacent["previous"] is None
     assert adjacent["next"]["idx"] == 2
+
+    assert _update_library_item(
+        db,
+        result.book_id,
+        title="Updated Article",
+        author="Writer",
+        content_kind="article",
+        library_status="reading",
+        tags=["Trade", " siemens ", "trade", ""],
+    )
+    updated = _fetch_book(db, result.book_id)
+    assert updated["title"] == "Updated Article"
+    assert updated["content_kind"] == "article"
+    assert updated["library_status"] == "reading"
+    assert set(updated["tags"].split(", ")) == {"Trade", "siemens"}
+    assert _fetch_library_tags(db) == ["siemens", "Trade"]
+    assert [row["id"] for row in _fetch_books(db, content_kind="article")] == [
+        result.book_id
+    ]
+    assert [row["id"] for row in _fetch_books(db, library_status="reading")] == [
+        result.book_id
+    ]
+    assert [row["id"] for row in _fetch_books(db, tag="TRADE")] == [result.book_id]
+    assert _fetch_books(db, tag="missing") == []
+
+
+def test_update_library_item_validates_fields_and_missing_item(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+
+    assert not _update_library_item(
+        db,
+        999,
+        title="Missing",
+        author="",
+        content_kind="book",
+        library_status="inbox",
+        tags=[],
+    )
+    for values, message in (
+        ({"title": "", "content_kind": "book", "library_status": "inbox"}, "Title"),
+        (
+            {"title": "Item", "content_kind": "paragraph", "library_status": "inbox"},
+            "content type",
+        ),
+        (
+            {"title": "Item", "content_kind": "book", "library_status": "done"},
+            "library status",
+        ),
+    ):
+        try:
+            _update_library_item(
+                db,
+                999,
+                author="",
+                tags=[],
+                **values,
+            )
+        except ValueError as exc:
+            assert message in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+    try:
+        _update_library_item(
+            db,
+            999,
+            title="Item",
+            author="",
+            content_kind="book",
+            library_status="inbox",
+            tags=["x" * 61],
+        )
+    except ValueError as exc:
+        assert "60 characters" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
 
 
 def test_reanchor_helpers_match_words_and_phrases() -> None:

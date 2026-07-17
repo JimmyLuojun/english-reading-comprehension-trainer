@@ -1,6 +1,6 @@
 # URL 导入执行方案
 
-实现状态：已落地。Import 页面新增 "Import from URL"，提交到 `POST /import/url`。后端下载远程 HTML/plain-text 页面，抽取可读正文后复用现有 TXT 导入链路；不改 schema，不新增 `source_format`，导入结果仍以 `books.source_format='txt'` 存储。
+实现状态：已落地。Import 页面新增 "Import from URL"，提交到 `POST /import/url`。后端下载远程 HTML/plain-text 页面，抽取可读正文后复用现有 TXT 导入链路；`source_format='txt'`，并独立记录 `import_method='url'` / 原 URL `source_uri`，Auto 内容类型为 `article`。
 
 ## 1. 目标
 
@@ -42,7 +42,7 @@
 ## 3. 当前非目标
 
 - 不远程下载 PDF/EPUB；远程 PDF/EPUB 仍需用户先下载再上传。
-- 不保存 `source_url`。
+- 不跟踪最终 redirect URL 或网页版本历史；`source_uri` 保存用户提交的原 URL。
 - 不新增 `source_format='url'` 或 `source_format='web'`。
 - 不做登录页、付费墙、动态 JS 渲染页面的浏览器级抓取。
 - 不做正文抽取质量的复杂启发式或 readability 算法。
@@ -55,7 +55,7 @@
 
 ## 5. 后续升级
 
-- 增加 `books.source_url` 或单独 `web_sources` 表，保留来源 URL。
-- 将 Web 导入在 Books 页面单独分组，避免和普通书籍混在一起。
+- 如需要 provenance 历史，再增加独立 `web_sources` 表记录最终 URL、抓取时间和版本。
+- Library 已可按 content type/status/tag 过滤；如需单独管理 Web source，再增 source filter。
 - 引入更强的正文抽取策略，但必须保持测试可离线、可控。
 - 如果要做外部网页选句分析，另起 `docs/features/external-web-sentence-analysis.md`，不要把浏览器扩展职责混进 URL 导入器。

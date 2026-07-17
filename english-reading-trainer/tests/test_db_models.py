@@ -11,9 +11,12 @@ from app.db_models import (
     OUTCOME_TO_QUALITY,
     VALID_ERROR_CODES,
     CardType,
+    ContentKind,
     ErrorLayer,
+    ImportMethod,
     LexicalType,
     MasteryState,
+    LibraryStatus,
     ReviewOutcome,
     SM2_DEFAULT_EF,
     SM2_MIN_EF,
@@ -111,6 +114,21 @@ class TestEnumerations:
         assert SourceFormat.EPUB.value == "epub"
         assert SourceFormat.PDF.value == "pdf"
         assert SourceFormat.MD.value == "md"
+
+    def test_library_item_enum_values(self) -> None:
+        assert {value.value for value in ContentKind} == {
+            "book",
+            "article",
+            "excerpt",
+            "unclassified",
+        }
+        assert {value.value for value in ImportMethod} == {"file", "paste", "url"}
+        assert {value.value for value in LibraryStatus} == {
+            "inbox",
+            "reading",
+            "finished",
+            "archived",
+        }
 
     def test_lexical_type_values(self) -> None:
         assert LexicalType.WORD.value == "word"

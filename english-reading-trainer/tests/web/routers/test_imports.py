@@ -22,10 +22,11 @@ def test_register_import_routes_adds_import_endpoints() -> None:
 def test_import_url_route_redirects_to_reader(monkeypatch) -> None:
     seen: dict[str, str] = {}
 
-    def fake_import_url_content(db, url, *, form_title, author):
+    def fake_import_url_content(db, url, *, form_title, author, content_kind):
         seen["url"] = url
         seen["title"] = form_title
         seen["author"] = author
+        seen["content_kind"] = content_kind
         return ImportOutcome(book_id=23)
 
     monkeypatch.setattr(imports, "import_url_content", fake_import_url_content)
@@ -48,6 +49,7 @@ def test_import_url_route_redirects_to_reader(monkeypatch) -> None:
         "url": "https://example.com/article",
         "title": "Remote Article",
         "author": "Writer",
+        "content_kind": "auto",
     }
 
 

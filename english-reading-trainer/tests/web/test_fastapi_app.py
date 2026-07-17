@@ -422,7 +422,7 @@ class TestBasicPages:
         assert "?chapter=${chapter}&restore=1" in response.text
         assert "Continue reading" not in response.text
         assert "Due now" in response.text
-        assert 'href="/books" aria-label="Books: 0"' in response.text
+        assert 'href="/books" aria-label="Library Items: 0"' in response.text
         assert 'href="/cards#sentence-cards" aria-label="Sentence cards: 0"' in response.text
         assert 'href="/cards#word-cards" aria-label="Word cards: 0"' in response.text
         assert 'href="/review" aria-label="Due now: 0"' in response.text
@@ -454,6 +454,75 @@ class TestBasicPages:
         assert 'class="chapter-row-link"' in response.text
         assert ">Read</a>" not in response.text
         assert f"/read/{book_id}?chapter=1" in response.text
+
+    def test_library_item_metadata_can_be_edited_and_filtered(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Trade Article",
+                "author": "Writer",
+                "content_kind": "article",
+                "library_status": "reading",
+                "tags": "Trade, Siemens",
+            },
+            follow_redirects=False,
+        )
+        detail = client.get(f"/books/{book_id}")
+        filtered = client.get("/books?content_kind=article&library_status=reading&tag=trade")
+
+        assert response.status_code == 303
+        assert response.headers["location"] == f"/books/{book_id}"
+        assert "Trade Article" in detail.text
+        assert 'value="article" selected' in detail.text
+        assert 'value="reading" selected' in detail.text
+        assert "Trade, Siemens" in detail.text or "Siemens, Trade" in detail.text
+        assert "Trade Article" in filtered.text
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT title, content_kind, library_status
+                     FROM books WHERE id = ?""",
+                (book_id,),
+            ).fetchone()
+            tag_count = conn.execute(
+                "SELECT COUNT(*) FROM book_tags WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()[0]
+        assert dict(row) == {
+            "title": "Trade Article",
+            "content_kind": "article",
+            "library_status": "reading",
+        }
+        assert tag_count == 2
+
+    def test_library_item_metadata_rejects_invalid_values(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        invalid = client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Item",
+                "content_kind": "paragraph",
+                "library_status": "inbox",
+            },
+        )
+        missing = client.post(
+            "/books/999/metadata",
+            data={
+                "title": "Missing",
+                "content_kind": "book",
+                "library_status": "inbox",
+            },
+        )
+
+        assert invalid.status_code == 400
+        assert "Invalid content type" in invalid.text
+        assert missing.status_code == 404
 
     def test_epub_frontmatter_does_not_become_chapter_one(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -510,7 +579,7 @@ class TestBasicPages:
         response = client.get("/books/999")
 
         assert response.status_code == 404
-        assert "Book not found" in response.text
+        assert "Library Item not found" in response.text
 
     def test_missing_read_book_restore_clears_stale_local_storage(
         self,
@@ -519,7 +588,7 @@ class TestBasicPages:
         response = client.get("/read/999?chapter=1&restore=1")
 
         assert response.status_code == 200
-        assert "Book not found" in response.text
+        assert "Library Item not found" in response.text
         assert 'const bookId = "999"' in response.text
         assert 'localStorage.removeItem("reader:last-book-id")' in response.text
         assert "reader:progress:book:${bookId}" in response.text
@@ -532,7 +601,7 @@ class TestBasicPages:
         response = client.get("/read/999?chapter=1")
 
         assert response.status_code == 404
-        assert "Book not found" in response.text
+        assert "Library Item not found" in response.text
 
     def test_missing_chapter_returns_404(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -542,7 +611,7 @@ class TestBasicPages:
         response = client.get(f"/read/{book_id}?chapter=999")
 
         assert response.status_code == 404
-        assert "Chapter not found" in response.text
+        assert "Section not found" in response.text
 
     def test_missing_chapter_restore_clears_stale_progress(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -552,7 +621,7 @@ class TestBasicPages:
         response = client.get(f"/read/{book_id}?chapter=999&restore=1")
 
         assert response.status_code == 200
-        assert "Chapter not found" in response.text
+        assert "Section not found" in response.text
         assert f'const bookId = "{book_id}"' in response.text
         assert "reader:progress:book:${bookId}" in response.text
         assert "window.location.replace(`/read/${encodeURIComponent(bookId)}`)" in response.text
@@ -578,7 +647,7 @@ class TestBookDeletion:
         response = client.post("/books/999/delete")
 
         assert response.status_code == 404
-        assert "Book not found" in response.text
+        assert "Library Item not found" in response.text
 
     def test_delete_txt_book_cascades_sentence_data_and_keeps_ai_cache(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -952,8 +1021,8 @@ class TestReadingAndMarking:
         assert 'id="chapter-end"' in response.text
         assert f'href="/read/{book_id}?chapter=1#chapter-end"' in response.text
         assert f'href="/read/{book_id}?chapter=3#chapter-start"' in response.text
-        assert "Previous section: Chapter 1" in response.text
-        assert "Next section: Chapter 3" in response.text
+        assert "Previous section: Section 1" in response.text
+        assert "Next section: Section 3" in response.text
 
     def test_read_page_omits_missing_boundary_links_at_book_edges(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -2752,15 +2821,26 @@ class TestImportRoutes:
         response = client.post(
             "/import/file",
             files={"file": ("article.txt", content, "text/plain")},
-            data={"title": "Morning Article", "author": "Test Author"},
+            data={
+                "title": "Morning Article",
+                "author": "Test Author",
+                "content_kind": "article",
+            },
             follow_redirects=False,
         )
 
         assert response.status_code == 303
         assert response.headers["location"].startswith("/read/")
         with db.get_connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
-        assert count == 1
+            row = conn.execute(
+                """SELECT content_kind, import_method, source_uri
+                     FROM books LIMIT 1"""
+            ).fetchone()
+        assert dict(row) == {
+            "content_kind": "article",
+            "import_method": "file",
+            "source_uri": "article.txt",
+        }
 
     def test_import_file_auto_title_from_filename_stem(
         self, client: TestClient, db: DatabaseConnection
@@ -2867,9 +2947,15 @@ class TestImportRoutes:
         assert response.status_code == 303
         assert response.headers["location"].startswith("/read/")
         with db.get_connection() as conn:
-            row = conn.execute("SELECT title, author FROM books LIMIT 1").fetchone()
+            row = conn.execute(
+                """SELECT title, author, content_kind, import_method, source_uri
+                     FROM books LIMIT 1"""
+            ).fetchone()
         assert row["title"] == "Pasted Article"
         assert row["author"] == "Paste Author"
+        assert row["content_kind"] == "excerpt"
+        assert row["import_method"] == "paste"
+        assert row["source_uri"] == ""
 
     def test_import_paste_auto_title_from_text(
         self, client: TestClient, db: DatabaseConnection
@@ -2894,7 +2980,8 @@ class TestImportRoutes:
             "• No Incoterms, payment terms (T/T, L/C), currency-risk, or\n"
             "credit-insurance tracking.\n"
             "• No export/delivery milestones: export declaration, customs, or\n"
-            "freight tracking."
+            "freight tracking.\n\n"
+            "• Model changed to gpt-5.6-sol xhigh"
         )
         imported = client.post(
             "/import/paste",
@@ -2909,11 +2996,12 @@ class TestImportRoutes:
             '<h1 class="reader-title">2. No foreign-trade layer — '
             "this is the biggest fit gap.</h1>"
         ) in response.text
-        assert '<h2 class="reader-chapter">Chapter 1</h2>' in response.text
+        assert 'class="reader-chapter"' not in response.text
         assert response.text.count('class="reader-para"') == 3
         assert "2. No foreign-trade layer" in response.text
         assert "• No Incoterms" in response.text
         assert "• No export/delivery milestones" in response.text
+        assert "Model changed to" not in response.text
 
     def test_import_paste_empty_text_returns_400(self, client: TestClient) -> None:
         response = client.post(

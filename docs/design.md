@@ -10,7 +10,7 @@
 **MVP 范围（2026-06-14 初始定义；已实现项以当前系统总览为准）**
 
 - TXT / EPUB 导入（当前实现已扩展到 Markdown、PDF 文件导入和 URL 页面导入，见 §1）
-- 自动拆分 Book → Chapter → Paragraph → Sentence
+- 自动拆分 Item → Section → Paragraph → Sentence（数据库兼容名仍为 books/chapters）
 - CLI 标记难句 / 生词 / 短语
 - AI 难句结构化分析（带响应缓存）
 - 生词卡 + lemma / 标签 / 原词三种相似提醒
@@ -46,6 +46,7 @@
 - 本地 FastAPI Web UI + SQLite 单机存储。
 - 已支持 TXT / Markdown / EPUB / PDF 文件导入，以及 URL 导入 HTML/plain-text 页面后复用 TXT 阅读链路。
 - 已支持阅读页选句选词、词卡/句卡、AI 分析缓存、SM-2 Review、Cards、Review Queue、能力画像和 EPUB/PDF 媒体/非文本块展示。
+- Library Item 兼容层已支持 `book/article/excerpt/unclassified`、独立 source format/import method/source URI、手工 library status、item tags、类型化 Section/Chapter 显示和列表过滤；物理表与 `book_id` 保持不变。
 - `app/web/fastapi_app.py` 已拆成薄 app factory；Web 代码按 `routers/`、`queries/`、`views/` 和共享 helper 管理。
 - 当前产品化阶段仍是自用稳定化，不引入多用户、OAuth、桌面打包、云端同步或移动原生 App。
 
@@ -64,6 +65,7 @@
 
 ## 3. 功能设计
 
+- [Library Items](features/library-items.md)：已实现的统一 Library Item 产品层、兼容 schema、导入类型/来源、手工状态、item tags 和类型化阅读标题。
 - [语音与发音](features/pronunciation.md)：浏览器 TTS MVP 与未来服务端音频缓存。
 - [Cards 与 Review](features/cards-review.md)：Cards/Review 信息增强、Notes、Reveal、来源跳转和 EPUB 导入接入。
 - [删除导入材料](features/book-deletion.md)：彻底删除书籍/文章、词卡 re-anchor、review log 保留规则。
@@ -78,7 +80,7 @@
 - [阅读护眼主题执行方案](features/reading-eye-comfort-theme.md)：已实现的米黄/sepia 护眼主题与头部开关，纯 CSS 变量覆盖，反转 §0 的"主题切换"排除项。
 - [审美升级执行方案](features/visual-refresh.md)：已实现的默认观感升级（衬线标题、青绿主色、三级文字层级、统一圆角与柔和表面），纯 CSS 变量层改动，不碰布局/不引外部字体，与 sepia 主题共存。
 - [审美升级后续优化](features/visual-refresh-followups.md)：已实现的三项小优化——实心主按钮（视觉层级）、指标等宽数字、内联 SVG favicon 与标题整理，单选择器/`<head>` 改动，零新依赖。
-- [回到上次阅读：Books 导航续读](features/dashboard-continue-and-reading-font.md)：已实现——顶部导航 "Books" 客户端改写 `#nav-books` href 直接续读（有进度跳回上次章节+滚动+面板），新增 "Library" 入口看目录，无历史时 "Books" 仍指向目录；已删除冗余工具栏 `_continue_reading_script` 按钮。字号 20px/1.8 已实现，不在本次范围。
+- [回到上次阅读：Continue 导航续读](features/dashboard-continue-and-reading-font.md)：已实现——顶部导航 "Continue" 客户端改写 `#nav-books` href 直接续读（有进度跳回上次 section+滚动+面板），"Library" 入口管理目录；无历史时 "Continue" 仍指向目录。字号 20px/1.8 已实现，不在本次范围。
 - [UI 一致性与密度优化](features/ui-consistency-and-density.md)：已实现的五步收尾——调浅 sepia 护眼色板（仅 sepia 块）、抽 `_page_header` 锁页头一致性、Import/Profile 收窄、表格去浮表头精修与 Delete 弱化、Review 行压缩、Import 任务卡，仍是 CSS 变量层 + 一个共享 helper，不碰默认冷白色与 reader 布局。
 - [Reader/Review 交互修复批次](features/reader-review-ux-fixes.md)：已实现的六步小修——B1 分析完成不关正在写的翻译浮层、B3 改过译文的句子仍能调回旧分析并标 stale、A2 Review 统一 takeaway 术语并区分译文/takeaway、B2 词性分色（word 绿/phrase 紫/collocation/idiom 橙，句子保持黄）、A1 面板内选词二次分析修复、B4 裸键 `S`/`T` 整句选中快捷键（含面板正文字号对齐原文 + 中英双语醒目标签）。
 - [句子结构练习与 AI 结构纠错](features/sentence-structure-practice.md)：计划中——句子浮层「写结构」按钮，写入语法结构由 AI 评估纠正；新增 `user_structure` 列、可选 `structure_feedback` schema 块。核心约束：diagnose/predict 两套 prompt 共用单一 `_PROMPT_VERSION`，升 v5 必须成对建文件、schema 出 v5 分支、空结构不改 cache hash。文档含**递归增益设计（§S7–S12）**：复用现有 `ERROR_TYPES` 闭合枚举做关节（结构反馈带 `error_code`），结构错误走并行 lane 永不进 `sentence_card_errors`；分 A（随 v1，加 `error_code`）/B（弱点画像）/C（预测式高亮+drill 队列）/D（元分析导出）四期复利。
@@ -95,6 +97,7 @@
 - [Inference error layer ADR](decisions/2026-06-18-inference-error-layer.md)：新增 `inference` 错误层（I01/I02），其余分类缺口（宏观结构、否定/比较范围）暂缓，待真实数据决定。
 - [Sentence analysis input snapshots ADR](decisions/2026-06-20-sentence-analysis-input-snapshots.md)：句子分析 cache 行保存本次分析依据的译文/结构快照，Reader 只在快照与当前输入不同且非空时显示只读复盘框。
 - [Local data and service hardening ADR](decisions/2026-07-10-local-data-and-service-hardening.md)：SQLite 备份/可验证恢复、原子且带 checksum 的迁移、本地 token/CSRF、URL SSRF 防护、可观测性与 Reader 静态资源拆分。
+- [Library Item compatibility layer ADR](decisions/2026-07-17-library-item-compatibility-layer.md)：Library Item 作为产品概念，保留 `books`/`book_id` 作为兼容物理模型。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。

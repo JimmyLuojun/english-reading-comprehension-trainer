@@ -45,3 +45,33 @@ def test_delete_book_and_assets_skips_purge_when_book_missing(monkeypatch) -> No
 
     assert books.delete_book_and_assets(object(), 42) is None
     assert calls == []
+
+
+def test_update_library_item_splits_tag_text(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_update(db, book_id, **values):
+        captured.update({"db": db, "book_id": book_id, **values})
+        return True
+
+    monkeypatch.setattr(books, "_update_library_item", fake_update)
+    db = object()
+
+    assert books.update_library_item(
+        db,
+        7,
+        title="Article",
+        author="Writer",
+        content_kind="article",
+        library_status="reading",
+        tags_text="Trade, Siemens",
+    )
+    assert captured == {
+        "db": db,
+        "book_id": 7,
+        "title": "Article",
+        "author": "Writer",
+        "content_kind": "article",
+        "library_status": "reading",
+        "tags": ["Trade", " Siemens"],
+    }

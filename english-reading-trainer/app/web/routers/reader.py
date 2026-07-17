@@ -16,6 +16,7 @@ from app.web.queries import (
     _fetch_chapter_blocks,
     _fetch_chapter_by_idx,
     _fetch_chapter_sentences,
+    _fetch_chapters,
     _fetch_adjacent_chapters,
 )
 from app.web.views import (
@@ -31,7 +32,7 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         if book is None:
             if request.query_params.get("restore") == "1":
                 return _stale_restore_page(book_id)
-            return _error_page("Book not found", status_code=404)
+            return _error_page("Library Item not found", status_code=404)
         chapter_idx = chapter
         if "chapter" not in request.query_params:
             default_idx = _default_read_idx(db, book_id)
@@ -41,8 +42,9 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         if chapter_row is None:
             if request.query_params.get("restore") == "1":
                 return _stale_chapter_restore_page(book_id)
-            return _error_page("Chapter not found", status_code=404)
+            return _error_page("Section not found", status_code=404)
         adjacent_chapters = _fetch_adjacent_chapters(db, book_id, chapter_idx)
+        total_sections = len(_fetch_chapters(db, book_id))
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
         blocks = _fetch_chapter_blocks(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
@@ -64,18 +66,20 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             section_kind=chapter_row.get("section_kind") or "chapter",
             chapter_number=chapter_row.get("chapter_number"),
             restore_progress=restore_progress,
+            content_kind=book.get("content_kind") or "unclassified",
+            total_sections=total_sections or 1,
             previous_chapter=adjacent_chapters["previous"],
             next_chapter=adjacent_chapters["next"],
         )}
         """
-        return _html_page("Read", body, active="books", page_class="reader-page")
+        return _html_page("Read", body, active="library", page_class="reader-page")
 
 
 def _stale_restore_page(book_id: int) -> HTMLResponse:
     body = f"""
     <section class="band">
-      <h1>Book not found</h1>
-      <p class="muted">The saved reading position points to a book that no longer exists.</p>
+      <h1>Library Item not found</h1>
+      <p class="muted">The saved reading position points to an item that no longer exists.</p>
       <p><a class="button primary" href="/books">Open Library</a></p>
     </section>
     <script>
@@ -91,15 +95,15 @@ def _stale_restore_page(book_id: int) -> HTMLResponse:
       }})();
     </script>
     """
-    return _html_page("Book not found", body, active="library")
+    return _html_page("Library Item not found", body, active="library")
 
 
 def _stale_chapter_restore_page(book_id: int) -> HTMLResponse:
     body = f"""
     <section class="band">
-      <h1>Chapter not found</h1>
-      <p class="muted">The saved reading position points to a chapter that no longer exists.</p>
-      <p><a class="button primary" href="/read/{book_id}">Open book</a></p>
+      <h1>Section not found</h1>
+      <p class="muted">The saved reading position points to a section that no longer exists.</p>
+      <p><a class="button primary" href="/read/{book_id}">Open item</a></p>
     </section>
     <script>
       (() => {{
@@ -111,4 +115,4 @@ def _stale_chapter_restore_page(book_id: int) -> HTMLResponse:
       }})();
     </script>
     """
-    return _html_page("Chapter not found", body, active="books")
+    return _html_page("Section not found", body, active="library")

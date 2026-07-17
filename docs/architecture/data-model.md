@@ -13,6 +13,7 @@ paragraphs
 sentences
 book_assets
 chapter_blocks
+book_tags
 
 sentence_cards
 word_cards          -- 含单词与短语（见 §3）
@@ -32,7 +33,8 @@ prompt_versions
 
 ```sql
 -- 文本层级
-books(id, title, author, language, source_format, file_hash, imported_at,
+books(id, title, author, language, source_format, content_kind,
+      import_method, source_uri, library_status, file_hash, imported_at,
       total_chapters, total_sentences)
 chapters(id, book_id, idx, title, sentence_start, sentence_end,
          section_kind, chapter_number)
@@ -68,6 +70,7 @@ tags(id, name, category)              -- 用户自定义
 error_types(id, code, name, layer)    -- 见 §2，封闭枚举
 sentence_card_tags(card_id, tag_id)
 word_card_tags(card_id, tag_id)
+book_tags(book_id, tag_id)
 sentence_card_errors(card_id, error_type_id)
 word_card_errors(card_id, error_type_id)
 
@@ -85,6 +88,7 @@ prompt_versions(id, name, version, body_md, created_at, is_active)
 ### 1.3 说明
 
 - `text_hash` 用 SHA256(normalized\_text)；用于跨书去重（见 §4）。
+- Library Item 是产品层概念，物理表继续使用 `books` 以保持 `book_id` 关系。`content_kind` 与 `source_format` / `import_method` 分离；`library_status` 是手工整理状态，不是阅读进度。
 - `paragraphs` / `sentences` 继续作为复习、标注、AI 诊断的句子流；`chapter_blocks` 只补充阅读页的原书顺序和非文本媒体，不把图片塞进 `sentences`。
 - `chapter_blocks.paragraph_id` 指向有句子流支撑的块（`prose` / `pre` / `table`），图片和缺失资源块为 `NULL`。
 - `book_assets` 存 EPUB/PDF 导入产生的资源元数据和文件系统相对路径；实际二进制写入 `data/assets/books/<book_id>/`。

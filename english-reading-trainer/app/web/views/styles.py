@@ -1307,9 +1307,36 @@ def _css() -> str:
       color: var(--danger);
     }
     .stack-form { display: grid; gap: 8px; }
-    .stack-form input:not([type=file]) { max-width: 420px; }
+    .stack-form input:not([type=file]), .stack-form select { max-width: 420px; }
     .stack-form textarea { max-width: 640px; }
     .stack-form button { justify-self: start; }
+    .library-filters {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .library-filters label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .source-metadata {
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr);
+      gap: 4px 14px;
+      margin: 20px 0 0;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+    .source-metadata dt { color: var(--muted); }
+    .source-metadata dd { margin: 0; overflow-wrap: anywhere; }
     .small { padding: 4px 8px; }
     .prompt, .profile-summary pre {
       white-space: pre-wrap;

@@ -53,7 +53,7 @@ def _html_page(
 <body{body_class}>
   <nav>
     <a class="{_active(active, "dashboard")}" href="/">Dashboard</a>
-    <a id="nav-books" class="{_active(active, "books")}" href="/books">Books</a>
+    <a id="nav-books" class="{_active(active, "books")}" href="/books">Continue</a>
     <a class="{_active(active, "library")}" href="/books">Library</a>
     <a class="{_active(active, "import")}" href="/import">Import</a>
     <a class="{_active(active, "cards")}" href="/cards">Cards</a>

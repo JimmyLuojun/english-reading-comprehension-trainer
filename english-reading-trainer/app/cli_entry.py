@@ -45,7 +45,7 @@ from app.cards.word_card_service import (
     list_word_cards,
 )
 from app.db_connection import DatabaseConnection
-from app.db_models import CardType, LexicalType, ReviewOutcome
+from app.db_models import CardType, ContentKind, ImportMethod, LexicalType, ReviewOutcome
 from app.importers.epub_importer import import_epub
 from app.importers.markdown_importer import import_markdown
 from app.importers.pdf_importer import import_pdf
@@ -86,6 +86,23 @@ def _open_db() -> DatabaseConnection:
     """Open the configured database without applying migrations."""
     db_path = os.environ.get("TRAINER_DB", str(_DEFAULT_DB))
     return DatabaseConnection(db_path)
+
+
+def _record_file_import(
+    db: DatabaseConnection,
+    book_id: int,
+    path: Path,
+    *,
+    content_kind: ContentKind = ContentKind.UNCLASSIFIED,
+) -> None:
+    """Record provenance for imports created through the CLI."""
+    with db.get_connection() as conn:
+        conn.execute(
+            """UPDATE books
+                  SET content_kind = ?, import_method = ?, source_uri = ?
+                WHERE id = ?""",
+            (content_kind.value, ImportMethod.FILE.value, str(path), book_id),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +223,8 @@ def import_txt_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
+    _record_file_import(db, result.book_id, path)
+
     typer.echo(
         f"Imported '{effective_title}' (book id={result.book_id}): "
         f"{result.chapter_count} chapters, {result.sentence_count} sentences."
@@ -240,6 +259,8 @@ def import_markdown_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
+    _record_file_import(db, result.book_id, path)
+
     typer.echo(
         f"Imported '{effective_title}' (book id={result.book_id}): "
         f"{result.chapter_count} chapters, {result.sentence_count} sentences."
@@ -271,6 +292,13 @@ def import_epub_cmd(
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+    _record_file_import(
+        db,
+        result.book_id,
+        path,
+        content_kind=ContentKind.BOOK,
+    )
 
     with db.get_connection() as conn:
         row = conn.execute(
@@ -309,6 +337,8 @@ def import_pdf_cmd(
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+    _record_file_import(db, result.book_id, path)
 
     with db.get_connection() as conn:
         row = conn.execute(

@@ -24,6 +24,8 @@ def _reader_view(
     section_kind: str,
     chapter_number: int | None,
     restore_progress: bool,
+    content_kind: str = "book",
+    total_sections: int = 1,
     previous_chapter: dict[str, Any] | None = None,
     next_chapter: dict[str, Any] | None = None,
     blocks: list[dict[str, Any]] | None = None,
@@ -43,25 +45,50 @@ def _reader_view(
             "title": chapter_title,
             "section_kind": section_kind,
             "chapter_number": chapter_number,
-        }
+        },
+        content_kind=content_kind,
+        total_sections=total_sections,
     )
+    section_heading = (
+        f'<h2 class="reader-chapter">{_escape(section_label)}</h2>'
+        if section_label
+        else ""
+    )
+    detail_label = {
+        "book": "Chapters",
+        "article": "Sections",
+        "excerpt": "Item details",
+        "unclassified": "Sections",
+    }.get(content_kind, "Sections")
     return f"""
     <article class="reader" data-reader data-book-id="{book_id}"
       data-chapter-idx="{chapter_idx}" data-return-to="{_escape(return_to)}"
       data-restore-progress="{restore_flag}">
       <header class="reader-header">
         <div class="reader-header-actions" aria-label="Reader navigation">
-          <a class="button small" href="/books">All books</a>
-          <a class="button small" href="/books/{book_id}">Chapters</a>
+          <a class="button small" href="/books">Library</a>
+          <a class="button small" href="/books/{book_id}">{detail_label}</a>
         </div>
         <h1 class="reader-title">{_escape(book_title)}</h1>
-        <h2 class="reader-chapter">{_escape(section_label)}</h2>
+        {section_heading}
       </header>
       <div id="chapter-start" class="reader-anchor" aria-hidden="true"></div>
-      {_reader_boundary_link(book_id, previous_chapter, "previous")}
+      {_reader_boundary_link(
+          book_id,
+          previous_chapter,
+          "previous",
+          content_kind=content_kind,
+          total_sections=total_sections,
+      )}
       {content}
       <div id="chapter-end" class="reader-anchor" aria-hidden="true"></div>
-      {_reader_boundary_link(book_id, next_chapter, "next")}
+      {_reader_boundary_link(
+          book_id,
+          next_chapter,
+          "next",
+          content_kind=content_kind,
+          total_sections=total_sections,
+      )}
     </article>
     {_analysis_panel()}
     {_paragraph_toolbar()}
@@ -157,6 +184,9 @@ def _reader_boundary_link(
     book_id: int,
     chapter: dict[str, Any] | None,
     direction: str,
+    *,
+    content_kind: str = "book",
+    total_sections: int = 1,
 ) -> str:
     if chapter is None:
         return ""
@@ -168,11 +198,16 @@ def _reader_boundary_link(
         anchor = "chapter-start"
         label = "Next section"
         class_name = "reader-section-nav-next"
-    section_label = _section_label(chapter)
+    section_label = _section_label(
+        chapter,
+        content_kind=content_kind,
+        total_sections=total_sections,
+    )
+    link_text = f"{label}: {_escape(section_label)}" if section_label else label
     return (
         f'<p class="reader-section-nav {class_name}" role="navigation">'
         f'<a href="/read/{book_id}?chapter={chapter["idx"]}#{anchor}">'
-        f'{label}: {_escape(section_label)}</a>'
+        f"{link_text}</a>"
         "</p>"
     )
 

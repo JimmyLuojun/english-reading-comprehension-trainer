@@ -22,6 +22,26 @@ class SourceFormat(str, Enum):
     MD   = "md"
 
 
+class ContentKind(str, Enum):
+    BOOK         = "book"
+    ARTICLE      = "article"
+    EXCERPT      = "excerpt"
+    UNCLASSIFIED = "unclassified"
+
+
+class ImportMethod(str, Enum):
+    FILE  = "file"
+    PASTE = "paste"
+    URL   = "url"
+
+
+class LibraryStatus(str, Enum):
+    INBOX    = "inbox"
+    READING  = "reading"
+    FINISHED = "finished"
+    ARCHIVED = "archived"
+
+
 class SectionKind(str, Enum):
     FRONTMATTER = "frontmatter"
     CHAPTER     = "chapter"
@@ -153,6 +173,10 @@ class BookRecord:
     imported_at: datetime
     total_chapters: int = 0
     total_sentences: int = 0
+    content_kind: ContentKind = ContentKind.UNCLASSIFIED
+    import_method: Optional[ImportMethod] = None
+    source_uri: str = ""
+    library_status: LibraryStatus = LibraryStatus.INBOX
 
 
 @dataclass

@@ -185,6 +185,15 @@ class TestImportTxtCmd:
         assert result.exit_code == 0
         assert "My Book" in result.output
         assert "sentences" in result.output
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT content_kind, import_method, source_uri FROM books"
+            ).fetchone()
+        assert dict(row) == {
+            "content_kind": "unclassified",
+            "import_method": "file",
+            "source_uri": str(f),
+        }
 
     def test_uses_filename_as_default_title(
         self, db: DatabaseConnection, tmp_path: Path
@@ -286,6 +295,15 @@ class TestImportEpubCmd:
         result = runner.invoke(app, ["books", "import", "epub", str(ep)])
         assert result.exit_code == 0
         assert "EPUB Book" in result.output
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT content_kind, import_method, source_uri FROM books"
+            ).fetchone()
+        assert dict(row) == {
+            "content_kind": "book",
+            "import_method": "file",
+            "source_uri": str(ep),
+        }
 
     def test_override_title(self, db: DatabaseConnection, tmp_path: Path) -> None:
         ep = make_epub(tmp_path, "test2.epub")

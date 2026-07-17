@@ -12,7 +12,7 @@ from app.web.services import imports
 
 
 def test_import_text_bytes_returns_book_id(monkeypatch) -> None:
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_import_text(db, raw, title, author):
         captured["title"] = title
@@ -23,6 +23,13 @@ def test_import_text_bytes_returns_book_id(monkeypatch) -> None:
         imports,
         "import_text",
         fake_import_text,
+    )
+    monkeypatch.setattr(
+        imports,
+        "_update_book_import_metadata",
+        lambda db, book_id, **metadata: captured.update(
+            {"book_id": book_id, **metadata}
+        ),
     )
 
     outcome = imports.import_text_bytes(
@@ -36,7 +43,14 @@ def test_import_text_bytes_returns_book_id(monkeypatch) -> None:
     assert outcome.book_id == 7
     assert not outcome.is_error
     assert not outcome.is_duplicate
-    assert captured == {"title": "The_escappe_plan_lines", "author": "A"}
+    assert captured == {
+        "title": "The_escappe_plan_lines",
+        "author": "A",
+        "book_id": 7,
+        "content_kind": "unclassified",
+        "import_method": "file",
+        "source_uri": "",
+    }
 
 
 def test_import_text_bytes_maps_duplicate_to_existing_book(monkeypatch) -> None:
@@ -389,6 +403,7 @@ def test_small_url_import_helpers_cover_format_and_parse_edges() -> None:
 
 
 def test_import_url_content_imports_extracted_text(monkeypatch) -> None:
+    metadata: dict[str, object] = {}
     monkeypatch.setattr(
         imports,
         "fetch_url_article",
@@ -402,6 +417,13 @@ def test_import_url_content_imports_extracted_text(monkeypatch) -> None:
         "import_text",
         lambda db, raw, title, author: SimpleNamespace(book_id=17),
     )
+    monkeypatch.setattr(
+        imports,
+        "_update_book_import_metadata",
+        lambda db, book_id, **values: metadata.update(
+            {"book_id": book_id, **values}
+        ),
+    )
 
     outcome = imports.import_url_content(
         object(),
@@ -412,6 +434,12 @@ def test_import_url_content_imports_extracted_text(monkeypatch) -> None:
 
     assert outcome.book_id == 17
     assert not outcome.is_error
+    assert metadata == {
+        "book_id": 17,
+        "content_kind": "article",
+        "import_method": "url",
+        "source_uri": "https://example.com/post",
+    }
 
 
 def test_import_url_content_maps_fetch_errors() -> None:
@@ -457,6 +485,7 @@ def test_import_markdown_file_returns_book_id(monkeypatch, tmp_path: Path) -> No
         "import_markdown_bytes",
         lambda *args, **kwargs: SimpleNamespace(book_id=41),
     )
+    monkeypatch.setattr(imports, "_update_book_import_metadata", lambda *args, **kwargs: None)
 
     outcome = imports.import_markdown_file(
         object(),
@@ -482,6 +511,7 @@ def test_import_markdown_file_uses_fallback_title_before_temp_stem(
         return SimpleNamespace(book_id=42)
 
     monkeypatch.setattr(imports, "import_markdown_bytes", fake_import_markdown_bytes)
+    monkeypatch.setattr(imports, "_update_book_import_metadata", lambda *args, **kwargs: None)
 
     outcome = imports.import_markdown_file(
         object(),
@@ -582,3 +612,58 @@ def test_import_pdf_file_maps_import_errors(monkeypatch, tmp_path: Path) -> None
 
     assert outcome.error == "bad pdf"
     assert outcome.status_code == 400
+
+
+def test_import_content_kind_auto_rules_and_validation() -> None:
+    assert imports._resolve_import_content_kind(
+        "auto", import_method="url", source_format="txt"
+    ) == "article"
+    assert imports._resolve_import_content_kind(
+        "auto", import_method="paste", source_format="txt"
+    ) == "excerpt"
+    assert imports._resolve_import_content_kind(
+        "auto", import_method="file", source_format="epub"
+    ) == "book"
+    assert imports._resolve_import_content_kind(
+        "auto", import_method="file", source_format="pdf"
+    ) == "unclassified"
+    assert imports._resolve_import_content_kind(
+        "article", import_method="file", source_format="pdf"
+    ) == "article"
+    with pytest.raises(ValueError, match="Auto, Book, Article, or Excerpt"):
+        imports._resolve_import_content_kind(
+            "paragraph", import_method="paste", source_format="txt"
+        )
+
+
+def test_strip_trailing_interface_metadata_only_removes_final_notice() -> None:
+    raw = (
+        "Readable paragraph.\n\n"
+        "• Model changed to gpt-5.6-sol xhigh\n"
+    ).encode()
+
+    assert imports._strip_trailing_interface_metadata(raw) == b"Readable paragraph."
+    assert imports._strip_trailing_interface_metadata(
+        b"Model changed to a better approach.\nMore prose."
+    ) == b"Model changed to a better approach.\nMore prose."
+    non_utf8 = b"\xffModel changed to model"
+    assert imports._strip_trailing_interface_metadata(non_utf8) == non_utf8
+
+
+def test_import_text_bytes_rejects_invalid_content_kind_before_import(monkeypatch) -> None:
+    monkeypatch.setattr(
+        imports,
+        "import_text",
+        lambda *args, **kwargs: pytest.fail("import_text must not run"),
+    )
+
+    outcome = imports.import_text_bytes(
+        object(),
+        b"Readable sentence.",
+        form_title="",
+        author="",
+        content_kind="paragraph",
+    )
+
+    assert outcome.status_code == 400
+    assert "Content type" in (outcome.error or "")

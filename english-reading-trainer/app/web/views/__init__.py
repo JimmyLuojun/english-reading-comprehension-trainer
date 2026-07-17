@@ -11,6 +11,8 @@ from app.web.views.layout import (
 
 from app.web.views.books import (
     _books_table,
+    _library_filters,
+    _library_item_form,
     _delete_book_form,
     _chapters_table,
     _primary_read_idx,
@@ -85,6 +87,8 @@ __all__ = [
     "_analysis_panel",
     "_appendix_letter",
     "_books_table",
+    "_library_filters",
+    "_library_item_form",
     "_cards_return_script",
     "_chapters_table",
     "_css",

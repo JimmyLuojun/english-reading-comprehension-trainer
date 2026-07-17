@@ -163,9 +163,12 @@ For restart-safe local development, follow the stable-token instructions in
 [Restarting without losing the Reader](#restarting-without-losing-the-reader).
 
 The web UI supports TXT/Markdown/EPUB/PDF file import, URL import for
-HTML/plain-text pages, the dashboard, book browsing, chapter reading, sentence
-and word marking, card lists, review actions, profile prompt generation, profile
-saving, and latest profile viewing.
+HTML/plain-text pages, and a unified Library for books, articles, excerpts, and
+unclassified material. Library Items have editable type/status/tags and retain
+independent source format/import provenance; the Reader uses type-aware
+Chapter/Section labels. Sentence and word marking, card lists, review actions,
+profile prompt generation, profile saving, and latest profile viewing remain
+available across every item type.
 
 ## NotebookLM Companion Workflow
 

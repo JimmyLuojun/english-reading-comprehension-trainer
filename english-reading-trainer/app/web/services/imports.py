@@ -15,6 +15,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.db_connection import DatabaseConnection
+from app.db_models import ContentKind, ImportMethod, SourceFormat
 from app.importers.epub_importer import DuplicateBookError as EpubDuplicateBookError
 from app.importers.epub_importer import calculate_epub_file_hash, import_epub
 from app.importers.markdown_importer import import_markdown_bytes
@@ -25,7 +26,7 @@ from app.web.config import (
     _URL_IMPORT_MAX_REDIRECTS,
     _URL_IMPORT_TIMEOUT_SECONDS,
 )
-from app.web.queries import _lookup_book_id_by_hash
+from app.web.queries import _lookup_book_id_by_hash, _update_book_import_metadata
 from app.web.utils import _resolve_title
 
 _ALLOWED_URL_SCHEMES = {"http", "https"}
@@ -50,6 +51,16 @@ _REMOVED_HTML_TAGS = (
     "svg",
 )
 _WHITESPACE_RE = re.compile(r"[ \t\r\f\v]+")
+_INTERFACE_METADATA_RE = re.compile(
+    r"^(?:[\u2022*\-]\s*)?model changed to\b.*$",
+    re.IGNORECASE,
+)
+_IMPORT_CONTENT_KINDS = {
+    "auto",
+    ContentKind.BOOK.value,
+    ContentKind.ARTICLE.value,
+    ContentKind.EXCERPT.value,
+}
 
 
 class UrlImportError(ValueError):
@@ -93,8 +104,20 @@ def import_text_bytes(
     form_title: str,
     author: str,
     fallback_title: str = "",
+    content_kind: str = "auto",
+    import_method: str = ImportMethod.FILE.value,
+    source_uri: str = "",
 ) -> ImportOutcome:
     """Import raw TXT bytes and return a routing-neutral outcome."""
+    try:
+        resolved_kind = _resolve_import_content_kind(
+            content_kind,
+            import_method=import_method,
+            source_format=SourceFormat.TXT.value,
+        )
+    except ValueError as exc:
+        return ImportOutcome(error=str(exc), status_code=400)
+    raw = _strip_trailing_interface_metadata(raw)
     title = _resolve_title(form_title, raw, fallback_title=fallback_title)
     try:
         result = import_text(db, raw, title=title, author=author.strip())
@@ -103,6 +126,13 @@ def import_text_bytes(
         return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
     except ValueError as exc:
         return ImportOutcome(error=str(exc), status_code=400)
+    _update_book_import_metadata(
+        db,
+        result.book_id,
+        content_kind=resolved_kind,
+        import_method=import_method,
+        source_uri=source_uri.strip(),
+    )
     return ImportOutcome(book_id=result.book_id)
 
 
@@ -112,6 +142,7 @@ def import_url_content(
     *,
     form_title: str,
     author: str,
+    content_kind: str = "auto",
 ) -> ImportOutcome:
     """Fetch a web page, extract readable text, and import it as TXT content."""
     try:
@@ -122,6 +153,9 @@ def import_url_content(
             raw,
             form_title=form_title.strip() or article.title,
             author=author,
+            content_kind=content_kind,
+            import_method=ImportMethod.URL.value,
+            source_uri=url.strip(),
         )
     except UrlImportError as exc:
         return ImportOutcome(error=str(exc), status_code=exc.status_code)
@@ -339,9 +373,16 @@ def import_epub_file(
     *,
     form_title: str,
     author: str,
+    content_kind: str = "auto",
+    source_uri: str = "",
 ) -> ImportOutcome:
     """Import an EPUB file and return a routing-neutral outcome."""
     try:
+        resolved_kind = _resolve_import_content_kind(
+            content_kind,
+            import_method=ImportMethod.FILE.value,
+            source_format=SourceFormat.EPUB.value,
+        )
         file_hash = calculate_epub_file_hash(file_path)
         result = import_epub(
             db,
@@ -354,6 +395,13 @@ def import_epub_file(
         return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
     except (ValueError, FileNotFoundError) as exc:
         return ImportOutcome(error=str(exc), status_code=400)
+    _update_book_import_metadata(
+        db,
+        result.book_id,
+        content_kind=resolved_kind,
+        import_method=ImportMethod.FILE.value,
+        source_uri=source_uri.strip(),
+    )
     return ImportOutcome(book_id=result.book_id)
 
 
@@ -364,11 +412,18 @@ def import_markdown_file(
     form_title: str,
     author: str,
     fallback_title: str = "",
+    content_kind: str = "auto",
+    source_uri: str = "",
 ) -> ImportOutcome:
     """Import a Markdown file and return a routing-neutral outcome."""
     path = Path(file_path)
     try:
-        raw = path.read_bytes()
+        resolved_kind = _resolve_import_content_kind(
+            content_kind,
+            import_method=ImportMethod.FILE.value,
+            source_format=SourceFormat.MD.value,
+        )
+        raw = _strip_trailing_interface_metadata(path.read_bytes())
         result = import_markdown_bytes(
             db,
             raw,
@@ -380,6 +435,13 @@ def import_markdown_file(
         return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
     except (ValueError, OSError) as exc:
         return ImportOutcome(error=str(exc), status_code=400)
+    _update_book_import_metadata(
+        db,
+        result.book_id,
+        content_kind=resolved_kind,
+        import_method=ImportMethod.FILE.value,
+        source_uri=source_uri.strip(),
+    )
     return ImportOutcome(book_id=result.book_id)
 
 
@@ -389,9 +451,16 @@ def import_pdf_file(
     *,
     form_title: str,
     author: str,
+    content_kind: str = "auto",
+    source_uri: str = "",
 ) -> ImportOutcome:
     """Import a PDF file and return a routing-neutral outcome."""
     try:
+        resolved_kind = _resolve_import_content_kind(
+            content_kind,
+            import_method=ImportMethod.FILE.value,
+            source_format=SourceFormat.PDF.value,
+        )
         file_hash = calculate_pdf_file_hash(file_path)
         result = import_pdf(
             db,
@@ -404,4 +473,49 @@ def import_pdf_file(
         return ImportOutcome(duplicate_book_id=existing_id, status_code=409)
     except (ValueError, FileNotFoundError) as exc:
         return ImportOutcome(error=str(exc), status_code=400)
+    _update_book_import_metadata(
+        db,
+        result.book_id,
+        content_kind=resolved_kind,
+        import_method=ImportMethod.FILE.value,
+        source_uri=source_uri.strip(),
+    )
     return ImportOutcome(book_id=result.book_id)
+
+
+def _resolve_import_content_kind(
+    requested_kind: str,
+    *,
+    import_method: str,
+    source_format: str,
+) -> str:
+    requested = str(requested_kind or "auto").strip().lower()
+    if requested not in _IMPORT_CONTENT_KINDS:
+        raise ValueError("Content type must be Auto, Book, Article, or Excerpt.")
+    if requested != "auto":
+        return requested
+    if import_method == ImportMethod.URL.value:
+        return ContentKind.ARTICLE.value
+    if import_method == ImportMethod.PASTE.value:
+        return ContentKind.EXCERPT.value
+    if source_format == SourceFormat.EPUB.value:
+        return ContentKind.BOOK.value
+    return ContentKind.UNCLASSIFIED.value
+
+
+def _strip_trailing_interface_metadata(raw: bytes) -> bytes:
+    """Remove a trailing model-switch notice accidentally copied with content."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
+    lines = text.splitlines()
+    last_content_index = len(lines) - 1
+    while last_content_index >= 0 and not lines[last_content_index].strip():
+        last_content_index -= 1
+    if last_content_index < 0:
+        return raw
+    if not _INTERFACE_METADATA_RE.fullmatch(lines[last_content_index].strip()):
+        return raw
+    del lines[last_content_index]
+    return "\n".join(lines).rstrip().encode("utf-8")

@@ -43,8 +43,10 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         file: UploadFile = File(...),
         title: str = Form(""),
         author: str = Form(""),
+        content_kind: str = Form("auto"),
     ) -> Any:
-        filename = (file.filename or "").lower()
+        original_filename = file.filename or ""
+        filename = original_filename.lower()
         if filename.endswith(".epub"):
             try:
                 tmp_path, size = await _save_upload_to_temp(
@@ -62,7 +64,13 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
                 return await run_in_threadpool(
-                    _do_import_epub, db_factory(), tmp_path, title, author
+                    _do_import_epub,
+                    db_factory(),
+                    tmp_path,
+                    title,
+                    author,
+                    content_kind,
+                    original_filename,
                 )
             finally:
                 _unlink_silent(tmp_path)
@@ -84,7 +92,13 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 return _error_page("Uploaded file is empty.", status_code=400)
             try:
                 return await run_in_threadpool(
-                    _do_import_pdf, db_factory(), tmp_path, title, author
+                    _do_import_pdf,
+                    db_factory(),
+                    tmp_path,
+                    title,
+                    author,
+                    content_kind,
+                    original_filename,
                 )
             finally:
                 _unlink_silent(tmp_path)
@@ -112,6 +126,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                     title,
                     author,
                     _upload_title_stem(file.filename or ""),
+                    content_kind,
+                    original_filename,
                 )
             finally:
                 _unlink_silent(tmp_path)
@@ -127,11 +143,14 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             return _error_page("Uploaded file is empty.", status_code=400)
         outcome = await run_in_threadpool(
             import_text_bytes,
-                db_factory(),
-                raw,
-                form_title=title,
-                author=author,
-                fallback_title=_upload_title_stem(file.filename or ""),
+            db_factory(),
+            raw,
+            form_title=title,
+            author=author,
+            fallback_title=_upload_title_stem(file.filename or ""),
+            content_kind=content_kind,
+            import_method="file",
+            source_uri=original_filename,
         )
         return _import_outcome_response(outcome)
 
@@ -141,6 +160,7 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         text = form.get("text", "")
         title = form.get("title", "")
         author = form.get("author", "")
+        content_kind = form.get("content_kind", "auto")
         raw = text.encode("utf-8")
         if len(raw) > fastapi_app._MAX_TEXT_IMPORT_BYTES:
             return _error_page(
@@ -151,10 +171,12 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             return _error_page("Pasted text is empty.", status_code=400)
         outcome = await run_in_threadpool(
             import_text_bytes,
-                db_factory(),
-                raw,
-                form_title=title,
-                author=author,
+            db_factory(),
+            raw,
+            form_title=title,
+            author=author,
+            content_kind=content_kind,
+            import_method="paste",
         )
         return _import_outcome_response(outcome)
 
@@ -164,14 +186,16 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         url = form.get("url", "")
         title = form.get("title", "")
         author = form.get("author", "")
+        content_kind = form.get("content_kind", "auto")
         if not url.strip():
             return _error_page("URL is empty.", status_code=400)
         outcome = await run_in_threadpool(
             import_url_content,
-                db_factory(),
-                url,
-                form_title=title,
-                author=author,
+            db_factory(),
+            url,
+            form_title=title,
+            author=author,
+            content_kind=content_kind,
         )
         return _import_outcome_response(outcome)
 
@@ -187,6 +211,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         file_path: str | Path,
         form_title: str,
         author: str,
+        content_kind: str,
+        source_uri: str,
     ) -> Any:
         return _import_outcome_response(
             import_epub_file(
@@ -194,6 +220,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 file_path,
                 form_title=form_title,
                 author=author,
+                content_kind=content_kind,
+                source_uri=source_uri,
             )
         )
 
@@ -202,6 +230,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         file_path: str | Path,
         form_title: str,
         author: str,
+        content_kind: str,
+        source_uri: str,
     ) -> Any:
         return _import_outcome_response(
             import_pdf_file(
@@ -209,6 +239,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 file_path,
                 form_title=form_title,
                 author=author,
+                content_kind=content_kind,
+                source_uri=source_uri,
             )
         )
 
@@ -218,6 +250,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
         form_title: str,
         author: str,
         fallback_title: str = "",
+        content_kind: str = "auto",
+        source_uri: str = "",
     ) -> Any:
         return _import_outcome_response(
             import_markdown_file(
@@ -226,6 +260,8 @@ def register_import_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 form_title=form_title,
                 author=author,
                 fallback_title=fallback_title,
+                content_kind=content_kind,
+                source_uri=source_uri,
             )
         )
 

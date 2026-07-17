@@ -7,6 +7,8 @@ from app.web.queries.stats import (
 from app.web.queries.books import (
     _fetch_books,
     _fetch_book,
+    _fetch_library_tags,
+    _update_library_item,
     _delete_book,
     _fetch_reanchor_candidate_sentences,
     _find_reanchor_sentence_id,
@@ -46,6 +48,7 @@ from app.web.queries.analysis import (
 
 from app.web.queries.imports import (
     _lookup_book_id_by_hash,
+    _update_book_import_metadata,
 )
 
 __all__ = [
@@ -59,6 +62,7 @@ __all__ = [
     "_fetch_book",
     "_fetch_book_asset",
     "_fetch_books",
+    "_fetch_library_tags",
     "_fetch_cache_metadata",
     "_fetch_chapter_blocks",
     "_fetch_chapter_by_idx",
@@ -80,6 +84,8 @@ __all__ = [
     "_purge_book_assets_dir",
     "_sql_placeholders",
     "_update_word_card_analysis_id",
+    "_update_book_import_metadata",
+    "_update_library_item",
     "_word_card_terms",
     "_word_tokens",
 ]

@@ -20,6 +20,11 @@ def test_import_forms_expose_file_and_paste_flows() -> None:
     assert 'action="/import/url"' in html
     assert 'type="url"' in html
     assert "Import URL" in html
+    assert html.count('name="content_kind"') == 3
+    assert html.count('<option value="auto" selected>Auto</option>') == 3
+    assert '<option value="book">Book</option>' in html
+    assert '<option value="article">Article</option>' in html
+    assert '<option value="excerpt">Excerpt</option>' in html
 
 
 def test_duplicate_page_links_to_existing_book_or_books() -> None:

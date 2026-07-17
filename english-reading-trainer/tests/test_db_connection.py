@@ -60,6 +60,7 @@ class TestMigrationRunner:
         assert "014_markdown_reader_blocks.sql" in applied
         assert "015_word_card_source_offsets.sql" in applied
         assert "016_migration_checksums.sql" in applied
+        assert "017_library_items.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -83,6 +84,65 @@ class TestMigrationRunner:
         assert "014_markdown_reader_blocks.sql" in recorded
         assert "015_word_card_source_offsets.sql" in recorded
         assert "016_migration_checksums.sql" in recorded
+        assert "017_library_items.sql" in recorded
+
+    def test_library_item_migration_preserves_legacy_truth_and_constraints(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "old_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            if sql_file.name != "017_library_items.sql":
+                shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "library_items_upgrade.db")
+        db.apply_migrations(old_migrations)
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                """INSERT INTO books (title, source_format, file_hash, imported_at)
+                   VALUES ('Legacy text', 'txt', 'legacy-library-item', '2026-01-01')"""
+            ).lastrowid
+
+        assert db.apply_migrations(MIGRATIONS_DIR) == ["017_library_items.sql"]
+
+        with db.get_connection() as conn:
+            row = conn.execute(
+                """SELECT content_kind, import_method, source_uri, library_status
+                     FROM books WHERE id = ?""",
+                (book_id,),
+            ).fetchone()
+            assert dict(row) == {
+                "content_kind": "unclassified",
+                "import_method": None,
+                "source_uri": "",
+                "library_status": "inbox",
+            }
+            tag_id = conn.execute(
+                "INSERT INTO tags (name, category) VALUES ('Trade', 'library')"
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+                (book_id, tag_id),
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE books SET content_kind = 'paragraph' WHERE id = ?",
+                    (book_id,),
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE books SET library_status = 'complete' WHERE id = ?",
+                    (book_id,),
+                )
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE books SET import_method = 'clipboard' WHERE id = ?",
+                    (book_id,),
+                )
+            conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
+            assert conn.execute("SELECT COUNT(*) FROM book_tags").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM tags WHERE id = ?", (tag_id,)).fetchone()[0] == 1
 
     def test_malformed_migration_rolls_back_schema_and_tracking_row(
         self, tmp_path: Path
@@ -370,6 +430,7 @@ class TestMigrationRunner:
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
+            "017_library_items.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -461,6 +522,7 @@ class TestMigrationRunner:
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
+            "017_library_items.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -736,6 +798,7 @@ class TestConstraints:
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
+            "017_library_items.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -791,6 +854,7 @@ class TestConstraints:
                 "014_markdown_reader_blocks.sql",
                 "015_word_card_source_offsets.sql",
                 "016_migration_checksums.sql",
+                "017_library_items.sql",
             }:
                 shutil.copy(sql_file, old_migrations / sql_file.name)
 
@@ -833,6 +897,7 @@ class TestConstraints:
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
+            "017_library_items.sql",
         ]
         with db.get_connection() as conn:
             conn.execute(
@@ -903,6 +968,7 @@ class TestConstraints:
             "014_markdown_reader_blocks.sql",
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
+            "017_library_items.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

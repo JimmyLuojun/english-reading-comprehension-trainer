@@ -12,7 +12,7 @@ def _import_forms() -> str:
             "Import",
             "Add a TXT, Markdown, EPUB, or PDF file, or paste text directly. You jump straight to the reader after import.",
         )
-        + """
+        + f"""
     <section class="band">
       <h2>Upload file</h2>
       <form method="post" action="/import/file" enctype="multipart/form-data" class="stack-form">
@@ -20,6 +20,7 @@ def _import_forms() -> str:
         <input id="file-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="file-author">Author (optional)</label>
         <input id="file-author" name="author">
+        {_content_kind_select("file-content-kind")}
         <label for="file-input">TXT, Markdown, EPUB, or PDF file</label>
         <input id="file-input" type="file" name="file" accept=".txt,.md,.markdown,.epub,.pdf,text/plain,text/markdown,text/x-markdown,application/epub+zip,application/pdf" required>
         <button type="submit">Import file</button>
@@ -32,6 +33,7 @@ def _import_forms() -> str:
         <input id="paste-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="paste-author">Author (optional)</label>
         <input id="paste-author" name="author">
+        {_content_kind_select("paste-content-kind")}
         <label for="paste-text">Article text</label>
         <textarea id="paste-text" name="text" rows="14" placeholder="Paste an article here..." required></textarea>
         <button type="submit">Import pasted text</button>
@@ -44,6 +46,7 @@ def _import_forms() -> str:
         <input id="url-title" name="title" placeholder="Leave blank to auto-detect">
         <label for="url-author">Author (optional)</label>
         <input id="url-author" name="author">
+        {_content_kind_select("url-content-kind")}
         <label for="url-input">Article URL</label>
         <input id="url-input" type="url" name="url" placeholder="https://example.com/article" required>
         <button type="submit">Import URL</button>
@@ -52,21 +55,33 @@ def _import_forms() -> str:
     """
     )
 
+
+def _content_kind_select(element_id: str) -> str:
+    return f"""
+        <label for="{element_id}">Content type</label>
+        <select id="{element_id}" name="content_kind">
+          <option value="auto" selected>Auto</option>
+          <option value="book">Book</option>
+          <option value="article">Article</option>
+          <option value="excerpt">Excerpt</option>
+        </select>
+    """
+
 def _duplicate_page(existing_book_id: int | None) -> HTMLResponse:
     if existing_book_id is not None:
         link = (
-            f'<a class="button primary" href="/read/{existing_book_id}">Open existing book</a> '
-            f'<a class="button" href="/books/{existing_book_id}">View chapters</a>'
+            f'<a class="button primary" href="/read/{existing_book_id}">Open existing item</a> '
+            f'<a class="button" href="/books/{existing_book_id}">View item details</a>'
         )
     else:
-        link = '<a class="button" href="/books">Browse books</a>'
+        link = '<a class="button" href="/books">Browse Library</a>'
     body = f"""
     {_page_header(
         "Already imported",
-        "This content has the same hash as a book already in your library.",
+        "This content has the same hash as an item already in your Library.",
     )}
     <section class="band">
-      <p>No new book was created. Open the existing one to keep reading.</p>
+      <p>No new Library Item was created. Open the existing one to keep reading.</p>
       <p>{link}</p>
     </section>
     """

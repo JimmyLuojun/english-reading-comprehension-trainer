@@ -20,10 +20,10 @@ Press `Ctrl+C`, then run exactly the same command again (especially keep the
 same `--access-token` and port). The browser tab can stay open; reload it once
 the server is running again.
 
-The reader saves its current book, chapter, top visible sentence, and open
-analysis panel in this browser's local storage. It restores that state after a
-reload or server restart. Other page scroll positions are kept for the current
-browser session.
+The reader saves its current Library Item, internal section (`book_id` /
+`chapter_idx`), top visible sentence, and open analysis panel in this browser's
+local storage. It restores that state after a reload or server restart. Other
+page scroll positions are kept for the current browser session.
 
 Do not use a private/incognito window or clear site data if you need this
 restore behavior. If you start the launcher without `--access-token`, it makes

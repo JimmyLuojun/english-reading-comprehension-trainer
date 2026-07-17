@@ -41,7 +41,7 @@ from bs4.element import Tag
 from ebooklib import ITEM_DOCUMENT, ITEM_NAVIGATION, epub
 
 from app.db_connection import DatabaseConnection
-from app.db_models import SourceFormat
+from app.db_models import ContentKind, SourceFormat
 from app.importers.txt_importer import DuplicateBookError, ImportResult
 from app.nlp.sentence_segmenter import normalize_for_hash, segment_sentences
 
@@ -1235,9 +1235,21 @@ def _insert(
             book_id: int = conn.execute(
                 """INSERT INTO books
                    (title, author, language, source_format, file_hash, imported_at,
-                    total_chapters, total_sentences)
-                   VALUES (?, ?, ?, ?, ?, ?, 0, 0)""",
-                (title, author, language, source_format.value, file_hash, now),
+                    total_chapters, total_sentences, content_kind)
+                   VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)""",
+                (
+                    title,
+                    author,
+                    language,
+                    source_format.value,
+                    file_hash,
+                    now,
+                    (
+                        ContentKind.BOOK.value
+                        if source_format == SourceFormat.EPUB
+                        else ContentKind.UNCLASSIFIED.value
+                    ),
+                ),
             ).lastrowid
             asset_cache: dict[str, int] = {}
 

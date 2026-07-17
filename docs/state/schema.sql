@@ -180,7 +180,10 @@ CREATE TABLE IF NOT EXISTS "books" (
     imported_at     TEXT    NOT NULL,
     total_chapters  INTEGER NOT NULL DEFAULT 0,
     total_sentences INTEGER NOT NULL DEFAULT 0
-);
+, content_kind TEXT NOT NULL DEFAULT 'unclassified'
+    CHECK(content_kind IN ('book', 'article', 'excerpt', 'unclassified')), import_method TEXT
+    CHECK(import_method IS NULL OR import_method IN ('file', 'paste', 'url')), source_uri TEXT NOT NULL DEFAULT '', library_status TEXT NOT NULL DEFAULT 'inbox'
+    CHECK(library_status IN ('inbox', 'reading', 'finished', 'archived')));
 CREATE TABLE IF NOT EXISTS "chapter_blocks" (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     book_id         INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -230,3 +233,11 @@ CREATE UNIQUE INDEX idx_word_card_sources_exact_unique
 CREATE UNIQUE INDEX idx_word_card_sources_legacy_unique
     ON word_card_sources(card_id, sentence_id, source_key)
     WHERE start_offset IS NULL OR end_offset IS NULL;
+CREATE TABLE book_tags (
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY(book_id, tag_id)
+);
+CREATE INDEX idx_books_content_kind ON books(content_kind);
+CREATE INDEX idx_books_library_status ON books(library_status);
+CREATE INDEX idx_book_tags_tag ON book_tags(tag_id);

@@ -21,7 +21,7 @@ def test_html_page_escapes_title_and_marks_active_nav() -> None:
     assert response.status_code == 200
     assert "&lt;Title&gt; - English Reading Trainer" in body
     assert '<body class="reader">' in body
-    assert '<a id="nav-books" class="active" href="/books">Books</a>' in body
+    assert '<a id="nav-books" class="active" href="/books">Continue</a>' in body
     assert '<a class="" href="/books">Library</a>' in body
     assert 'getElementById("nav-books")' in body
     assert "reader:last-book-id" in body

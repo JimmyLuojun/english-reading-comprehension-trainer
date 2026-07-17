@@ -337,6 +337,11 @@ def test_css_ui_consistency_width_table_and_action_density_rules() -> None:
         "    }"
     ) in css
     assert "td button.danger:hover, td .button.danger:hover" in css
-    assert ".stack-form input:not([type=file]) { max-width: 420px; }" in css
+    assert (
+        ".stack-form input:not([type=file]), .stack-form select { max-width: 420px; }"
+        in css
+    )
+    assert ".library-filters {" in css
+    assert ".source-metadata {" in css
     assert ".stack-form textarea { max-width: 640px; }" in css
     assert ".stack-form button { justify-self: start; }" in css

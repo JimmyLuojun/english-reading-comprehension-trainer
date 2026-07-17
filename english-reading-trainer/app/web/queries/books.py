@@ -8,26 +8,140 @@ from pathlib import Path
 from typing import Any
 
 from app.db_connection import DatabaseConnection
-from app.db_models import LexicalType
+from app.db_models import ContentKind, LexicalType, LibraryStatus
 from app.web.config import (
     _WORD_TOKEN_RE,
 )
 from app.web.models import DeleteBookResult
 
-def _fetch_books(db: DatabaseConnection) -> list[dict[str, Any]]:
+def _fetch_books(
+    db: DatabaseConnection,
+    *,
+    content_kind: str = "",
+    library_status: str = "",
+    tag: str = "",
+) -> list[dict[str, Any]]:
+    conditions: list[str] = []
+    parameters: list[Any] = []
+    if content_kind:
+        conditions.append("b.content_kind = ?")
+        parameters.append(content_kind)
+    if library_status:
+        conditions.append("b.library_status = ?")
+        parameters.append(library_status)
+    if tag:
+        conditions.append(
+            """EXISTS (
+                   SELECT 1
+                     FROM book_tags filter_bt
+                     JOIN tags filter_t ON filter_t.id = filter_bt.tag_id
+                    WHERE filter_bt.book_id = b.id
+                      AND filter_t.name = ? COLLATE NOCASE
+               )"""
+        )
+        parameters.append(tag)
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     with db.get_connection() as conn:
         rows = conn.execute(
-            """SELECT id, title, author, source_format, total_chapters,
-                      total_sentences, imported_at
-                 FROM books
-                ORDER BY id"""
+            f"""SELECT b.id, b.title, b.author, b.source_format,
+                       b.content_kind, b.library_status, b.import_method,
+                       b.source_uri, b.total_chapters, b.total_sentences,
+                       b.imported_at,
+                       COALESCE(GROUP_CONCAT(t.name, ', '), '') AS tags
+                  FROM books b
+                  LEFT JOIN book_tags bt ON bt.book_id = b.id
+                  LEFT JOIN tags t ON t.id = bt.tag_id
+                  {where_clause}
+                 GROUP BY b.id
+                 ORDER BY b.id""",
+            parameters,
         ).fetchall()
     return [dict(row) for row in rows]
 
 def _fetch_book(db: DatabaseConnection, book_id: int) -> dict[str, Any] | None:
     with db.get_connection() as conn:
-        row = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+        row = conn.execute(
+            """SELECT b.*,
+                      COALESCE(GROUP_CONCAT(t.name, ', '), '') AS tags
+                 FROM books b
+                 LEFT JOIN book_tags bt ON bt.book_id = b.id
+                 LEFT JOIN tags t ON t.id = bt.tag_id
+                WHERE b.id = ?
+                GROUP BY b.id""",
+            (book_id,),
+        ).fetchone()
     return dict(row) if row else None
+
+
+def _fetch_library_tags(db: DatabaseConnection) -> list[str]:
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT t.name
+                 FROM tags t
+                 JOIN book_tags bt ON bt.tag_id = t.id
+                ORDER BY t.name COLLATE NOCASE"""
+        ).fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def _update_library_item(
+    db: DatabaseConnection,
+    book_id: int,
+    *,
+    title: str,
+    author: str,
+    content_kind: str,
+    library_status: str,
+    tags: list[str],
+) -> bool:
+    """Update user-managed Library Item metadata and item-level tags."""
+    normalized_title = title.strip()
+    if not normalized_title:
+        raise ValueError("Title is required.")
+    if content_kind not in {kind.value for kind in ContentKind}:
+        raise ValueError("Invalid content type.")
+    if library_status not in {status.value for status in LibraryStatus}:
+        raise ValueError("Invalid library status.")
+
+    normalized_tags: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        tag_name = raw_tag.strip()
+        key = tag_name.casefold()
+        if not tag_name or key in seen:
+            continue
+        if len(tag_name) > 60:
+            raise ValueError("Tags must be 60 characters or fewer.")
+        seen.add(key)
+        normalized_tags.append(tag_name)
+
+    with db.get_connection() as conn:
+        cursor = conn.execute(
+            """UPDATE books
+                  SET title = ?, author = ?, content_kind = ?, library_status = ?
+                WHERE id = ?""",
+            (normalized_title, author.strip(), content_kind, library_status, book_id),
+        )
+        if cursor.rowcount != 1:
+            return False
+        conn.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
+        for tag_name in normalized_tags:
+            row = conn.execute(
+                "SELECT id FROM tags WHERE name = ? COLLATE NOCASE",
+                (tag_name,),
+            ).fetchone()
+            if row is None:
+                tag_id = conn.execute(
+                    "INSERT INTO tags (name, category) VALUES (?, 'library')",
+                    (tag_name,),
+                ).lastrowid
+            else:
+                tag_id = row["id"]
+            conn.execute(
+                "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+                (book_id, tag_id),
+            )
+    return True
 
 def _delete_book(db: DatabaseConnection, book_id: int) -> DeleteBookResult | None:
     with db.get_connection() as conn:
