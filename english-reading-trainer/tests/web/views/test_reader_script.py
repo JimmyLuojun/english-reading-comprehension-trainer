@@ -43,6 +43,17 @@ def test_reader_script_restores_progress_after_a_browser_reload() -> None:
     assert 'reader.dataset.restoreProgress !== "1" && !readerPageWasReloaded()' in restore_progress
 
 
+def test_reader_restore_redirect_does_not_overwrite_saved_progress_on_pagehide() -> None:
+    script = _selection_script()
+    restore_progress = script[script.index("function restoreReaderProgress()") :]
+    restore_progress = restore_progress[: restore_progress.index("function topSentenceId()")]
+    save_progress = script[script.index("function saveReaderProgress()") :]
+    save_progress = save_progress[: save_progress.index("function currentAnalysisState()")]
+
+    assert "progressRestoreRedirecting = true;" in restore_progress
+    assert "if (!progressKey || progressRestoreRedirecting) return;" in save_progress
+
+
 def test_paragraph_shortcut_and_toolbar_contracts() -> None:
     script = _selection_script()
     shortcut = script[script.index("function handleReaderShortcut") :]

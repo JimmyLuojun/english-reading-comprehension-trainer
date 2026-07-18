@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -76,8 +77,8 @@ def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
         'placeholder="Comma-separated">'
     )
     return (
-        "<tr>"
-        f'<td><a href="/books/{book_id}">{_escape(title)}</a></td>'
+        f'<tr id="library-item-{book_id}" class="library-item-row">'
+        f'<td><a href="/books/{book_id}/open">{_escape(title)}</a></td>'
         f"<td>{type_select}</td>"
         f"<td>{status_select}</td>"
         f"<td>{tags_input}</td>"
@@ -86,7 +87,8 @@ def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
         f"<td>{row['total_chapters']}</td>"
         f"<td>{row['total_sentences']}</td>"
         '<td><div class="library-row-actions">'
-        f"{classification_form}{_delete_book_form(book_id)}"
+        f'{classification_form}<a class="button small" href="/books/{book_id}">Details</a>'
+        f"{_delete_book_form(book_id)}"
         "</div></td>"
         "</tr>"
     )
@@ -136,6 +138,79 @@ def _library_filters(
     """
 
 
+def _library_notice(
+    rows: list[dict[str, Any]],
+    *,
+    saved: int = 0,
+    saved_title: str = "",
+    deleted_tag: str = "",
+    tag_items: str = "",
+) -> str:
+    """Render one-time save/tag-delete feedback for the Library list."""
+    titles = {int(row["id"]): str(row["title"]) for row in rows}
+    messages: list[str] = []
+    if saved:
+        title = saved_title or titles.get(saved, "")
+        messages.append(f"Saved {_escape(title)}." if title else "Saved.")
+    if deleted_tag:
+        item_ids = [
+            int(raw)
+            for raw in tag_items.split(",")
+            if raw.strip().isdigit()
+        ]
+        message = f"Tag {_escape(deleted_tag)} deleted"
+        if item_ids:
+            links = ", ".join(
+                f'<a href="/books#library-item-{item_id}">'
+                f'{_escape(titles.get(item_id) or f"Item {item_id}")}</a>'
+                for item_id in item_ids
+            )
+            noun = "item" if len(item_ids) == 1 else "items"
+            message += (
+                f"; removed from {len(item_ids)} {noun}: {links}. "
+                "You can update them below."
+            )
+        else:
+            message += "; no items were using it."
+        messages.append(message)
+    if not messages:
+        return ""
+    return f'<p class="flash" role="status">{" ".join(messages)}</p>'
+
+
+def _library_tag_manager(tags_usage: list[dict[str, Any]]) -> str:
+    """Render the collapsible tag management section for the Library list."""
+    if not tags_usage:
+        return ""
+    entries = "".join(
+        "<li>"
+        f'<span class="tag-manager-name">{_escape(str(tag["name"]))}</span>'
+        f'<span class="muted">{int(tag["item_count"])} '
+        f'{"item" if int(tag["item_count"]) == 1 else "items"}</span>'
+        f'<form method="post" action="/tags/{int(tag["id"])}/delete" '
+        'class="inline-form">'
+        f'<button class="danger small" type="submit" '
+        f'onclick="return confirm('
+        f'{_escape(json.dumps(_tag_delete_confirm(str(tag["name"]), int(tag["item_count"]))))}'
+        f')">Delete</button></form></li>'
+        for tag in tags_usage
+    )
+    return (
+        '<details class="tag-manager">'
+        "<summary>Manage tags</summary>"
+        f'<ul class="tag-manager-list">{entries}</ul>'
+        '<p class="muted tag-manager-hint">Add a tag by typing it into any '
+        "item's Tags field and saving that row. Deleting a tag here removes "
+        "it from every item.</p>"
+        "</details>"
+    )
+
+
+def _tag_delete_confirm(name: str, item_count: int) -> str:
+    noun = "item" if item_count == 1 else "items"
+    return f'Delete tag "{name}"? It will be removed from {item_count} {noun}.'
+
+
 def _library_item_form(book: dict[str, Any]) -> str:
     return f"""
     <section class="band">
@@ -152,15 +227,9 @@ def _library_item_form(book: dict[str, Any]) -> str:
           <option value="excerpt"{_selected('excerpt', book.get('content_kind'))}>Excerpt</option>
           <option value="unclassified"{_selected('unclassified', book.get('content_kind'))}>Unclassified</option>
         </select>
-        <label for="item-library-status">Library status</label>
-        <select id="item-library-status" name="library_status">
-          <option value="inbox"{_selected('inbox', book.get('library_status'))}>Inbox</option>
-          <option value="reading"{_selected('reading', book.get('library_status'))}>Reading</option>
-          <option value="finished"{_selected('finished', book.get('library_status'))}>Finished</option>
-          <option value="archived"{_selected('archived', book.get('library_status'))}>Archived</option>
-        </select>
-        <label for="item-tags">Tags <span class="muted">(comma-separated)</span></label>
-        <input id="item-tags" name="tags" value="{_escape(book.get('tags') or '')}">
+        <input type="hidden" name="library_status"
+               value="{_escape(book.get('library_status') or 'inbox')}">
+        <input type="hidden" name="tags" value="{_escape(book.get('tags') or '')}">
         <button type="submit">Save metadata</button>
       </form>
       <dl class="source-metadata">
@@ -204,10 +273,67 @@ def _chapters_table(
     if content_kind == "excerpt":
         heading = "Content"
     return f"""
-    <table class="chapter-table">
+    <table id="item-contents" class="chapter-table">
       <thead><tr><th>{heading}</th><th>Sentences</th></tr></thead>
       <tbody>{body}</tbody>
     </table>
+    """
+
+
+def _has_meaningful_contents(
+    rows: list[dict[str, Any]],
+    *,
+    content_kind: str,
+) -> bool:
+    if content_kind == "excerpt":
+        return False
+    readable_sections = sum(
+        1
+        for row in rows
+        if int(row.get("sentence_end") or 0) - int(row.get("sentence_start") or 0) > 0
+    )
+    return readable_sections > 1
+
+
+def _library_item_open_redirect(
+    book_id: int,
+    *,
+    has_contents: bool,
+    primary_read_idx: int | None,
+) -> str:
+    direct_href = (
+        f"/read/{book_id}?chapter={primary_read_idx}"
+        if primary_read_idx is not None
+        else f"/read/{book_id}"
+    )
+    first_open_href = f"/books/{book_id}/contents" if has_contents else direct_href
+    has_contents_js = "true" if has_contents else "false"
+    return f"""
+    <section class="band">
+      <h1>Opening Library Item…</h1>
+      <p class="muted">Restoring your reading position or preparing the item.</p>
+      <p><a class="button primary" href="{first_open_href}">Open item</a></p>
+    </section>
+    <script>
+      (() => {{
+        const bookId = "{book_id}";
+        const hasContents = {has_contents_js};
+        const directHref = "{direct_href}";
+        let hasProgress = false;
+        try {{
+          const progress = JSON.parse(
+            window.localStorage.getItem(`reader:progress:book:${{bookId}}`) || "null",
+          );
+          hasProgress = Number.parseInt(progress?.chapter_idx, 10) > 0;
+        }} catch (error) {{
+          hasProgress = false;
+        }}
+        const target = hasProgress
+          ? `/read/${{encodeURIComponent(bookId)}}?restore=1`
+          : (hasContents ? `/books/${{encodeURIComponent(bookId)}}/contents` : directHref);
+        window.location.replace(target);
+      }})();
+    </script>
     """
 
 

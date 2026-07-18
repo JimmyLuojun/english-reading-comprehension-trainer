@@ -84,6 +84,55 @@ def _fetch_library_tags(db: DatabaseConnection) -> list[str]:
     return [str(row["name"]) for row in rows]
 
 
+def _fetch_library_tag_usage(db: DatabaseConnection) -> list[dict[str, Any]]:
+    """List library-manageable tags with the number of items using each."""
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """SELECT t.id, t.name,
+                      COUNT(DISTINCT bt.book_id) AS item_count
+                 FROM tags t
+                 LEFT JOIN book_tags bt ON bt.tag_id = t.id
+                WHERE t.category = 'library'
+                   OR bt.book_id IS NOT NULL
+                GROUP BY t.id
+                ORDER BY t.name COLLATE NOCASE"""
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _delete_library_tag(
+    db: DatabaseConnection, tag_id: int
+) -> tuple[str, list[int]] | None:
+    """Remove a tag from all Library Items and report the affected item ids.
+
+    The shared tags row itself is deleted only when no word or sentence
+    card still references it.
+    """
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT name FROM tags WHERE id = ?", (tag_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        name = str(row["name"])
+        book_ids = [
+            int(link["book_id"])
+            for link in conn.execute(
+                "SELECT book_id FROM book_tags WHERE tag_id = ? ORDER BY book_id",
+                (tag_id,),
+            ).fetchall()
+        ]
+        conn.execute("DELETE FROM book_tags WHERE tag_id = ?", (tag_id,))
+        card_refs = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM sentence_card_tags WHERE tag_id = ?)
+                    + (SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?)""",
+            (tag_id, tag_id),
+        ).fetchone()[0]
+        if card_refs == 0:
+            conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+    return name, book_ids
+
+
 def _update_library_item(
     db: DatabaseConnection,
     book_id: int,

@@ -21,7 +21,16 @@
 
 `library_status` 是手工整理状态，不是阅读位置。Reader 位置仍由当前 browser localStorage 负责，未引入第二个进度事实源。
 
-Library 详情页可编辑 title、author、content type、library status 和逗号分隔的 item tags；Library 列表可按 type、status、tag 过滤。列表中的每一行也可直接修改 content type、library status 和逗号分隔的 tags，并通过该行的 Save 单独保存；保存后保留当前筛选条件。行内编辑不修改 title、author、内容结构、卡片、标注或阅读位置。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。
+Library 详情页只编辑 title、author 和 content type；library status 与 item tags 不在详情页重复显示，统一在 Library 列表维护。Library 列表的 item title 通过统一 open 入口进入阅读流，独立的 Details 操作进入详情页。列表可按 type、status、tag 过滤；每一行可直接修改 content type、library status 和逗号分隔的 tags，并通过该行的 Save 单独保存，保存后保留当前筛选条件。行内编辑不修改 title、author、内容结构、卡片、标注或阅读位置。详情页保存 title/author/type 时会原样保留已有 status 和 tags。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。行内 Save 后重定向回列表并携带 `saved` 参数，列表顶部渲染一次性 `Saved ‹title›.` 提示。`Manage tags` 折叠区列出全部 library tag（含未被任何 item 使用的 orphan）及其 item 数；`POST /tags/{tag_id}/delete` 从所有 item 移除该 tag，随后列表提示受影响的 item 并链接到对应行锚点（`#library-item-{id}`），用户可直接修改这些 item 的 tags。tag 仍通过行内 Tags 输入创建（首次保存自动写入 `tags` 表）；若 tag 仍被 word/sentence 卡片引用，删除时只解除 `book_tags` 关联，保留共享 `tags` 行。
+
+### 2.1 阅读入口与 Contents
+
+- `/books/{book_id}/open` 是 Library title 的统一入口。它只读取现有 `reader:progress:book:{book_id}` localStorage key，不写入新进度。
+- 有有效进度时，进入 `/read/{book_id}?restore=1`，由 Reader 恢复已保存的 section 和 top sentence。每个 item 的 key 独立，因此来回切换 item 不会互相覆盖位置。Reader 在跨 section 恢复跳转期间会暂停 `pagehide` 进度写入，避免离开的旧 section 覆盖正在恢复的新 section 并引起循环跳转。
+- 没有进度且有两个或以上可读 section 时，先进入独立 `/books/{book_id}/contents` 页；只有一个可读 section 时直接从起点阅读。Excerpt 不显示人为 Contents。
+- Contents 页本身不加载 Reader script，因此只查看目录不会被判定为已阅读。选择 section 或 Start from beginning 后才由 Reader 正常保存进度。
+- Reader 对有意义的多 section item 始终提供 Contents 入口；单 section item 和 excerpt 保留 Item details 入口。句卡等显式 deep link 仍以 URL 指定位置为准，不被自动 resume 覆盖。
+- 阅读历史不从 `library_status`、卡片或标注推断。当前进度仍只对同一 browser origin 有效；跨设备同步仍属于后续 SQLite progress 迁移。
 
 ## 3. 导入规则
 

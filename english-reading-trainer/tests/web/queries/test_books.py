@@ -15,6 +15,8 @@ from app.web.queries.books import (
     _fetch_chapter_by_idx,
     _fetch_chapters,
     _fetch_library_tags,
+    _fetch_library_tag_usage,
+    _delete_library_tag,
     _find_reanchor_sentence_id,
     _find_phrase_reanchor_sentence_id,
     _find_word_reanchor_sentence_id,
@@ -136,6 +138,47 @@ def test_update_library_item_validates_fields_and_missing_item(tmp_path: Path) -
         assert "60 characters" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_library_tag_usage_and_scoped_delete(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    source = tmp_path / "book.txt"
+    source.write_text(
+        "Chapter 1\nFirst sentence.\n\nChapter 2\nSecond sentence.",
+        encoding="utf-8",
+    )
+    result = import_txt(db, source, title="Book", author="Author")
+    assert _update_library_item(
+        db,
+        result.book_id,
+        title="Book",
+        author="Author",
+        content_kind="book",
+        library_status="inbox",
+        tags=["Trade", "logic"],
+    )
+    with db.get_connection() as conn:
+        conn.execute(
+            "INSERT INTO tags (name, category) VALUES ('orphan', 'library')"
+        )
+        conn.execute(
+            "INSERT INTO tags (name, category) VALUES ('cards-only', 'review')"
+        )
+        trade_id = int(
+            conn.execute("SELECT id FROM tags WHERE name = 'Trade'").fetchone()["id"]
+        )
+
+    usage = _fetch_library_tag_usage(db)
+
+    assert [(row["name"], row["item_count"]) for row in usage] == [
+        ("logic", 1),
+        ("orphan", 0),
+        ("Trade", 1),
+    ]
+    assert _delete_library_tag(db, trade_id) == ("Trade", [result.book_id])
+    assert _fetch_book(db, result.book_id)["tags"] == "logic"
+    assert [row["name"] for row in _fetch_library_tag_usage(db)] == ["logic", "orphan"]
+    assert _delete_library_tag(db, 999) is None
 
 
 def test_reanchor_helpers_match_words_and_phrases() -> None:

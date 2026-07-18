@@ -26,6 +26,7 @@ def _reader_view(
     restore_progress: bool,
     content_kind: str = "book",
     total_sections: int = 1,
+    has_contents: bool | None = None,
     previous_chapter: dict[str, Any] | None = None,
     next_chapter: dict[str, Any] | None = None,
     blocks: list[dict[str, Any]] | None = None,
@@ -54,12 +55,15 @@ def _reader_view(
         if section_label
         else ""
     )
-    detail_label = {
-        "book": "Chapters",
-        "article": "Sections",
-        "excerpt": "Item details",
-        "unclassified": "Sections",
-    }.get(content_kind, "Sections")
+    show_contents = (
+        content_kind != "excerpt" and total_sections > 1
+        if has_contents is None
+        else has_contents
+    )
+    item_navigation_label = "Contents" if show_contents else "Item details"
+    item_navigation_href = (
+        f"/books/{book_id}/contents" if show_contents else f"/books/{book_id}"
+    )
     return f"""
     <article class="reader" data-reader data-book-id="{book_id}"
       data-chapter-idx="{chapter_idx}" data-return-to="{_escape(return_to)}"
@@ -67,7 +71,7 @@ def _reader_view(
       <header class="reader-header">
         <div class="reader-header-actions" aria-label="Reader navigation">
           <a class="button small" href="/books">Library</a>
-          <a class="button small" href="/books/{book_id}">{detail_label}</a>
+          <a class="button small" href="{item_navigation_href}">{item_navigation_label}</a>
         </div>
         <h1 class="reader-title">{_escape(book_title)}</h1>
         {section_heading}

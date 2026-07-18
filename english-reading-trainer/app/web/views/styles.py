@@ -1358,6 +1358,37 @@ def _css() -> str:
     .library-inline-form {
       display: contents;
     }
+    .flash {
+      margin: 0 0 14px;
+      padding: 10px 14px;
+      border: 1px solid #9bd4bd;
+      border-radius: var(--radius);
+      background: #f0fdf4;
+    }
+    .tag-manager {
+      margin: 0 0 18px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .tag-manager summary { cursor: pointer; color: var(--muted); }
+    .tag-manager-list {
+      list-style: none;
+      margin: 12px 0 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .tag-manager-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tag-manager-name { font-weight: 600; }
+    .tag-manager-hint { margin: 12px 0 0; font-size: 12px; }
+    .library-item-row { scroll-margin-top: 72px; }
+    .library-item-row:target td { background: #eff6ff; }
     .source-metadata {
       display: grid;
       grid-template-columns: max-content minmax(0, 1fr);

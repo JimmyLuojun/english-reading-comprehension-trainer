@@ -29,6 +29,7 @@ Usage examples:
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import typer
@@ -876,29 +877,51 @@ def ai_prompt_word(
 # ai save-sentence / save-word
 # ---------------------------------------------------------------------------
 
+def _read_ai_analysis_json(input_file: Path | None) -> str:
+    """Read an AI analysis from a UTF-8 file or the existing stdin flow."""
+    if input_file is None:
+        typer.echo("Paste the JSON from your AI chat. Finish with Ctrl-D (Mac/Linux):\n")
+        try:
+            raw_json = sys.stdin.read().strip()
+        except (KeyboardInterrupt, EOFError):
+            raw_json = ""
+    else:
+        try:
+            raw_json = input_file.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError) as error:
+            typer.echo(f"Error reading input file: {error}", err=True)
+            raise typer.Exit(1)
+
+    if not raw_json:
+        typer.echo("No input received.", err=True)
+        raise typer.Exit(1)
+    return raw_json
+
 @ai_app.command("save-sentence")
 def ai_save_sentence(
     sentence_id:    int = typer.Argument(..., help="Sentence ID"),
     model:          str = typer.Option("manual", "--model", "-m",
                         help="Model label (e.g. claude-opus-4-7, gemini-2.0)"),
     prompt_version: str = typer.Option("v1", "--prompt-version", "-p"),
+    input_file: Path | None = typer.Option(
+        None,
+        "--input-file",
+        "-i",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Read the AI JSON from a UTF-8 file instead of stdin",
+    ),
 ) -> None:
     """
     Save a sentence analysis JSON returned by your AI chat.
 
-    Paste the JSON when prompted (finish with Ctrl-D on a new line).
+    Paste the JSON when prompted, or pass --input-file for agent-safe saving.
     """
     from app.ai.analysis_saver import save_sentence_analysis
-    typer.echo("Paste the JSON from your AI chat. Finish with Ctrl-D (Mac/Linux):\n")
-    import sys
-    try:
-        raw_json = sys.stdin.read().strip()
-    except (KeyboardInterrupt, EOFError):
-        raw_json = ""
-
-    if not raw_json:
-        typer.echo("No input received.", err=True)
-        raise typer.Exit(1)
+    raw_json = _read_ai_analysis_json(input_file)
 
     db = _get_db()
     try:
@@ -925,23 +948,25 @@ def ai_save_word(
     surface_form:   str = typer.Argument(..., help="Word or phrase"),
     model:          str = typer.Option("manual", "--model", "-m"),
     prompt_version: str = typer.Option("v1", "--prompt-version", "-p"),
+    input_file: Path | None = typer.Option(
+        None,
+        "--input-file",
+        "-i",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Read the AI JSON from a UTF-8 file instead of stdin",
+    ),
 ) -> None:
     """
     Save a word/phrase analysis JSON returned by your AI chat.
 
-    Paste the JSON when prompted (finish with Ctrl-D on a new line).
+    Paste the JSON when prompted, or pass --input-file for agent-safe saving.
     """
     from app.ai.analysis_saver import save_word_analysis
-    typer.echo("Paste the JSON from your AI chat. Finish with Ctrl-D (Mac/Linux):\n")
-    import sys
-    try:
-        raw_json = sys.stdin.read().strip()
-    except (KeyboardInterrupt, EOFError):
-        raw_json = ""
-
-    if not raw_json:
-        typer.echo("No input received.", err=True)
-        raise typer.Exit(1)
+    raw_json = _read_ai_analysis_json(input_file)
 
     db = _get_db()
     try:

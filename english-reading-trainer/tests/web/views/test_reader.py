@@ -465,7 +465,7 @@ def test_reader_view_has_book_and_chapter_navigation() -> None:
     )
 
     assert '<a class="button small" href="/books">Library</a>' in html
-    assert '<a class="button small" href="/books/7">Chapters</a>' in html
+    assert '<a class="button small" href="/books/7">Item details</a>' in html
 
 
 def test_reader_view_uses_type_aware_heading_and_navigation() -> None:
@@ -489,10 +489,19 @@ def test_reader_view_uses_type_aware_heading_and_navigation() -> None:
     unclassified = _reader_view(**common, content_kind="unclassified")
 
     assert 'class="reader-chapter"' not in article
-    assert '>Sections</a>' in article
+    assert '>Item details</a>' in article
     assert 'class="reader-chapter"' not in excerpt
     assert '>Item details</a>' in excerpt
     assert '<h2 class="reader-chapter">Section 1</h2>' in unclassified
+
+    multi_section = _reader_view(**{**common, "total_sections": 2}, content_kind="book")
+    assert '<a class="button small" href="/books/7/contents">Contents</a>' in multi_section
+    multi_but_not_meaningful = _reader_view(
+        **{**common, "total_sections": 2},
+        content_kind="book",
+        has_contents=False,
+    )
+    assert '>Item details</a>' in multi_but_not_meaningful
 
 
 def test_reader_content_blocks_render_markdown_headings_and_lists() -> None:

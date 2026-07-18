@@ -18,14 +18,23 @@ from app.web.queries import (
     _fetch_books,
     _fetch_chapters,
     _fetch_library_tags,
+    _fetch_library_tag_usage,
 )
-from app.web.services.books import delete_book_and_assets, update_library_item
+from app.web.services.books import (
+    delete_book_and_assets,
+    delete_library_tag,
+    update_library_item,
+)
 from app.web.views import (
     _books_table,
     _chapters_table,
+    _has_meaningful_contents,
     _html_page,
     _library_filters,
     _library_item_form,
+    _library_item_open_redirect,
+    _library_notice,
+    _library_tag_manager,
     _page_header,
     _primary_read_idx,
 )
@@ -36,6 +45,9 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         content_kind: str = "",
         library_status: str = "",
         tag: str = "",
+        saved: int = 0,
+        deleted_tag: str = "",
+        tag_items: str = "",
     ) -> HTMLResponse:
         db = db_factory()
         rows = _fetch_books(
@@ -45,13 +57,30 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             tag=tag,
         )
         tags = _fetch_library_tags(db)
+        tag_usage = _fetch_library_tag_usage(db)
+        saved_title = ""
+        if saved:
+            saved_title = next(
+                (str(row["title"]) for row in rows if int(row["id"]) == saved), ""
+            )
+            if not saved_title:
+                book = _fetch_book(db, saved)
+                saved_title = str(book["title"]) if book else ""
         body = _page_header("Library", "Books, articles, and excerpts in one place.")
+        body += _library_notice(
+            rows,
+            saved=saved,
+            saved_title=saved_title,
+            deleted_tag=deleted_tag,
+            tag_items=tag_items,
+        )
         body += _library_filters(
             tags,
             selected_kind=content_kind,
             selected_status=library_status,
             selected_tag=tag,
         )
+        body += _library_tag_manager(tag_usage)
         filters = {
             key: value
             for key, value in (
@@ -93,7 +122,25 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         if not updated:
             return _error_page("Library Item not found", status_code=404)
         return_to = _safe_return_to(form.get("return_to", f"/books/{book_id}"))
+        if return_to == "/books" or return_to.startswith("/books?"):
+            separator = "&" if "?" in return_to else "?"
+            return_to = f"{return_to}{separator}saved={book_id}"
         return _redirect(return_to)
+
+    @web_app.post("/tags/{tag_id}/delete")
+    def delete_tag(tag_id: int) -> Any:
+        db = db_factory()
+        result = delete_library_tag(db, tag_id)
+        if result is None:
+            return _error_page("Tag not found", status_code=404)
+        name, book_ids = result
+        query = urlencode(
+            {
+                "deleted_tag": name,
+                "tag_items": ",".join(str(book_id) for book_id in book_ids),
+            }
+        )
+        return _redirect(f"/books?{query}")
 
     @web_app.get("/books/{book_id}", response_class=HTMLResponse)
     def book_detail(book_id: int) -> HTMLResponse:
@@ -113,7 +160,7 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         {_page_header(
             book["title"],
             f'{item_type} · {book["author"] or "Unknown author"}',
-            f'<a class="button" href="{read_href}">Start reading</a>',
+            f'<a class="button" href="{read_href}">Start from beginning</a>',
         )}
         {_library_item_form(book)}
         {_chapters_table(
@@ -123,3 +170,49 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         )}
         """
         return _html_page(book["title"], body, active="library")
+
+    @web_app.get("/books/{book_id}/open", response_class=HTMLResponse)
+    def open_library_item(book_id: int) -> HTMLResponse:
+        db = db_factory()
+        book = _fetch_book(db, book_id)
+        if book is None:
+            return _error_page("Library Item not found", status_code=404)
+        chapters = _fetch_chapters(db, book_id)
+        content_kind = book.get("content_kind") or "unclassified"
+        body = _library_item_open_redirect(
+            book_id,
+            has_contents=_has_meaningful_contents(
+                chapters,
+                content_kind=content_kind,
+            ),
+            primary_read_idx=_primary_read_idx(chapters),
+        )
+        return _html_page(f'Open {book["title"]}', body, active="library")
+
+    @web_app.get("/books/{book_id}/contents", response_class=HTMLResponse)
+    def library_item_contents(book_id: int) -> HTMLResponse:
+        db = db_factory()
+        book = _fetch_book(db, book_id)
+        if book is None:
+            return _error_page("Library Item not found", status_code=404)
+        chapters = _fetch_chapters(db, book_id)
+        read_idx = _primary_read_idx(chapters)
+        start_href = (
+            f"/read/{book_id}?chapter={read_idx}"
+            if read_idx is not None
+            else f"/read/{book_id}"
+        )
+        content_kind = book.get("content_kind") or "unclassified"
+        item_type = str(content_kind).replace("_", " ").title()
+        body = f"""
+        {_page_header(
+            book["title"],
+            f'{item_type} · Choose where to begin',
+            f'<a class="button" href="{start_href}">Start from beginning</a>',
+        )}
+        <section class="band">
+          <h2>Contents</h2>
+          {_chapters_table(book_id, chapters, content_kind=content_kind)}
+        </section>
+        """
+        return _html_page(f'Contents · {book["title"]}', body, active="library")

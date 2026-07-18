@@ -92,6 +92,38 @@ def _seed_reader(db: DatabaseConnection, tmp_path: Path) -> int:
     return int(result.book_id)
 
 
+def _seed_multi_section_reader(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> tuple[int, int]:
+    source = tmp_path / "multi-section-reader.txt"
+    second_chapter = "\n\n".join(
+        f"Reading position sentence {index} has enough content."
+        for index in range(1, 21)
+    )
+    source.write_text(
+        "Chapter 1\n"
+        "First chapter opening. First chapter continuation.\n\n"
+        "Chapter 2\n"
+        f"Second chapter opening. {second_chapter}\n\n"
+        "Chapter 3\n"
+        "Third chapter opening. Third chapter continuation.",
+        encoding="utf-8",
+    )
+    result = import_txt(db, source, title="Multi-section Book", author="Author")
+    with db.get_connection() as conn:
+        sentence_id = conn.execute(
+            """SELECT s.id
+                 FROM sentences s
+                 JOIN chapters c ON c.id = s.chapter_id
+                WHERE s.book_id = ? AND c.idx = 2
+                ORDER BY s.idx
+                LIMIT 1 OFFSET 8""",
+            (result.book_id,),
+        ).fetchone()["id"]
+    return int(result.book_id), int(sentence_id)
+
+
 def _attach_sentence_analysis(db: DatabaseConnection, sentence_id: int) -> int:
     payload = {
         "subject_skeleton": "The cat sat",
@@ -368,6 +400,89 @@ def reader_url(db: DatabaseConnection, tmp_path: Path) -> Iterator[str]:
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@pytest.fixture()
+def library_open_state(
+    db: DatabaseConnection,
+    tmp_path: Path,
+) -> Iterator[dict[str, str | int]]:
+    book_id, chapter_two_sentence_id = _seed_multi_section_reader(db, tmp_path)
+    port = _free_port()
+    server = Server(
+        Config(
+            create_app(lambda: db),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            access_log=False,
+            lifespan="off",
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    _wait_for_port(port)
+    try:
+        yield {
+            "base_url": f"http://127.0.0.1:{port}",
+            "book_id": book_id,
+            "chapter_two_sentence_id": chapter_two_sentence_id,
+        }
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_unread_multi_section_item_opens_contents_without_creating_progress(
+    browser: Browser,
+    library_open_state: dict[str, str | int],
+) -> None:
+    book_id = library_open_state["book_id"]
+    open_url = f'{library_open_state["base_url"]}/books/{book_id}/open'
+
+    for page in _new_page(browser, open_url):
+        page.wait_for_url(f"**/books/{book_id}/contents")
+        assert page.get_by_role("heading", name="Contents", exact=True).is_visible()
+        progress = page.evaluate(
+            "(key) => window.localStorage.getItem(key)",
+            f"reader:progress:book:{book_id}",
+        )
+
+    assert progress is None
+
+
+def test_library_item_open_resumes_saved_section_and_sentence(
+    browser: Browser,
+    library_open_state: dict[str, str | int],
+) -> None:
+    base_url = library_open_state["base_url"]
+    book_id = library_open_state["book_id"]
+    sentence_id = library_open_state["chapter_two_sentence_id"]
+    context = browser.new_context(bypass_csp=True)
+    page = context.new_page()
+    try:
+        page.goto(f"{base_url}/books")
+        page.evaluate(
+            """({key, value}) => window.localStorage.setItem(key, JSON.stringify(value))""",
+            {
+                "key": f"reader:progress:book:{book_id}",
+                "value": {
+                    "chapter_idx": 2,
+                    "top_sentence_id": sentence_id,
+                    "analysis_state": {"open": False},
+                },
+            },
+        )
+        page.goto(f"{base_url}/books/{book_id}/open", wait_until="commit")
+        page.wait_for_url(f"**/read/{book_id}?chapter=2&restore=1")
+        page.wait_for_timeout(100)
+
+        sentence = page.locator(f"#sentence-{sentence_id}")
+        assert sentence.is_visible()
+        top = sentence.evaluate("element => element.getBoundingClientRect().top")
+        assert 60 <= top <= 90
+    finally:
+        context.close()
 
 
 def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) -> None:

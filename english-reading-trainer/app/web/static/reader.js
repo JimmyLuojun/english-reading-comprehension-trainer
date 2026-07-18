@@ -263,6 +263,7 @@
       let translationEditorOpen = false;
       let structureEditorOpen = false;
       let progressTimer = null;
+      let progressRestoreRedirecting = false;
       let toolbarHideTimer = null;
       let translationAutoSaveTimer = null;
       let structureAutoSaveTimer = null;
@@ -2429,6 +2430,7 @@
         if (!saved) return null;
         const savedChapter = Number.parseInt(saved.chapter_idx, 10);
         if (savedChapter && savedChapter !== chapterIdx) {
+          progressRestoreRedirecting = true;
           window.location.replace(`/read/${bookId}?chapter=${savedChapter}&restore=1`);
           return null;
         }
@@ -2453,7 +2455,7 @@
       }
 
       function saveReaderProgress() {
-        if (!progressKey) return;
+        if (!progressKey || progressRestoreRedirecting) return;
         const sentenceId = topSentenceId();
         if (!sentenceId) return;
         window.localStorage.setItem(progressKey, JSON.stringify({

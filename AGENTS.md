@@ -45,11 +45,13 @@ This ensures Claude Code, Codex CLI, and Gemini CLI share the same context consi
 
 ## Project Structure
 
+- `.agents/skills/` - Canonical project skills shared directly by Codex CLI, Kimi Code CLI, and Antigravity; do not duplicate new shared workflows into tool-specific folders
+- `.agents/rules/` - Thin Antigravity project adapters; `AGENTS.md` remains the canonical project-instruction source
 - `.claude/agents/` - Custom subagents for specialized tasks
-- `.claude/skills/` - Claude Code skills (slash commands)
+- `.claude/skills/` - Legacy/tool-specific Claude Code skills (slash commands)
 - `.claude/rules/` - Modular rules auto-loaded into context
-- `.codex/skills/` - Codex CLI skills
+- `.codex/skills/` - Legacy tool-specific Codex skills; shared workflows belong in `.agents/skills/`
 - `.codex/prompts/` - Codex CLI custom slash commands
-- `.gemini/skills/` - Gemini CLI skills
+- `.gemini/skills/` - Legacy/tool-specific Gemini CLI skills
 - `.gemini/commands/` - Gemini CLI custom slash commands (TOML)
 - `.mcp.json` - MCP server configuration

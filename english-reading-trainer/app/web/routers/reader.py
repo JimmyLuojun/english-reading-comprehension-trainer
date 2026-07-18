@@ -20,6 +20,7 @@ from app.web.queries import (
     _fetch_adjacent_chapters,
 )
 from app.web.views import (
+    _has_meaningful_contents,
     _html_page,
     _reader_view,
 )
@@ -44,7 +45,8 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
                 return _stale_chapter_restore_page(book_id)
             return _error_page("Section not found", status_code=404)
         adjacent_chapters = _fetch_adjacent_chapters(db, book_id, chapter_idx)
-        total_sections = len(_fetch_chapters(db, book_id))
+        chapters = _fetch_chapters(db, book_id)
+        total_sections = len(chapters)
         sentences = _fetch_chapter_sentences(db, chapter_row["id"])
         blocks = _fetch_chapter_blocks(db, chapter_row["id"])
         word_cards = _fetch_active_word_cards(db)
@@ -68,6 +70,10 @@ def register_reader_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseCo
             restore_progress=restore_progress,
             content_kind=book.get("content_kind") or "unclassified",
             total_sections=total_sections or 1,
+            has_contents=_has_meaningful_contents(
+                chapters,
+                content_kind=book.get("content_kind") or "unclassified",
+            ),
             previous_chapter=adjacent_chapters["previous"],
             next_chapter=adjacent_chapters["next"],
         )}

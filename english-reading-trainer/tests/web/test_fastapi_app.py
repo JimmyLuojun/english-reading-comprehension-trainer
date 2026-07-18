@@ -436,7 +436,8 @@ class TestBasicPages:
 
         assert response.status_code == 200
         assert "Test Book" in response.text
-        assert "/books/1" in response.text
+        assert f'<a href="/books/{book_id}/open">Test Book</a>' in response.text
+        assert f'<a class="button small" href="/books/{book_id}">Details</a>' in response.text
         assert '<a class="active" href="/books">Library</a>' in response.text
         assert "reader:last-book-id" in response.text
         assert "?chapter=${chapter}&restore=1" in response.text
@@ -465,7 +466,13 @@ class TestBasicPages:
         )
 
         assert response.status_code == 303
-        assert response.headers["location"] == "/books?library_status=inbox"
+        assert (
+            response.headers["location"]
+            == f"/books?library_status=inbox&saved={book_id}"
+        )
+        landing = client.get(response.headers["location"])
+        assert 'class="flash"' in landing.text
+        assert "Saved Test Book." in landing.text
         with db.get_connection() as conn:
             item = conn.execute(
                 """SELECT title, author, content_kind, library_status
@@ -502,6 +509,39 @@ class TestBasicPages:
         assert 'class="chapter-row-link"' in response.text
         assert ">Read</a>" not in response.text
         assert f"/read/{book_id}?chapter=1" in response.text
+        assert "Start from beginning" in response.text
+
+    def test_open_item_resumes_saved_progress_or_uses_direct_first_open(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+
+        response = client.get(f"/books/{book_id}/open")
+
+        assert response.status_code == 200
+        assert f'const bookId = "{book_id}";' in response.text
+        assert 'const hasContents = false;' in response.text
+        assert f'const directHref = "/read/{book_id}?chapter=1";' in response.text
+        assert "reader:progress:book:${bookId}" in response.text
+        assert "?restore=1" in response.text
+
+    def test_unread_multi_section_item_opens_dedicated_contents_page(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id = _seed_three_chapter_book(db, tmp_path)
+
+        opener = client.get(f"/books/{book_id}/open")
+        contents = client.get(f"/books/{book_id}/contents")
+
+        assert opener.status_code == 200
+        assert 'const hasContents = true;' in opener.text
+        assert f"/books/{book_id}/contents" in opener.text
+        assert contents.status_code == 200
+        assert "Contents" in contents.text
+        assert "Choose where to begin" in contents.text
+        assert 'id="item-contents"' in contents.text
+        assert contents.text.count('class="chapter-row chapter-row-readable"') == 3
+        assert f"/read/{book_id}?chapter=1" in contents.text
 
     def test_library_item_metadata_can_be_edited_and_filtered(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -526,8 +566,10 @@ class TestBasicPages:
         assert response.headers["location"] == f"/books/{book_id}"
         assert "Trade Article" in detail.text
         assert 'value="article" selected' in detail.text
-        assert 'value="reading" selected' in detail.text
-        assert "Trade, Siemens" in detail.text or "Siemens, Trade" in detail.text
+        assert 'type="hidden" name="library_status"' in detail.text
+        assert 'type="hidden" name="tags"' in detail.text
+        assert 'id="item-library-status"' not in detail.text
+        assert 'id="item-tags"' not in detail.text
         assert "Trade Article" in filtered.text
         with db.get_connection() as conn:
             row = conn.execute(
@@ -571,6 +613,129 @@ class TestBasicPages:
         assert invalid.status_code == 400
         assert "Invalid content type" in invalid.text
         assert missing.status_code == 404
+
+    def test_library_tag_delete_removes_tag_and_reports_affected_items(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Test Book",
+                "author": "Author",
+                "content_kind": "book",
+                "library_status": "inbox",
+                "tags": "Trade, Logic",
+            },
+        )
+
+        page = client.get("/books")
+        with db.get_connection() as conn:
+            trade_id = int(
+                conn.execute(
+                    "SELECT id FROM tags WHERE name = 'Trade'"
+                ).fetchone()["id"]
+            )
+
+        assert "Manage tags" in page.text
+        assert f'action="/tags/{trade_id}/delete"' in page.text
+        assert "Trade" in page.text
+
+        response = client.post(f"/tags/{trade_id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert location.startswith("/books?")
+        assert "deleted_tag=Trade" in location
+        assert f"tag_items={book_id}" in location
+
+        landing = client.get(location)
+
+        assert 'class="flash"' in landing.text
+        assert "Tag Trade deleted" in landing.text
+        assert "removed from 1 item" in landing.text
+        assert f'href="/books#library-item-{book_id}"' in landing.text
+        assert f'<tr id="library-item-{book_id}"' in landing.text
+        assert "Logic" in landing.text
+        with db.get_connection() as conn:
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM book_tags WHERE tag_id = ?",
+                    (trade_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM tags WHERE id = ?", (trade_id,)
+                ).fetchone()[0]
+                == 0
+            )
+
+    def test_library_tag_delete_keeps_tag_row_used_by_word_cards(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        with db.get_connection() as conn:
+            card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, first_sentence_id, created_at, due_at)
+                   VALUES ('cat', 'cat', ?, '2026-01-01', '2026-01-02')""",
+                (sentence_ids[0],),
+            ).lastrowid
+        client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Test Book",
+                "author": "Author",
+                "content_kind": "book",
+                "library_status": "inbox",
+                "tags": "Trade",
+            },
+        )
+        with db.get_connection() as conn:
+            trade_id = int(
+                conn.execute(
+                    "SELECT id FROM tags WHERE name = 'Trade'"
+                ).fetchone()["id"]
+            )
+            conn.execute(
+                "INSERT INTO word_card_tags (card_id, tag_id) VALUES (?, ?)",
+                (card_id, trade_id),
+            )
+
+        response = client.post(f"/tags/{trade_id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        with db.get_connection() as conn:
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM book_tags WHERE tag_id = ?",
+                    (trade_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM tags WHERE id = ?", (trade_id,)
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?",
+                    (trade_id,),
+                ).fetchone()[0]
+                == 1
+            )
+
+    def test_library_tag_delete_returns_404_for_missing_tag(
+        self, client: TestClient
+    ) -> None:
+        response = client.post("/tags/999/delete")
+
+        assert response.status_code == 404
+        assert "Tag not found" in response.text
 
     def test_epub_frontmatter_does_not_become_chapter_one(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -625,9 +790,15 @@ class TestBasicPages:
 
     def test_missing_book_returns_404(self, client: TestClient) -> None:
         response = client.get("/books/999")
+        open_response = client.get("/books/999/open")
+        contents_response = client.get("/books/999/contents")
 
         assert response.status_code == 404
         assert "Library Item not found" in response.text
+        assert open_response.status_code == 404
+        assert "Library Item not found" in open_response.text
+        assert contents_response.status_code == 404
+        assert "Library Item not found" in contents_response.text
 
     def test_missing_read_book_restore_clears_stale_local_storage(
         self,

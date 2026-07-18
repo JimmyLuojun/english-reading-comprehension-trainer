@@ -6,8 +6,12 @@ from app.web.views.books import (
     _appendix_letter,
     _books_table,
     _chapters_table,
+    _has_meaningful_contents,
     _library_filters,
     _library_item_form,
+    _library_item_open_redirect,
+    _library_notice,
+    _library_tag_manager,
     _primary_read_idx,
     _section_label,
     _strip_appendix_ordinal,
@@ -37,6 +41,7 @@ def test_books_table_renders_rows_and_empty_state() -> None:
 
     assert "&lt;Book&gt;" in html
     assert 'class="library-table"' in html
+    assert '<tr id="library-item-1" class="library-item-row">' in html
     assert 'id="library-item-form-1"' in html
     assert 'name="content_kind" form="library-item-form-1"' in html
     assert 'value="article" selected' in html
@@ -49,6 +54,8 @@ def test_books_table_renders_rows_and_empty_state() -> None:
         'value="/books?content_kind=article&amp;tag=%3Cunsafe%3E"'
     ) in html
     assert ">Save</button>" in html
+    assert '<a href="/books/1/open">&lt;Book&gt;</a>' in html
+    assert '<a class="button small" href="/books/1">Details</a>' in html
     assert "/books/1/delete" in html
 
 
@@ -121,6 +128,7 @@ def test_chapters_table_makes_every_readable_section_row_clickable() -> None:
     )
 
     assert 'class="chapter-table"' in html
+    assert 'id="item-contents"' in html
     assert '<th>Chapter</th><th>Sentences</th></tr>' in html
     assert html.count('class="chapter-row chapter-row-readable"') == 2
     assert '<a class="chapter-row-link" href="/read/7?chapter=1">Chapter 1</a>' in html
@@ -153,6 +161,47 @@ def test_chapters_table_disables_sections_without_sentences() -> None:
     ) in html
     assert "/read/7?chapter=1" not in html
     assert "chapter-row-link" not in html
+
+
+def test_meaningful_contents_requires_multiple_readable_non_excerpt_sections() -> None:
+    readable = {"sentence_start": 0, "sentence_end": 2}
+    empty = {"sentence_start": 2, "sentence_end": 2}
+
+    assert not _has_meaningful_contents([readable], content_kind="book")
+    assert _has_meaningful_contents([readable, readable], content_kind="book")
+    assert not _has_meaningful_contents([readable, empty], content_kind="article")
+    assert not _has_meaningful_contents(
+        [readable, readable],
+        content_kind="excerpt",
+    )
+
+
+def test_library_item_open_redirect_resumes_or_uses_first_open_destination() -> None:
+    contents = _library_item_open_redirect(
+        7,
+        has_contents=True,
+        primary_read_idx=2,
+    )
+    direct = _library_item_open_redirect(
+        8,
+        has_contents=False,
+        primary_read_idx=3,
+    )
+    empty = _library_item_open_redirect(
+        9,
+        has_contents=False,
+        primary_read_idx=None,
+    )
+
+    assert 'window.localStorage.getItem(`reader:progress:book:${bookId}`)' in contents
+    assert "Number.parseInt(progress?.chapter_idx, 10) > 0" in contents
+    assert "`/read/${encodeURIComponent(bookId)}?restore=1`" in contents
+    assert '`/books/${encodeURIComponent(bookId)}/contents`' in contents
+    assert '<a class="button primary" href="/books/7/contents">Open item</a>' in contents
+    assert 'const hasContents = false;' in direct
+    assert 'const directHref = "/read/8?chapter=3";' in direct
+    assert '<a class="button primary" href="/read/8?chapter=3">Open item</a>' in direct
+    assert 'const directHref = "/read/9";' in empty
 
 
 def test_type_aware_section_labels_hide_artificial_headings() -> None:
@@ -207,5 +256,51 @@ def test_library_filters_and_metadata_form_escape_and_select_values() -> None:
     assert 'action="/books/4/metadata"' in form
     assert '&lt;Article &quot;One&quot;&gt;' in form
     assert 'value="article" selected' in form
-    assert 'value="reading" selected' in form
+    assert 'type="hidden" name="library_status"' in form
+    assert 'value="reading"' in form
+    assert 'type="hidden" name="tags" value="Trade, &lt;unsafe&gt;"' in form
+    assert 'id="item-library-status"' not in form
+    assert 'id="item-tags"' not in form
+    assert "Library status</label>" not in form
+    assert "Tags <span" not in form
     assert "https://example.com/?a=&lt;b&gt;" in form
+
+
+def test_library_notice_renders_save_and_tag_delete_feedback() -> None:
+    rows = [{"id": 1, "title": "<Book>"}, {"id": 2, "title": "Article"}]
+
+    assert _library_notice(rows) == ""
+    saved = _library_notice(rows, saved=1)
+    assert 'class="flash"' in saved
+    assert "Saved &lt;Book&gt;." in saved
+    deleted = _library_notice(rows, deleted_tag="Trade", tag_items="1, 2")
+    assert "Tag Trade deleted" in deleted
+    assert "removed from 2 items" in deleted
+    assert '<a href="/books#library-item-1">&lt;Book&gt;</a>' in deleted
+    assert '<a href="/books#library-item-2">Article</a>' in deleted
+    single = _library_notice(rows, deleted_tag="Solo", tag_items="2")
+    assert "removed from 1 item:" in single
+    unused = _library_notice(rows, deleted_tag="<unsafe>", tag_items="")
+    assert "Tag &lt;unsafe&gt; deleted; no items were using it." in unused
+    unknown = _library_notice([], saved=9, deleted_tag="Ghost", tag_items="7")
+    assert "Saved." in unknown
+    assert '<a href="/books#library-item-7">Item 7</a>' in unknown
+
+
+def test_library_tag_manager_renders_usage_and_delete_forms() -> None:
+    assert _library_tag_manager([]) == ""
+
+    html = _library_tag_manager(
+        [
+            {"id": 3, "name": 'Trade "hot"', "item_count": 1},
+            {"id": 4, "name": "logic", "item_count": 2},
+        ]
+    )
+
+    assert "Manage tags" in html
+    assert 'action="/tags/3/delete"' in html
+    assert 'action="/tags/4/delete"' in html
+    assert "Trade &quot;hot&quot;" in html
+    assert ">1 item</span>" in html
+    assert "2 items" in html
+    assert 'onclick="return confirm(&quot;Delete tag' in html

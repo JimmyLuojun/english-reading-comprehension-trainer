@@ -1206,7 +1206,7 @@ class TestAiSaveSentence:
         monkeypatch.setattr(sys, "stdin", InterruptingStdin())
 
         with pytest.raises(typer.Exit) as exc:
-            cli_entry.ai_save_sentence(1)
+            cli_entry.ai_save_sentence(1, input_file=None)
 
         assert exc.value.exit_code == 1
 
@@ -1244,6 +1244,48 @@ class TestAiSaveSentence:
             input=_VALID_SENTENCE_JSON,
         )
         assert result.exit_code == 0
+
+    def test_input_file_saves_without_stdin(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        response_path = tmp_path / "sentence-analysis.json"
+        response_path.write_text(_VALID_SENTENCE_JSON, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["ai", "save-sentence", str(sid), "--input-file", str(response_path)],
+        )
+
+        assert result.exit_code == 0
+        assert "Paste the JSON" not in result.output
+
+    def test_empty_input_file_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        response_path = tmp_path / "empty.json"
+        response_path.write_text("   ", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["ai", "save-sentence", str(sid), "--input-file", str(response_path)],
+        )
+
+        assert result.exit_code != 0
+        assert "No input received" in result.output
+
+    def test_missing_input_file_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+
+        result = runner.invoke(
+            app,
+            ["ai", "save-sentence", str(sid), "--input-file", str(tmp_path / "missing.json")],
+        )
+
+        assert result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------
@@ -1312,7 +1354,7 @@ class TestAiSaveWord:
         monkeypatch.setattr(sys, "stdin", InterruptingStdin())
 
         with pytest.raises(typer.Exit) as exc:
-            cli_entry.ai_save_word(1, "cat")
+            cli_entry.ai_save_word(1, "cat", input_file=None)
 
         assert exc.value.exit_code == 1
 
@@ -1362,3 +1404,67 @@ class TestAiSaveWord:
             input=_VALID_WORD_JSON,
         )
         assert result.exit_code == 0
+
+    def test_input_file_saves_without_stdin(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        response_path = tmp_path / "word-analysis.json"
+        response_path.write_text(_VALID_WORD_JSON, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "ai",
+                "save-word",
+                str(sid),
+                "cat",
+                "--input-file",
+                str(response_path),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Paste the JSON" not in result.output
+
+    def test_invalid_input_file_exits_nonzero(
+        self, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        _, sid = _seed_book_and_sentence(db, tmp_path)
+        response_path = tmp_path / "invalid.json"
+        response_path.write_text("not json", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "ai",
+                "save-word",
+                str(sid),
+                "cat",
+                "--input-file",
+                str(response_path),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Validation failed" in result.output
+
+
+@pytest.mark.parametrize("error", [OSError("unreadable"), UnicodeError("bad encoding")])
+def test_ai_input_file_read_error_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error: Exception,
+) -> None:
+    response_path = tmp_path / "analysis.json"
+    response_path.write_text("{}", encoding="utf-8")
+
+    def fail_read(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    with pytest.raises(typer.Exit) as exc:
+        cli_entry._read_ai_analysis_json(response_path)
+
+    assert exc.value.exit_code == 1

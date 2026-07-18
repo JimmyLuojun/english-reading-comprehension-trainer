@@ -75,3 +75,11 @@ def test_update_library_item_splits_tag_text(monkeypatch) -> None:
         "library_status": "reading",
         "tags": ["Trade", " Siemens"],
     }
+
+
+def test_delete_library_tag_delegates_to_query(monkeypatch) -> None:
+    monkeypatch.setattr(
+        books, "_delete_library_tag", lambda db, tag_id: ("Trade", [1, 2])
+    )
+
+    assert books.delete_library_tag(object(), 5) == ("Trade", [1, 2])

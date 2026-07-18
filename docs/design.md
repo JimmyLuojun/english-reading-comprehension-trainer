@@ -66,6 +66,7 @@
 ## 3. 功能设计
 
 - [Library Items](features/library-items.md)：已实现的统一 Library Item 产品层、兼容 schema、导入类型/来源、手工状态、item tags 和类型化阅读标题。
+- [Project-shared AI skills ADR](decisions/2026-07-18-project-shared-ai-skills.md)：Codex CLI、Kimi Code CLI 与 Antigravity 共用 `.agents/skills`，以应用 CLI prompt/save 合约为唯一工作流入口。
 - [语音与发音](features/pronunciation.md)：浏览器 TTS MVP 与未来服务端音频缓存。
 - [Cards 与 Review](features/cards-review.md)：Cards/Review 信息增强、Notes、Reveal、来源跳转和 EPUB 导入接入。
 - [删除导入材料](features/book-deletion.md)：彻底删除书籍/文章、词卡 re-anchor、review log 保留规则。

@@ -6,6 +6,7 @@ from app.db_connection import DatabaseConnection
 from app.web.models import DeleteBookResult
 from app.web.queries import (
     _delete_book,
+    _delete_library_tag,
     _fetch_book,
     _purge_book_assets_dir,
     _update_library_item,
@@ -46,3 +47,10 @@ def update_library_item(
         library_status=library_status,
         tags=tags_text.split(","),
     )
+
+
+def delete_library_tag(
+    db: DatabaseConnection, tag_id: int
+) -> tuple[str, list[int]] | None:
+    """Delete a library tag and report the items it was removed from."""
+    return _delete_library_tag(db, tag_id)
