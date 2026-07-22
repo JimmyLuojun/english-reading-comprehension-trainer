@@ -1,5 +1,5 @@
 """
-Browser-level tests for the reader selection toolbar state machine.
+Browser-level tests for Reader and Library interaction state.
 
 These tests use a local uvicorn server plus Playwright when a browser can be
 started in the current environment. Route-level toolbar assertions live in
@@ -112,6 +112,16 @@ def _seed_multi_section_reader(
     )
     result = import_txt(db, source, title="Multi-section Book", author="Author")
     with db.get_connection() as conn:
+        trade_id = conn.execute(
+            "INSERT INTO tags (name, category) VALUES ('Trade', 'library')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO tags (name, category) VALUES ('Siemens', 'library')"
+        )
+        conn.execute(
+            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+            (result.book_id, trade_id),
+        )
         sentence_id = conn.execute(
             """SELECT s.id
                  FROM sentences s
@@ -483,6 +493,59 @@ def test_library_item_open_resumes_saved_section_and_sentence(
         assert 60 <= top <= 90
     finally:
         context.close()
+
+
+def test_library_tag_picker_selects_creates_removes_and_saves_multiple_tags(
+    browser: Browser,
+    db: DatabaseConnection,
+    library_open_state: dict[str, str | int],
+) -> None:
+    base_url = library_open_state["base_url"]
+    book_id = library_open_state["book_id"]
+
+    for page in _new_page(browser, f"{base_url}/books"):
+        row = page.locator(f"#library-item-{book_id}")
+        picker = row.locator("[data-tag-picker]")
+        value = picker.locator("[data-tag-value]")
+
+        assert picker.locator(".library-tag-chip").all_inner_texts() == ["Trade"]
+        picker.locator("summary").click()
+        picker.get_by_role("checkbox", name="Siemens").check()
+        assert value.input_value() == "Trade, Siemens"
+
+        picker.get_by_role("textbox", name="New tag").fill("photolithography")
+        picker.get_by_role("button", name="Add").click()
+        assert value.input_value() == "Trade, Siemens, photolithography"
+
+        picker.get_by_role("checkbox", name="Trade").uncheck()
+        assert value.input_value() == "Siemens, photolithography"
+        assert picker.locator(".library-tag-chip").all_inner_texts() == [
+            "Siemens",
+            "photolithography",
+        ]
+
+        row.get_by_role("button", name="Save").click()
+        page.wait_for_url(f"**/books?saved={book_id}")
+        assert page.get_by_role("status").inner_text() == "Saved Multi-section Book."
+        saved_tags = set(
+            page.locator(
+                f"#library-item-{book_id} .library-tag-chip"
+            ).all_inner_texts()
+        )
+
+    assert saved_tags == {"Siemens", "photolithography"}
+    with db.get_connection() as conn:
+        stored_tags = {
+            str(row["name"])
+            for row in conn.execute(
+                """SELECT t.name
+                     FROM tags t
+                     JOIN book_tags bt ON bt.tag_id = t.id
+                    WHERE bt.book_id = ?""",
+                (book_id,),
+            ).fetchall()
+        }
+    assert stored_tags == {"Siemens", "photolithography"}
 
 
 def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) -> None:

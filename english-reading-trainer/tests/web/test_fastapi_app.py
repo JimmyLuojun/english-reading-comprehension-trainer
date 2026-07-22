@@ -446,6 +446,11 @@ class TestBasicPages:
         assert 'name="content_kind"' in response.text
         assert 'name="library_status"' in response.text
         assert 'name="tags"' in response.text
+        assert 'data-tag-picker' in response.text
+        assert '<script src="/static/library-tags.js"></script>' in response.text
+        script = client.get("/static/library-tags.js")
+        assert script.status_code == 200
+        assert "function syncPicker(picker)" in script.text
 
     def test_library_item_classification_can_be_edited_inline(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -498,6 +503,9 @@ class TestBasicPages:
             "library_status": "reading",
         }
         assert tags == {"Trade", "Siemens"}
+        page = client.get("/books")
+        assert '<input type="checkbox" value="Trade" data-tag-option checked>' in page.text
+        assert '<input type="checkbox" value="Siemens" data-tag-option checked>' in page.text
 
     def test_book_detail_lists_chapters(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

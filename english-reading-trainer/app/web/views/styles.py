@@ -1372,7 +1372,8 @@ def _css() -> str:
       min-width: 1120px;
     }
     .library-inline-select,
-    .library-inline-tags {
+    .library-tag-picker > summary,
+    .library-tag-new input {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
@@ -1384,8 +1385,93 @@ def _css() -> str:
     .library-inline-select {
       min-width: 118px;
     }
-    .library-inline-tags {
-      min-width: 150px;
+    .library-tag-cell {
+      min-width: 230px;
+      vertical-align: top;
+    }
+    .library-tag-picker {
+      min-width: 210px;
+    }
+    .library-tag-picker > summary {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .library-tag-picker > summary::-webkit-details-marker { display: none; }
+    .library-tag-picker > summary::after {
+      content: "▾";
+      flex: 0 0 auto;
+      color: var(--muted);
+      transition: transform 120ms ease;
+    }
+    .library-tag-picker[open] > summary::after { transform: rotate(180deg); }
+    .library-tag-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      min-width: 0;
+    }
+    .library-tag-chip {
+      max-width: 180px;
+      overflow: hidden;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: var(--surface-alt);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .library-tag-placeholder { color: var(--muted); }
+    .library-tag-panel {
+      min-width: 230px;
+      margin-top: 6px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+    }
+    .library-tag-panel fieldset {
+      min-width: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+    .library-tag-legend {
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .library-tag-options {
+      display: grid;
+      gap: 4px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .library-tag-option {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 2px;
+      cursor: pointer;
+    }
+    .library-tag-option input { margin: 0; }
+    .library-tag-empty { margin: 0 0 8px; }
+    .library-tag-new {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .library-tag-hint {
+      margin: 7px 0 0;
+      font-size: 11px;
     }
     .library-row-actions {
       display: flex;

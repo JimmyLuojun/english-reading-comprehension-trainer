@@ -21,11 +21,20 @@ _CHAPTER_ORDINAL_RE = re.compile(
 def _books_table(
     rows: list[dict[str, Any]],
     *,
+    available_tags: list[str] | None = None,
     return_to: str = "/books",
 ) -> str:
     if not rows:
         return '<p class="empty">No Library Items found.</p>'
-    body = "\n".join(_library_item_row(row, return_to=return_to) for row in rows)
+    tag_choices = available_tags or []
+    body = "\n".join(
+        _library_item_row(
+            row,
+            available_tags=tag_choices,
+            return_to=return_to,
+        )
+        for row in rows
+    )
     return f"""
     <div class="library-table-wrap">
     <table class="library-table">
@@ -33,10 +42,16 @@ def _books_table(
       <tbody>{body}</tbody>
     </table>
     </div>
+    <script src="/static/library-tags.js"></script>
     """
 
 
-def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
+def _library_item_row(
+    row: dict[str, Any],
+    *,
+    available_tags: list[str],
+    return_to: str,
+) -> str:
     book_id = int(row["id"])
     form_id = f"library-item-form-{book_id}"
     title = str(row["title"])
@@ -71,17 +86,18 @@ def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
         <option value="archived"{_selected('archived', library_status)}>Archived</option>
       </select>
     """
-    tags_input = (
-        f'<input name="tags" form="{form_id}" value="{_escape(tags)}" '
-        f'aria-label="Tags for {_escape(title)}" class="library-inline-tags" '
-        'placeholder="Comma-separated">'
+    tags_picker = _library_tag_picker(
+        form_id=form_id,
+        title=title,
+        tags=tags,
+        available_tags=available_tags,
     )
     return (
         f'<tr id="library-item-{book_id}" class="library-item-row">'
         f'<td><a href="/books/{book_id}/open">{_escape(title)}</a></td>'
         f"<td>{type_select}</td>"
         f"<td>{status_select}</td>"
-        f"<td>{tags_input}</td>"
+        f'<td class="library-tag-cell">{tags_picker}</td>'
         f"<td>{_escape(author)}</td>"
         f"<td>{_escape(str(row['source_format']).upper())}</td>"
         f"<td>{row['total_chapters']}</td>"
@@ -91,6 +107,72 @@ def _library_item_row(row: dict[str, Any], *, return_to: str) -> str:
         f"{_delete_book_form(book_id)}"
         "</div></td>"
         "</tr>"
+    )
+
+
+def _library_tag_picker(
+    *,
+    form_id: str,
+    title: str,
+    tags: str,
+    available_tags: list[str],
+) -> str:
+    selected_tags = _normalized_tag_names(tags.split(","))
+    choices = _normalized_tag_names([*selected_tags, *available_tags])
+    selected_keys = {tag.casefold() for tag in selected_tags}
+    options = "".join(
+        '<label class="library-tag-option">'
+        f'<input type="checkbox" value="{_escape(tag)}" data-tag-option'
+        f'{" checked" if tag.casefold() in selected_keys else ""}>'
+        f'<span>{_escape(tag)}</span></label>'
+        for tag in choices
+    )
+    empty_state = (
+        '<p class="muted library-tag-empty" data-tag-empty>No saved tags yet.</p>'
+        if not choices
+        else '<p class="muted library-tag-empty" data-tag-empty hidden>'
+        "No saved tags yet.</p>"
+    )
+    summary = _library_tag_summary(selected_tags)
+    return (
+        '<details class="library-tag-picker" data-tag-picker>'
+        f'<summary aria-label="Tags for {_escape(title)}">'
+        f'<span class="library-tag-summary" data-tag-summary>{summary}</span>'
+        "</summary>"
+        f'<input type="hidden" name="tags" form="{form_id}" '
+        f'value="{_escape(", ".join(selected_tags))}" data-tag-value>'
+        '<div class="library-tag-panel">'
+        '<fieldset><legend class="library-tag-legend">Choose tags</legend>'
+        f'<div class="library-tag-options" data-tag-options>{options}</div>'
+        f"{empty_state}</fieldset>"
+        '<div class="library-tag-new">'
+        '<input type="text" data-tag-new aria-label="New tag" '
+        'placeholder="New tag">'
+        '<button type="button" class="small" data-tag-add>Add</button>'
+        "</div>"
+        '<p class="muted library-tag-hint">Select any number, or add a new tag.</p>'
+        "</div></details>"
+    )
+
+
+def _normalized_tag_names(tags: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        tag = raw_tag.strip()
+        key = tag.casefold()
+        if not tag or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(tag)
+    return normalized
+
+
+def _library_tag_summary(tags: list[str]) -> str:
+    if not tags:
+        return '<span class="library-tag-placeholder">Select tags</span>'
+    return "".join(
+        f'<span class="library-tag-chip">{_escape(tag)}</span>' for tag in tags
     )
 
 
@@ -199,8 +281,8 @@ def _library_tag_manager(tags_usage: list[dict[str, Any]]) -> str:
         '<details class="tag-manager">'
         "<summary>Manage tags</summary>"
         f'<ul class="tag-manager-list">{entries}</ul>'
-        '<p class="muted tag-manager-hint">Add a tag by typing it into any '
-        "item's Tags field and saving that row. Deleting a tag here removes "
+        '<p class="muted tag-manager-hint">Add a tag from any item\'s tag '
+        "picker and save that row. Deleting a tag here removes "
         "it from every item.</p>"
         "</details>"
     )

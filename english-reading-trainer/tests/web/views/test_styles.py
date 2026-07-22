@@ -357,7 +357,10 @@ def test_css_ui_consistency_width_table_and_action_density_rules() -> None:
     assert ".library-filters {" in css
     assert ".library-table-wrap {" in css
     assert ".library-inline-select," in css
-    assert ".library-inline-tags {" in css
+    assert ".library-tag-picker > summary," in css
+    assert ".library-tag-options {" in css
+    assert ".library-tag-chip {" in css
+    assert ".library-tag-panel {" in css
     assert ".library-row-actions {" in css
     assert ".source-metadata {" in css
     assert ".stack-form textarea { max-width: 640px; }" in css

@@ -92,7 +92,11 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         }
         query = urlencode(filters)
         return_to = f"/books?{query}" if query else "/books"
-        body += _books_table(rows, return_to=return_to)
+        body += _books_table(
+            rows,
+            available_tags=[str(tag["name"]) for tag in tag_usage],
+            return_to=return_to,
+        )
         return _html_page("Library", body, active="library")
 
     @web_app.post("/books/{book_id}/delete")

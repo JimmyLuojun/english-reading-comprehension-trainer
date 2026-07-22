@@ -36,6 +36,7 @@ def test_books_table_renders_rows_and_empty_state() -> None:
                 "total_sentences": 3,
             }
         ],
+        available_tags=["Trade", "Siemens", "<unsafe>", "trade"],
         return_to="/books?content_kind=article&tag=%3Cunsafe%3E",
     )
 
@@ -47,7 +48,23 @@ def test_books_table_renders_rows_and_empty_state() -> None:
     assert 'value="article" selected' in html
     assert 'name="library_status" form="library-item-form-1"' in html
     assert 'value="reading" selected' in html
-    assert 'name="tags" form="library-item-form-1" value="Trade"' in html
+    assert 'class="library-tag-picker" data-tag-picker' in html
+    assert '<summary aria-label="Tags for &lt;Book&gt;">' in html
+    assert '<span class="library-tag-chip">Trade</span>' in html
+    assert (
+        'type="hidden" name="tags" form="library-item-form-1" '
+        'value="Trade" data-tag-value'
+    ) in html
+    assert (
+        '<input type="checkbox" value="Trade" data-tag-option checked>'
+        in html
+    )
+    assert '<input type="checkbox" value="Siemens" data-tag-option>' in html
+    assert '<input type="checkbox" value="&lt;unsafe&gt;" data-tag-option>' in html
+    assert html.count('value="Trade" data-tag-option') == 1
+    assert 'aria-label="New tag"' in html
+    assert 'data-tag-add>Add</button>' in html
+    assert '<script src="/static/library-tags.js"></script>' in html
     assert 'name="title" value="&lt;Book&gt;"' in html
     assert (
         'name="return_to" '
@@ -57,6 +74,25 @@ def test_books_table_renders_rows_and_empty_state() -> None:
     assert '<a href="/books/1/open">&lt;Book&gt;</a>' in html
     assert '<a class="button small" href="/books/1">Details</a>' in html
     assert "/books/1/delete" in html
+
+    empty_picker = _books_table(
+        [
+            {
+                "id": 2,
+                "title": "Untagged",
+                "author": "",
+                "source_format": "md",
+                "content_kind": "unclassified",
+                "library_status": "inbox",
+                "tags": " , ",
+                "total_chapters": 1,
+                "total_sentences": 1,
+            }
+        ]
+    )
+    assert '<span class="library-tag-placeholder">Select tags</span>' in empty_picker
+    assert "No saved tags yet." in empty_picker
+    assert 'value="" data-tag-value' in empty_picker
 
 
 def test_chapter_labels_and_primary_read_idx() -> None:

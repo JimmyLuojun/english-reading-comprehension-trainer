@@ -164,11 +164,11 @@ For restart-safe local development, follow the stable-token instructions in
 
 The web UI supports TXT/Markdown/EPUB/PDF file import, URL import for
 HTML/plain-text pages, and a unified Library for books, articles, excerpts, and
-unclassified material. Library Items have editable type/status/tags and retain
-independent source format/import provenance; the Reader uses type-aware
-Chapter/Section labels. Sentence and word marking, card lists, review actions,
-profile prompt generation, profile saving, and latest profile viewing remain
-available across every item type.
+unclassified material. Library Items have editable type/status plus a
+multi-select tag picker and retain independent source format/import provenance;
+the Reader uses type-aware Chapter/Section labels. Sentence and word marking,
+card lists, review actions, profile prompt generation, profile saving, and latest
+profile viewing remain available across every item type.
 
 ## NotebookLM Companion Workflow
 
