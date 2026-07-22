@@ -61,7 +61,7 @@ def _wait_for_port(port: int) -> None:
 def _seed_reader(db: DatabaseConnection, tmp_path: Path) -> int:
     source = tmp_path / "reader.txt"
     source.write_text(
-        "The cat sat on the mat. It was a bright cold day.\n\n"
+        "The cat sat on the mat. It was a bright cold day for the cat.\n\n"
         "The clocks struck thirteen.",
         encoding="utf-8",
     )
@@ -737,6 +737,39 @@ def test_click_marked_word_with_saved_analysis_opens_analysis_panel(
         "panelHidden": False,
         "toolbarHidden": True,
         "activeWord": True,
+    }
+
+
+def test_click_prior_analysis_repeat_opens_saved_analysis(
+    browser: Browser,
+    reader_url: str,
+    db: DatabaseConnection,
+) -> None:
+    _attach_word_analysis(db)
+
+    for page in _new_page(browser, reader_url):
+        prior = page.locator('[data-prior-analysis-card]').first
+        prior.wait_for()
+        assert prior.text_content() == "cat"
+        assert prior.get_attribute("data-word-card") is None
+        assert prior.evaluate("element => getComputedStyle(element).textDecorationStyle") == "dotted"
+        prior.click()
+        page.wait_for_function(
+            'document.getElementById("analysis-word-meaning").textContent '
+            '=== "a small domestic feline"'
+        )
+        state = page.evaluate(
+            """() => ({
+              panelHidden: document.getElementById("analysis-panel").hidden,
+              toolbarHidden: document.getElementById("selection-toolbar").hidden,
+              priorStillPresent: Boolean(document.querySelector("[data-prior-analysis-card]")),
+            })"""
+        )
+
+    assert state == {
+        "panelHidden": False,
+        "toolbarHidden": True,
+        "priorStillPresent": True,
     }
 
 

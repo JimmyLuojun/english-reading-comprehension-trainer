@@ -473,6 +473,8 @@ class TestBasicPages:
         landing = client.get(response.headers["location"])
         assert 'class="flash"' in landing.text
         assert "Saved Test Book." in landing.text
+        visible_row = client.get(f"/books?saved={book_id}")
+        assert "Saved Test Book." in visible_row.text
         with db.get_connection() as conn:
             item = conn.execute(
                 """SELECT title, author, content_kind, library_status
@@ -1393,6 +1395,60 @@ class TestReadingAndMarking:
         assert "box-decoration-break: clone" in response.text
         assert "text-decoration-thickness: 0.12em" in response.text
         assert "rgba(251, 191, 36, 0.34)" in response.text
+
+    def test_read_page_marks_analyzed_repeat_only_inside_source_book(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_text_book(
+            db,
+            tmp_path,
+            "repeat-analysis.txt",
+            title="Repeat Analysis",
+            text="Supposedly this is true. Later supposedly it changed.",
+        )
+        other_book_id, _ = _seed_text_book(
+            db,
+            tmp_path,
+            "other-repeat.txt",
+            title="Other Repeat",
+            text="Supposedly this belongs to another book.",
+        )
+        client.post(
+            "/mark/word",
+            data={
+                "sentence_id": str(sentence_ids[0]),
+                "surface_form": "Supposedly",
+                "lexical_type": "word",
+                "source_start_offset": "0",
+                "source_end_offset": "10",
+                "selected_text": "Supposedly",
+                "return_to": "/cards",
+            },
+        )
+        card_id = _word_card_id(db, "supposedly")
+        with db.get_connection() as conn:
+            cache_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json, is_valid, created_at)
+                   VALUES ('supposedly-analysis', 'word.v5', 'manual', ?, 1, ?)""",
+                (
+                    json.dumps({**_VALID_WORD_ANALYSIS, "lemma": "supposedly"}),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            ).lastrowid
+            conn.execute(
+                "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
+                (cache_id, card_id),
+            )
+
+        source_book = client.get(f"/read/{book_id}")
+        other_book = client.get(f"/read/{other_book_id}")
+
+        assert source_book.status_code == 200
+        assert source_book.text.count(f'data-word-card="{card_id}"') == 1
+        assert source_book.text.count(f'data-prior-analysis-card="{card_id}"') == 1
+        assert "Analyzed earlier in this book — click to view" in source_book.text
+        assert f'data-prior-analysis-card="{card_id}"' not in other_book.text
 
     def test_explicit_chapter_does_not_restore_saved_progress(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path

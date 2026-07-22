@@ -227,6 +227,7 @@ def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
                       CASE WHEN ac.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
                       wcs.id AS source_id,
                       wcs.sentence_id AS source_sentence_id,
+                      source_sentence.book_id AS source_book_id,
                       wcs.start_offset,
                       wcs.end_offset,
                       wcs.selected_text
@@ -235,6 +236,8 @@ def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
                    ON ac.id = wc.ai_analysis_id AND ac.is_valid = 1
                  LEFT JOIN word_card_sources wcs
                    ON wcs.card_id = wc.id
+                 LEFT JOIN sentences source_sentence
+                   ON source_sentence.id = wcs.sentence_id
                 WHERE wc.archived_at IS NULL
                 ORDER BY wc.created_at DESC, wcs.is_primary DESC, wcs.created_at ASC, wcs.id ASC"""
         ).fetchall()

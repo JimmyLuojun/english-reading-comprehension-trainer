@@ -2104,7 +2104,7 @@
           acceptNode(node) {
             if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
             const parent = node.parentElement;
-            if (parent && parent.closest(".glossary-word, [data-word-card]")) return NodeFilter.FILTER_REJECT;
+            if (parent && parent.closest(".glossary-word, .prior-analysis-word, [data-word-card]")) return NodeFilter.FILTER_REJECT;
             return NodeFilter.FILTER_ACCEPT;
           },
         });
@@ -5147,6 +5147,10 @@
           reader.querySelectorAll(`[data-word-card="${activeAnalysisWordCardId}"]`).forEach((span) => {
             span.dataset.hasAnalysis = "1";
           });
+          reader.querySelectorAll(`[data-prior-analysis-card="${activeAnalysisWordCardId}"]`).forEach((span) => {
+            span.dataset.hasAnalysis = "1";
+            span.title = "Analyzed earlier in this book — click to view";
+          });
         }
         activeAnalysisSourceSentenceId = String(payload.sentence_id || "");
         activeExternalPromptWordCardId = null;
@@ -5846,6 +5850,16 @@
           return;
         }
         const selection = window.getSelection();
+        const priorAnalysisWord = event.target.closest("[data-prior-analysis-card]");
+        if (
+          priorAnalysisWord?.dataset.hasAnalysis === "1"
+          && !selectionIntersectsElement(selection, priorAnalysisWord)
+        ) {
+          event.preventDefault();
+          if (event.detail > 1) return;
+          loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);
+          return;
+        }
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan && !selectionIntersectsElement(selection, wordSpan)) {
           event.preventDefault();
@@ -5870,6 +5884,13 @@
       reader.addEventListener("pointermove", recordReaderPointerMove);
       reader.addEventListener("mousemove", recordReaderPointerMove);
       reader.addEventListener("dblclick", (event) => {
+        const priorAnalysisWord = event.target.closest("[data-prior-analysis-card]");
+        if (priorAnalysisWord?.dataset.hasAnalysis === "1") {
+          event.preventDefault();
+          window.getSelection()?.removeAllRanges();
+          loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);
+          return;
+        }
         const wordSpan = event.target.closest("[data-word-card]");
         if (wordSpan) {
           if (showCurrentReaderWordSelection({ forceWordSelection: true })) {

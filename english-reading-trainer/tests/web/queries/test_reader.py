@@ -100,7 +100,9 @@ def test_active_word_cards_report_only_valid_saved_analysis(tmp_path: Path) -> N
     with db.get_connection() as conn:
         conn.execute("UPDATE ai_cache SET is_valid = 1 WHERE id = ?", (cache_id,))
 
-    assert _fetch_active_word_cards(db)[0]["has_analysis"] == 1
+    active_card = _fetch_active_word_cards(db)[0]
+    assert active_card["has_analysis"] == 1
+    assert active_card["source_book_id"] == book.book_id
 
 
 def test_reader_query_preserves_archived_translation_without_active_card(

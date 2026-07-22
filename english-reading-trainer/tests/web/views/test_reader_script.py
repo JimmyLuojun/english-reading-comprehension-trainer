@@ -276,10 +276,39 @@ def test_analysis_glossary_highlights_nested_word_sections() -> None:
     render_vs_simpler = render_vs_simpler[: render_vs_simpler.index("function renderWordAnalysis")]
 
     assert "document.createTreeWalker(element, NodeFilter.SHOW_TEXT" in apply_highlights
-    assert 'parent.closest(".glossary-word, [data-word-card]")' in apply_highlights
+    assert (
+        'parent.closest(".glossary-word, .prior-analysis-word, [data-word-card]")'
+        in apply_highlights
+    )
     assert "textNode.replaceWith(fragment);" in apply_highlights
     assert "wordVsSimpler" in refresh_highlights
     assert "applyGlossaryHighlights(container);" in render_vs_simpler
+
+
+def test_prior_analysis_word_click_loads_saved_analysis_without_card_actions() -> None:
+    script = _selection_script()
+    click_handler = script[script.index('reader.addEventListener("click"'):]
+    click_handler = click_handler[: click_handler.index('reader.addEventListener("pointerdown"')]
+    double_click = script[script.index('reader.addEventListener("dblclick"'):]
+    double_click = double_click[: double_click.index('document.addEventListener("keydown"')]
+
+    assert 'event.target.closest("[data-prior-analysis-card]")' in click_handler
+    assert "loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);" in click_handler
+    assert 'priorAnalysisWord?.dataset.hasAnalysis === "1"' in click_handler
+    assert 'event.target.closest("[data-prior-analysis-card]")' in double_click
+    assert "loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);" in double_click
+    assert 'priorAnalysisWord?.dataset.hasAnalysis === "1"' in double_click
+    assert "deleteWordCardsAndReload" not in click_handler
+
+
+def test_completed_word_analysis_activates_dormant_repeat_markers() -> None:
+    script = _selection_script()
+    render = script[script.index("function renderWordAnalysis(payload"):]
+    render = render[: render.index("async function saveAnalysisMeaningIfEmpty")]
+
+    assert 'reader.querySelectorAll(`[data-prior-analysis-card="${activeAnalysisWordCardId}"]`)' in render
+    assert 'span.dataset.hasAnalysis = "1";' in render
+    assert 'span.title = "Analyzed earlier in this book — click to view";' in render
 
 
 def test_source_word_card_param_loads_saved_word_analysis() -> None:
@@ -1518,7 +1547,10 @@ def test_reader_script_propagates_lexical_type_and_refreshes_body_highlights() -
     assert "function uniqueOffsetsInSentence(sentence, selectedText)" in offset_helpers
     assert 'body.set("source_start_offset", String(offsets.start));' in offset_helpers
     assert "span.dataset.lexicalType = entry.card.lexical_type || \"\";" in glossary
-    assert 'parent.closest(".glossary-word, [data-word-card]")' in apply_highlights
+    assert (
+        'parent.closest(".glossary-word, .prior-analysis-word, [data-word-card]")'
+        in apply_highlights
+    )
     assert "function applyWordCardToSource(source, card)" in script
     assert "applyWordCardToSource(payload.source, payload.word_card);" in mark_analysis
 

@@ -32,11 +32,13 @@ def _reader_view(
     blocks: list[dict[str, Any]] | None = None,
 ) -> str:
     cards_by_sentence = _word_cards_by_sentence(word_cards)
+    book_word_cards = _book_word_cards_with_terms(word_cards, book_id)
     content = _reader_content_blocks(
         rows=rows,
         blocks=blocks or [],
         chapter_id=chapter_id,
         cards_by_sentence=cards_by_sentence,
+        prior_analysis_cards=book_word_cards,
         book_id=book_id,
     )
     restore_flag = "1" if restore_progress else "0"
@@ -105,14 +107,22 @@ def _reader_content_blocks(
     blocks: list[dict[str, Any]],
     chapter_id: int,
     cards_by_sentence: dict[int, list[dict[str, Any]]],
+    prior_analysis_cards: list[dict[str, Any]] | None = None,
     book_id: int,
 ) -> str:
+    prior_analysis_cards = prior_analysis_cards or []
     if not blocks:
         paragraphs = _group_sentence_paragraphs(rows)
         if not paragraphs:
             return '<p class="empty">No sentences in this chapter.</p>'
         return "\n".join(
-            _reader_paragraph(paragraph_rows, chapter_id, cards_by_sentence, book_id)
+            _reader_paragraph(
+                paragraph_rows,
+                chapter_id,
+                cards_by_sentence,
+                book_id,
+                prior_analysis_cards,
+            )
             for paragraph_rows in paragraphs
         )
 
@@ -154,6 +164,7 @@ def _reader_content_blocks(
                             chapter_id,
                             cards_by_sentence,
                             book_id,
+                            prior_analysis_cards,
                         )
                     )
                 else:
@@ -164,6 +175,7 @@ def _reader_content_blocks(
                             chapter_id,
                             cards_by_sentence,
                             book_id,
+                            prior_analysis_cards,
                         )
                     )
             continue
@@ -233,6 +245,7 @@ def _reader_paragraph(
     chapter_id: int,
     cards_by_sentence: dict[int, list[dict[str, Any]]],
     book_id: int,
+    prior_analysis_cards: list[dict[str, Any]] | None = None,
 ) -> str:
     paragraph_id = rows[0]["paragraph_id"] if rows else ""
     analysis_attrs = _paragraph_analysis_attrs(rows[0] if rows else {})
@@ -242,6 +255,7 @@ def _reader_paragraph(
             chapter_id,
             cards_by_sentence.get(row["id"], []),
             book_id,
+            prior_analysis_cards,
         )
         for row in rows
     )
@@ -276,6 +290,7 @@ def _reader_list_item(
     chapter_id: int,
     cards_by_sentence: dict[int, list[dict[str, Any]]],
     book_id: int,
+    prior_analysis_cards: list[dict[str, Any]] | None = None,
 ) -> str:
     sentence_spans = " ".join(
         _reader_sentence_span(
@@ -283,6 +298,7 @@ def _reader_list_item(
             chapter_id,
             cards_by_sentence.get(row["id"], []),
             book_id,
+            prior_analysis_cards,
         )
         for row in rows
     )
@@ -340,11 +356,41 @@ def _word_cards_by_sentence(
         grouped.setdefault(int(sentence_id), []).append(card)
     return grouped
 
+
+def _book_word_cards_with_terms(
+    word_cards: list[dict[str, Any]],
+    book_id: int,
+) -> list[dict[str, Any]]:
+    """Return cards sourced from this book with exact terms for repeat detection."""
+    cards_by_id: dict[int, dict[str, Any]] = {}
+    terms_by_id: dict[int, dict[str, str]] = {}
+    for card in word_cards:
+        if card.get("source_book_id") != book_id:
+            continue
+        card_id = int(card["id"])
+        cards_by_id.setdefault(card_id, card.copy())
+        terms = terms_by_id.setdefault(card_id, {})
+        for key in ("selected_text", "surface_form"):
+            term = str(card.get(key) or "").strip()
+            if term:
+                terms.setdefault(term.casefold(), term)
+
+    result: list[dict[str, Any]] = []
+    for card_id, card in cards_by_id.items():
+        card["prior_terms"] = sorted(
+            terms_by_id[card_id].values(),
+            key=lambda term: (-len(term), term.casefold()),
+        )
+        if card["prior_terms"]:
+            result.append(card)
+    return result
+
 def _reader_sentence_span(
     row: dict[str, Any],
     chapter_id: int,
     word_cards: list[dict[str, Any]],
     book_id: int,
+    prior_analysis_cards: list[dict[str, Any]] | None = None,
 ) -> str:
     marked = "1" if row["has_card"] else "0"
     classes = ["reader-sentence"]
@@ -355,7 +401,12 @@ def _reader_sentence_span(
     if row.get("has_analysis"):
         classes.append("analyzed-stale" if row.get("analysis_is_stale") else "analyzed")
     analysis_id = row.get("ai_analysis_id") if row.get("has_analysis") else ""
-    text = _highlight_word_cards(row["text"], word_cards, book_id)
+    text = _highlight_word_cards(
+        row["text"],
+        word_cards,
+        book_id,
+        prior_analysis_cards=prior_analysis_cards,
+    )
     title_attr = ' title="Translation saved"' if "translated" in classes else ""
     return (
         f'<span id="sentence-{row["id"]}" class="{" ".join(classes)}"{title_attr} '
@@ -373,8 +424,11 @@ def _highlight_word_cards(
     text: str,
     word_cards: list[dict[str, Any]],
     book_id: int,
+    *,
+    prior_analysis_cards: list[dict[str, Any]] | None = None,
 ) -> str:
-    if not word_cards:
+    prior_analysis_cards = prior_analysis_cards or []
+    if not word_cards and not prior_analysis_cards:
         return _render_inline_markdown_images(_escape(text), book_id)
 
     matches: list[tuple[int, int, dict[str, Any]]] = []
@@ -384,7 +438,7 @@ def _highlight_word_cards(
             continue
         matches.append((*source_range, card))
 
-    selected: list[tuple[int, int, dict[str, Any]]] = []
+    selected: list[tuple[int, int, dict[str, Any], bool]] = []
     occupied_until = -1
     for start, end, card in sorted(
         matches,
@@ -392,16 +446,47 @@ def _highlight_word_cards(
     ):
         if start < occupied_until:
             continue
-        selected.append((start, end, card))
+        selected.append((start, end, card, False))
         occupied_until = end
+
+    prior_matches: list[tuple[int, int, dict[str, Any]]] = []
+    for card in prior_analysis_cards:
+        for term in card.get("prior_terms", []):
+            prior_matches.extend(
+                (match.start(1), match.end(1), card)
+                for match in _reader_term_matches(text, term)
+            )
+
+    occupied_ranges = [(start, end) for start, end, _, _ in selected]
+    for start, end, card in sorted(
+        prior_matches,
+        key=lambda item: (item[0], -(item[1] - item[0])),
+    ):
+        if any(start < used_end and end > used_start for used_start, used_end in occupied_ranges):
+            continue
+        selected.append((start, end, card, True))
+        occupied_ranges.append((start, end))
 
     if not selected:
         return _render_inline_markdown_images(_escape(text), book_id)
 
     pieces: list[str] = []
     cursor = 0
-    for start, end, card in selected:
+    for start, end, card, is_prior in sorted(selected, key=lambda item: item[0]):
         pieces.append(_escape(text[cursor:start]))
+        if is_prior:
+            label = "Analyzed earlier in this book — click to view"
+            has_analysis = "1" if card.get("has_analysis") else "0"
+            title = f' title="{label}"' if card.get("has_analysis") else ""
+            pieces.append(
+                f'<span class="prior-analysis-word"'
+                f' data-prior-analysis-card="{card["id"]}"'
+                f' data-lexical-type="{_escape(str(card.get("lexical_type") or ""))}"'
+                f' data-has-analysis="{has_analysis}"{title}'
+                f'>{_escape(text[start:end])}</span>'
+            )
+            cursor = end
+            continue
         meaning = _escape(str(card.get("current_meaning") or ""))
         note = _escape(str(card.get("user_note") or ""))
         lexical_type = _escape(str(card.get("lexical_type") or ""))
@@ -457,15 +542,19 @@ def _word_card_candidate_terms(card: dict[str, Any]) -> list[str]:
 
 
 def _unique_reader_term_match(text: str, term: str) -> re.Match[str] | None:
+    matches = _reader_term_matches(text, term)
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _reader_term_matches(text: str, term: str) -> list[re.Match[str]]:
     escaped = re.escape(term).replace(r"\ ", r"\s+")
     pattern = re.compile(
         rf"(?<![{_WORD_BOUNDARY_CHARS}])({escaped})(?![{_WORD_BOUNDARY_CHARS}])",
         re.IGNORECASE,
     )
-    matches = list(pattern.finditer(text))
-    if len(matches) != 1:
-        return None
-    return matches[0]
+    return list(pattern.finditer(text))
 
 
 def _render_inline_markdown_images(html: str, book_id: int) -> str:

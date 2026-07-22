@@ -488,6 +488,43 @@ def _css() -> str:
       background: linear-gradient(transparent 42%, rgba(249, 115, 22, 0.44) 42%);
       text-decoration-color: #9a3412;
     }
+    .prior-analysis-word[data-has-analysis="1"] {
+      cursor: pointer;
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-color: rgba(217, 119, 6, 0.82);
+      text-decoration-thickness: 0.1em;
+      text-underline-offset: 0.2em;
+      transition: background-color 120ms ease, text-decoration-color 120ms ease;
+    }
+    .prior-analysis-word[data-has-analysis="1"]:hover {
+      border-radius: 3px;
+      background: rgba(251, 191, 36, 0.18);
+      text-decoration-color: #b45309;
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="word"] {
+      text-decoration-color: rgba(5, 150, 105, 0.86);
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="word"]:hover {
+      background: rgba(16, 185, 129, 0.14);
+      text-decoration-color: #047857;
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="phrase"] {
+      text-decoration-color: rgba(126, 34, 206, 0.82);
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="phrase"]:hover {
+      background: rgba(168, 85, 247, 0.12);
+      text-decoration-color: #6b21a8;
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="collocation"],
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="idiom"] {
+      text-decoration-color: rgba(194, 65, 12, 0.84);
+    }
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="collocation"]:hover,
+    .prior-analysis-word[data-has-analysis="1"][data-lexical-type="idiom"]:hover {
+      background: rgba(249, 115, 22, 0.13);
+      text-decoration-color: #9a3412;
+    }
     .selection-toolbar,
     .paragraph-toolbar {
       position: absolute;

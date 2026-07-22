@@ -289,6 +289,19 @@ def test_css_word_card_lexical_type_colors_keep_sentence_state_subtle() -> None:
     assert '.glossary-word[data-lexical-type="phrase"]' in css
     assert '.glossary-word[data-lexical-type="collocation"]' in css
     assert '.glossary-word[data-lexical-type="idiom"]' in css
+    prior = _css_block(
+        css,
+        '.prior-analysis-word[data-has-analysis="1"] {',
+        '.prior-analysis-word[data-has-analysis="1"]:hover {',
+    )
+    assert "text-decoration-style: dotted;" in prior
+    assert "text-decoration-thickness: 0.1em;" in prior
+    assert '.prior-analysis-word[data-has-analysis="1"][data-lexical-type="word"]' in css
+    assert '.prior-analysis-word[data-has-analysis="1"][data-lexical-type="phrase"]' in css
+    assert (
+        '.prior-analysis-word[data-has-analysis="1"][data-lexical-type="collocation"]'
+        in css
+    )
 
 
 def test_css_visual_refresh_followups_fill_primary_after_shared_hover() -> None:

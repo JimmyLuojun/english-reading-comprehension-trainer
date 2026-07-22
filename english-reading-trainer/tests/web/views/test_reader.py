@@ -7,6 +7,7 @@ from app.web.views.reader import (
     _group_sentence_paragraphs,
     _highlight_word_cards,
     _paragraph_toolbar,
+    _book_word_cards_with_terms,
     _reader_content_blocks,
     _reader_boundary_link,
     _reader_media_block,
@@ -70,6 +71,123 @@ def test_highlight_word_cards_uses_exact_source_offsets() -> None:
     assert 'data-source-start="17"' in html
     assert 'data-has-analysis="1"' in html
     assert ">long</span>" in html
+
+
+def test_book_word_cards_are_deduplicated_and_book_scoped() -> None:
+    cards = [
+        {
+            "id": 7,
+            "surface_form": "Supposedly",
+            "selected_text": "supposedly",
+            "source_book_id": 3,
+            "has_analysis": 1,
+        },
+        {
+            "id": 7,
+            "surface_form": "Supposedly",
+            "selected_text": "SUPPOSEDLY",
+            "source_book_id": 3,
+            "has_analysis": 1,
+        },
+        {
+            "id": 8,
+            "surface_form": "elsewhere",
+            "source_book_id": 4,
+            "has_analysis": 1,
+        },
+        {
+            "id": 9,
+            "surface_form": "saved only",
+            "source_book_id": 3,
+            "has_analysis": 0,
+        },
+    ]
+
+    result = _book_word_cards_with_terms(cards, 3)
+
+    assert [card["id"] for card in result] == [7, 9]
+    assert result[0]["prior_terms"] == ["supposedly"]
+
+
+def test_highlight_word_cards_marks_unrecorded_repeat_as_prior_analysis() -> None:
+    card = {
+        "id": 7,
+        "source_id": 17,
+        "start_offset": 0,
+        "end_offset": 10,
+        "surface_form": "Supposedly",
+        "lexical_type": "word",
+        "has_analysis": 1,
+        "current_meaning": "according to what is believed",
+        "user_note": "",
+    }
+    html = _highlight_word_cards(
+        "Supposedly true, and supposedly false.",
+        [card],
+        3,
+        prior_analysis_cards=[{**card, "prior_terms": ["Supposedly"]}],
+    )
+
+    assert html.count('data-word-card="7"') == 1
+    assert html.count('data-prior-analysis-card="7"') == 1
+    assert 'class="prior-analysis-word"' in html
+    assert 'data-has-analysis="1"' in html
+    assert 'title="Analyzed earlier in this book — click to view"' in html
+    assert ">supposedly</span> false" in html
+
+
+def test_prior_analysis_matching_uses_whole_terms_and_longest_match() -> None:
+    html = _highlight_word_cards(
+        "A runaway can run the gauntlet, then run.",
+        [],
+        3,
+        prior_analysis_cards=[
+            {
+                "id": 1,
+                "prior_terms": ["run"],
+                "lexical_type": "word",
+            },
+            {
+                "id": 2,
+                "prior_terms": ["run the gauntlet"],
+                "lexical_type": "collocation",
+            },
+        ],
+    )
+
+    assert "runaway" in html
+    assert 'data-prior-analysis-card="2"' in html
+    assert ">run the gauntlet</span>" in html
+    assert html.count('data-prior-analysis-card="1"') == 1
+
+
+def test_unanalyzed_repeat_is_dormant_until_analysis_finishes() -> None:
+    html = _highlight_word_cards(
+        "The cat watched another cat.",
+        [
+            {
+                "id": 7,
+                "start_offset": 4,
+                "end_offset": 7,
+                "surface_form": "cat",
+                "lexical_type": "word",
+                "has_analysis": 0,
+            }
+        ],
+        3,
+        prior_analysis_cards=[
+            {
+                "id": 7,
+                "prior_terms": ["cat"],
+                "lexical_type": "word",
+                "has_analysis": 0,
+            }
+        ],
+    )
+
+    assert 'data-prior-analysis-card="7"' in html
+    assert 'data-has-analysis="0"' in html
+    assert "Analyzed earlier in this book" not in html
 
 
 def test_highlight_word_cards_infers_unique_source_without_offsets() -> None:
