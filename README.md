@@ -169,6 +169,10 @@ multi-select tag picker and retain independent source format/import provenance;
 the Reader uses type-aware Chapter/Section labels. Sentence and word marking,
 card lists, review actions, profile prompt generation, profile saving, and latest
 profile viewing remain available across every item type.
+Imported Markdown also keeps reader-friendly headings, quote bars (including
+nested quotes), ordered/unordered lists, and task-list state while its prose
+remains fully selectable for translation, structure practice, cards, and AI
+analysis.
 
 ## NotebookLM Companion Workflow
 

@@ -3577,6 +3577,37 @@ class TestImportRoutes:
         assert row["title"] == "Logic Rules Summary"
         assert row["source_format"] == "md"
 
+    def test_imported_markdown_structure_keeps_reader_practice_spans(
+        self, client: TestClient
+    ) -> None:
+        md_bytes = (
+            b"# Practice Notes\n\n"
+            b"**You:**\n\n"
+            b"> Read this quoted sentence closely.\n\n"
+            b"- [x] Identify the main clause.\n"
+            b"- [ ] Translate the modifier."
+        )
+
+        imported = client.post(
+            "/import/file",
+            files={"file": ("practice.md", md_bytes, "text/markdown")},
+            data={"title": "Structured practice", "author": ""},
+            follow_redirects=False,
+        )
+        reader = client.get(imported.headers["location"])
+
+        assert reader.status_code == 200
+        assert '<blockquote class="reader-md-blockquote">' in reader.text
+        assert reader.text.count(
+            '<li class="reader-md-list-item reader-md-task-item'
+        ) == 2
+        assert "is-checked" in reader.text
+        assert "is-unchecked" in reader.text
+        assert 'class="reader-para reader-md-strong-block"' in reader.text
+        assert reader.text.count('class="reader-sentence"') == 4
+        assert "Write translation" in reader.text
+        assert "Write structure" in reader.text
+
     def test_import_markdown_file_duplicate_returns_409(
         self, client: TestClient, db: DatabaseConnection
     ) -> None:

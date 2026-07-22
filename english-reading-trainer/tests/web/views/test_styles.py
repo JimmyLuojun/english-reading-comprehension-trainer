@@ -43,6 +43,15 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert ".reader-md-heading" in css
     assert ".reader-md-list" in css
     assert ".reader-md-list-item" in css
+    assert ".reader-md-blockquote" in css
+    assert ".reader-md-task-item" in css
+    assert ".reader-md-task-item.is-checked::before" in css
+    assert 'content: "✓";' in css
+    assert ".reader-md-strong-block" in css
+    assert ".reader-md-emphasis-block" in css
+    assert "border-left: 4px solid var(--accent-line);" in css
+    assert "background: linear-gradient(90deg, var(--accent-soft), transparent 72%);" in css
+    assert "border-bottom: 1px solid var(--line);" in css
     assert ".reader-sentence.editing-target" in css
     assert "background: rgba(96, 165, 250, 0.16)" in css
     assert "box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.10)" in css

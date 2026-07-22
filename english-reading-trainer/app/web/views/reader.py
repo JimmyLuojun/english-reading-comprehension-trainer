@@ -134,19 +134,22 @@ def _reader_content_blocks(
     parts: list[str] = []
     pending_list_items: list[str] = []
     pending_list_ordered: bool | None = None
+    pending_list_quote_depth = 0
 
     def flush_list() -> None:
-        nonlocal pending_list_items, pending_list_ordered
+        nonlocal pending_list_items, pending_list_ordered, pending_list_quote_depth
         if not pending_list_items:
             return
         tag = "ol" if pending_list_ordered else "ul"
-        parts.append(
+        list_html = (
             f'<{tag} class="reader-md-list">'
             + "".join(pending_list_items)
             + f"</{tag}>"
         )
+        parts.append(_reader_markdown_quote(list_html, pending_list_quote_depth))
         pending_list_items = []
         pending_list_ordered = None
+        pending_list_quote_depth = 0
 
     for block in blocks:
         paragraph_id = block.get("paragraph_id")
@@ -155,9 +158,14 @@ def _reader_content_blocks(
             if paragraph_rows:
                 if block.get("kind") == "list_item":
                     ordered = _block_payload_bool(block, "ordered")
-                    if pending_list_items and pending_list_ordered != ordered:
+                    quote_depth = _block_payload_int(block, "quote_depth")
+                    if pending_list_items and (
+                        pending_list_ordered != ordered
+                        or pending_list_quote_depth != quote_depth
+                    ):
                         flush_list()
                     pending_list_ordered = ordered
+                    pending_list_quote_depth = quote_depth
                     pending_list_items.append(
                         _reader_list_item(
                             paragraph_rows,
@@ -165,17 +173,25 @@ def _reader_content_blocks(
                             cards_by_sentence,
                             book_id,
                             prior_analysis_cards,
+                            is_task=_block_payload_bool(block, "task"),
+                            is_checked=_block_payload_bool(block, "checked"),
+                            markdown_style=_block_payload_str(block, "block_style"),
                         )
                     )
                 else:
                     flush_list()
+                    paragraph_html = _reader_paragraph(
+                        paragraph_rows,
+                        chapter_id,
+                        cards_by_sentence,
+                        book_id,
+                        prior_analysis_cards,
+                        markdown_style=_block_payload_str(block, "block_style"),
+                    )
                     parts.append(
-                        _reader_paragraph(
-                            paragraph_rows,
-                            chapter_id,
-                            cards_by_sentence,
-                            book_id,
-                            prior_analysis_cards,
+                        _reader_markdown_quote(
+                            paragraph_html,
+                            _block_payload_int(block, "quote_depth"),
                         )
                     )
             continue
@@ -189,12 +205,31 @@ def _reader_content_blocks(
     return "\n".join(parts) if parts else '<p class="empty">No sentences in this chapter.</p>'
 
 
-def _block_payload_bool(block: dict[str, Any], key: str) -> bool:
+def _block_payload(block: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = json.loads(str(block.get("payload_json") or "{}"))
-    except json.JSONDecodeError:
-        return False
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _block_payload_bool(block: dict[str, Any], key: str) -> bool:
+    payload = _block_payload(block)
     return bool(payload.get(key))
+
+
+def _block_payload_int(block: dict[str, Any], key: str) -> int:
+    payload = _block_payload(block)
+    try:
+        value = int(payload.get(key, 0))
+    except (TypeError, ValueError):
+        return 0
+    return min(max(value, 0), 6)
+
+
+def _block_payload_str(block: dict[str, Any], key: str) -> str:
+    value = _block_payload(block).get(key)
+    return str(value) if isinstance(value, str) else ""
 
 def _reader_boundary_link(
     book_id: int,
@@ -246,6 +281,8 @@ def _reader_paragraph(
     cards_by_sentence: dict[int, list[dict[str, Any]]],
     book_id: int,
     prior_analysis_cards: list[dict[str, Any]] | None = None,
+    *,
+    markdown_style: str = "",
 ) -> str:
     paragraph_id = rows[0]["paragraph_id"] if rows else ""
     analysis_attrs = _paragraph_analysis_attrs(rows[0] if rows else {})
@@ -259,8 +296,11 @@ def _reader_paragraph(
         )
         for row in rows
     )
+    class_name = analysis_attrs["class_name"]
+    if markdown_style in {"strong", "emphasis"}:
+        class_name += f" reader-md-{markdown_style}-block"
     return (
-        f'<p class="{analysis_attrs["class_name"]}" data-paragraph-id="{paragraph_id}"'
+        f'<p class="{class_name}" data-paragraph-id="{paragraph_id}"'
         f'{analysis_attrs["attrs"]}>{sentence_spans}</p>'
     )
 
@@ -291,6 +331,10 @@ def _reader_list_item(
     cards_by_sentence: dict[int, list[dict[str, Any]]],
     book_id: int,
     prior_analysis_cards: list[dict[str, Any]] | None = None,
+    *,
+    is_task: bool = False,
+    is_checked: bool = False,
+    markdown_style: str = "",
 ) -> str:
     sentence_spans = " ".join(
         _reader_sentence_span(
@@ -302,14 +346,23 @@ def _reader_list_item(
         )
         for row in rows
     )
-    return f'<li class="reader-md-list-item">{sentence_spans}</li>'
+    classes = ["reader-md-list-item"]
+    if is_task:
+        classes.append("reader-md-task-item")
+        classes.append("is-checked" if is_checked else "is-unchecked")
+    if markdown_style in {"strong", "emphasis"}:
+        classes.append(f"reader-md-{markdown_style}-block")
+    return f'<li class="{" ".join(classes)}">{sentence_spans}</li>'
+
+
+def _reader_markdown_quote(html: str, depth: int) -> str:
+    for _ in range(min(max(depth, 0), 6)):
+        html = f'<blockquote class="reader-md-blockquote">{html}</blockquote>'
+    return html
 
 
 def _reader_markdown_heading(block: dict[str, Any], book_id: int) -> str:
-    try:
-        payload = json.loads(str(block.get("payload_json") or "{}"))
-    except json.JSONDecodeError:
-        payload = {}
+    payload = _block_payload(block)
     source_level = int(payload.get("level") or 2)
     heading_level = min(max(source_level + 2, 3), 6)
     text = _render_inline_markdown_images(_escape(str(block.get("text") or "")), book_id)

@@ -329,17 +329,21 @@ def _css() -> str:
         0 0 0 3px rgba(15, 143, 131, 0.12);
     }
     .reader-md-heading {
-      margin: 1.65em 0 0.65em;
+      margin: 1.8em 0 0.72em;
       color: var(--text-dim);
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
       font-weight: 700;
       line-height: 1.25;
+      text-wrap: balance;
     }
     .reader-md-heading-level-1 {
       font-size: 30px;
+      padding-bottom: 0.42em;
+      border-bottom: 1px solid var(--line);
     }
     .reader-md-heading-level-2 {
       font-size: 25px;
+      color: var(--text);
     }
     .reader-md-heading-level-3,
     .reader-md-heading-level-4,
@@ -348,8 +352,8 @@ def _css() -> str:
       font-size: 22px;
     }
     .reader-md-list {
-      margin: 0 0 1.2em 1.6em;
-      padding: 0;
+      margin: 0.3em 0 1.35em 1.7em;
+      padding: 0 0 0 0.2em;
       color: var(--text);
       font-family: Georgia, "Source Han Serif SC", "Songti SC", serif;
       font-size: 20px;
@@ -359,6 +363,62 @@ def _css() -> str:
       margin: 0.28em 0;
       padding-left: 0.25em;
       overflow-wrap: anywhere;
+    }
+    .reader-md-list-item::marker {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .reader-md-strong-block {
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+    .reader-md-emphasis-block {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    .reader-md-task-item {
+      position: relative;
+      list-style: none;
+      padding-left: 0.35em;
+    }
+    .reader-md-task-item::before {
+      display: flex;
+      position: absolute;
+      top: 0.55em;
+      left: -1.48em;
+      align-items: center;
+      justify-content: center;
+      width: 0.82em;
+      height: 0.82em;
+      border: 1.5px solid var(--accent-line);
+      border-radius: 3px;
+      background: var(--surface);
+      content: "";
+    }
+    .reader-md-task-item.is-checked::before {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+      content: "✓";
+      font: 700 0.62em/1 sans-serif;
+    }
+    .reader-md-blockquote {
+      margin: 0.9em 0 1.35em;
+      padding: 0.72em 1.05em;
+      border: 0;
+      border-left: 4px solid var(--accent-line);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: linear-gradient(90deg, var(--accent-soft), transparent 72%);
+      color: var(--text-dim);
+    }
+    .reader-md-blockquote .reader-para,
+    .reader-md-blockquote .reader-md-list {
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+    .reader-md-blockquote .reader-md-blockquote {
+      margin: 0.5em 0 0;
+      background: color-mix(in srgb, var(--surface) 62%, transparent);
     }
     .reader-figure {
       margin: 28px 0;

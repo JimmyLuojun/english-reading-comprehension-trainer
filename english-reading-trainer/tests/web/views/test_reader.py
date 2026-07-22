@@ -729,6 +729,138 @@ def test_reader_content_blocks_flushes_when_list_mode_changes() -> None:
     assert '<ul class="reader-md-list">' in html
 
 
+def test_reader_content_blocks_render_quotes_nested_quotes_and_tasks() -> None:
+    rows = [
+        {
+            "id": index,
+            "idx": index - 1,
+            "text": text,
+            "paragraph_id": 20 + index,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        }
+        for index, text in enumerate(
+            ("Quoted sentence.", "Nested sentence.", "Practice task."),
+            start=1,
+        )
+    ]
+    blocks = [
+        {"kind": "prose", "paragraph_id": 21, "payload_json": '{"quote_depth": 1}'},
+        {"kind": "prose", "paragraph_id": 22, "payload_json": '{"quote_depth": 2}'},
+        {
+            "kind": "list_item",
+            "paragraph_id": 23,
+            "payload_json": (
+                '{"ordered": false, "quote_depth": 1, '
+                '"task": true, "checked": true}'
+            ),
+        },
+    ]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert html.count('<blockquote class="reader-md-blockquote">') == 4
+    assert '<p class="reader-para" data-paragraph-id="21">' in html
+    assert '<p class="reader-para" data-paragraph-id="22">' in html
+    assert (
+        '<li class="reader-md-list-item reader-md-task-item is-checked">' in html
+    )
+    assert '<ul class="reader-md-list">' in html
+    assert html.count('class="reader-sentence"') == 3
+
+
+def test_reader_content_blocks_flushes_lists_when_quote_depth_changes() -> None:
+    rows = [
+        {
+            "id": index,
+            "idx": index - 1,
+            "text": f"Item {index}.",
+            "paragraph_id": 30 + index,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        }
+        for index in (1, 2)
+    ]
+    blocks = [
+        {
+            "kind": "list_item",
+            "paragraph_id": 31,
+            "payload_json": '{"ordered": false, "quote_depth": 1}',
+        },
+        {"kind": "list_item", "paragraph_id": 32, "payload_json": '{"ordered": false}'},
+    ]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert html.count('<ul class="reader-md-list">') == 2
+    assert html.count('<blockquote class="reader-md-blockquote">') == 1
+
+
+def test_reader_content_blocks_render_safe_whole_block_emphasis() -> None:
+    rows = [
+        {
+            "id": index,
+            "idx": index - 1,
+            "text": text,
+            "paragraph_id": 40 + index,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        }
+        for index, text in enumerate(("You:", "Read carefully.", "Plain."), start=1)
+    ]
+    blocks = [
+        {
+            "kind": "prose",
+            "paragraph_id": 41,
+            "payload_json": '{"block_style": "strong"}',
+        },
+        {
+            "kind": "prose",
+            "paragraph_id": 42,
+            "payload_json": '{"block_style": "emphasis"}',
+        },
+        {
+            "kind": "prose",
+            "paragraph_id": 43,
+            "payload_json": '{"block_style": 7}',
+        },
+    ]
+
+    html = _reader_content_blocks(
+        rows=rows,
+        blocks=blocks,
+        chapter_id=5,
+        cards_by_sentence={},
+        book_id=7,
+    )
+
+    assert 'class="reader-para reader-md-strong-block"' in html
+    assert 'class="reader-para reader-md-emphasis-block"' in html
+    assert '<p class="reader-para" data-paragraph-id="43">' in html
+    assert html.count('class="reader-sentence"') == 3
+
+
 def test_reader_content_blocks_treats_malformed_payload_as_unordered() -> None:
     rows = [
         {
@@ -754,6 +886,35 @@ def test_reader_content_blocks_treats_malformed_payload_as_unordered() -> None:
     )
 
     assert '<ul class="reader-md-list">' in html
+
+
+def test_reader_content_blocks_ignores_invalid_quote_depth_payloads() -> None:
+    rows = [
+        {
+            "id": 1,
+            "idx": 0,
+            "text": "Readable sentence.",
+            "paragraph_id": 10,
+            "has_card": 0,
+            "has_analysis": 0,
+            "analysis_is_stale": 0,
+            "user_translation": "",
+            "ai_analysis_id": None,
+        }
+    ]
+
+    for payload_json in ('{"quote_depth": "many"}', "[]", "null"):
+        html = _reader_content_blocks(
+            rows=rows,
+            blocks=[
+                {"kind": "prose", "paragraph_id": 10, "payload_json": payload_json}
+            ],
+            chapter_id=5,
+            cards_by_sentence={},
+            book_id=7,
+        )
+        assert '<blockquote class="reader-md-blockquote">' not in html
+        assert 'class="reader-sentence"' in html
 
 
 def test_reader_content_blocks_uses_default_heading_payload_on_malformed_json() -> None:

@@ -26,6 +26,7 @@ pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import Browser, Error as PlaywrightError, Page, sync_playwright
 
 from app.db_connection import DatabaseConnection
+from app.importers.markdown_importer import import_markdown_bytes
 from app.importers.txt_importer import import_txt
 from app.web.fastapi_app import create_app
 
@@ -132,6 +133,21 @@ def _seed_multi_section_reader(
             (result.book_id,),
         ).fetchone()["id"]
     return int(result.book_id), int(sentence_id)
+
+
+def _seed_markdown_reader(db: DatabaseConnection) -> int:
+    result = import_markdown_bytes(
+        db,
+        (
+            b"# Meeting Practice\n\n"
+            b"**You:**\n\n"
+            b"> Which engineers should join the meeting?\n\n"
+            b"- [x] Find the question word.\n"
+            b"- [ ] Translate the modal verb."
+        ),
+        title="Markdown Practice",
+    )
+    return int(result.book_id)
 
 
 def _attach_sentence_analysis(db: DatabaseConnection, sentence_id: int) -> int:
@@ -413,6 +429,30 @@ def reader_url(db: DatabaseConnection, tmp_path: Path) -> Iterator[str]:
 
 
 @pytest.fixture()
+def markdown_reader_url(db: DatabaseConnection) -> Iterator[str]:
+    book_id = _seed_markdown_reader(db)
+    port = _free_port()
+    server = Server(
+        Config(
+            create_app(lambda: db),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            access_log=False,
+            lifespan="off",
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    _wait_for_port(port)
+    try:
+        yield f"http://127.0.0.1:{port}/read/{book_id}?chapter=1"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+@pytest.fixture()
 def library_open_state(
     db: DatabaseConnection,
     tmp_path: Path,
@@ -563,6 +603,34 @@ def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) ->
         "translation": False,
         "structure": False,
     }
+
+
+def test_markdown_visual_structure_keeps_sentence_practice_interactive(
+    browser: Browser,
+    markdown_reader_url: str,
+) -> None:
+    for page in _new_page(browser, markdown_reader_url):
+        quote = page.locator(".reader-md-blockquote")
+        tasks = page.locator(".reader-md-task-item")
+
+        assert quote.count() == 1
+        assert tasks.count() == 2
+        assert page.locator(".reader-md-strong-block").inner_text() == "You:"
+        assert quote.evaluate("element => getComputedStyle(element).borderLeftWidth") == "4px"
+        assert page.locator(".reader-md-heading-level-1").evaluate(
+            "element => getComputedStyle(element).borderBottomStyle"
+        ) == "solid"
+
+        _select_sentence_contents(page, 1)
+        page.wait_for_function('!document.getElementById("toolbar-sentence-form").hidden')
+        assert page.get_by_role("button", name="Write translation").is_visible()
+        assert page.get_by_role("button", name="Write structure").is_visible()
+
+        page.get_by_role("button", name="Write translation").click()
+        page.wait_for_function(
+            '!document.getElementById("toolbar-translation-editor").hidden'
+        )
+        assert page.locator("#toolbar-translation-text").is_visible()
 
 
 def test_analysis_panel_overlays_reader_without_layout_shift(

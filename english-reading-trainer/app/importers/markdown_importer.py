@@ -59,6 +59,9 @@ _DATA_IMAGE_URL_RE = re.compile(
     re.I,
 )
 _INLINE_IMAGE_TOKEN_RE = re.compile(r"\[\[md-image-token:(\d+)\]\]")
+_MAX_BLOCKQUOTE_DEPTH = 6
+_WHOLE_STRONG_RE = re.compile(r"^\s*(\*\*|__)(?=\S).+?(?<=\S)\1\s*$")
+_WHOLE_EMPHASIS_RE = re.compile(r"^\s*(\*|_)(?=\S).+?(?<=\S)\1\s*$")
 
 
 @dataclass(frozen=True)
@@ -225,16 +228,27 @@ def _markdown_blocks(
     image_refs = _data_image_references(raw_lines)
     blocks: list[_MarkdownBlock] = []
     paragraph_lines: list[str] = []
+    paragraph_quote_depth = 0
+    paragraph_style = ""
     in_fence = False
     fence_char = ""
     index = 0
 
     def flush_paragraph() -> None:
+        nonlocal paragraph_quote_depth, paragraph_style
         if paragraph_lines:
             text = " ".join(paragraph_lines).strip()
             if text:
-                blocks.append(_MarkdownBlock("prose", text))
+                payload: dict[str, object] = {}
+                if paragraph_quote_depth:
+                    payload["quote_depth"] = paragraph_quote_depth
+                if paragraph_style:
+                    payload["block_style"] = paragraph_style
+                payload_json = json.dumps(payload) if payload else ""
+                blocks.append(_MarkdownBlock("prose", text, payload_json))
             paragraph_lines.clear()
+        paragraph_quote_depth = 0
+        paragraph_style = ""
 
     while index < len(raw_lines):
         line = raw_lines[index]
@@ -304,6 +318,7 @@ def _markdown_blocks(
             index += 1
             continue
 
+        quote_depth = _blockquote_depth(line)
         blockquote_stripped = _strip_blockquote_prefixes(line)
         list_match = _LIST_PREFIX_RE.match(blockquote_stripped)
         if list_match:
@@ -315,16 +330,26 @@ def _markdown_blocks(
             )
             if cleaned:
                 marker = list_match.group(1)
+                task_text = blockquote_stripped[list_match.end() :]
+                task_match = _TASK_MARKER_RE.match(task_text)
+                payload: dict[str, object] = {
+                    "ordered": marker[0].isdigit(),
+                    "marker": marker,
+                }
+                if quote_depth:
+                    payload["quote_depth"] = quote_depth
+                if task_match:
+                    payload["task"] = True
+                    payload["checked"] = task_text[1].lower() == "x"
+                    task_text = task_text[task_match.end() :]
+                block_style = _whole_line_style(task_text)
+                if block_style:
+                    payload["block_style"] = block_style
                 blocks.append(
                     _MarkdownBlock(
                         "list_item",
                         cleaned,
-                        json.dumps(
-                            {
-                                "ordered": marker[0].isdigit(),
-                                "marker": marker,
-                            }
-                        ),
+                        json.dumps(payload),
                     )
                 )
             index += 1
@@ -336,7 +361,17 @@ def _markdown_blocks(
             image_refs=image_refs,
         )
         if cleaned:
+            if paragraph_lines and quote_depth != paragraph_quote_depth:
+                flush_paragraph()
+            line_style = _whole_line_style(blockquote_stripped)
+            if paragraph_lines and line_style != paragraph_style:
+                paragraph_style = ""
+            elif not paragraph_lines:
+                paragraph_style = line_style
+            paragraph_quote_depth = quote_depth
             paragraph_lines.append(cleaned)
+        elif quote_depth:
+            flush_paragraph()
         index += 1
 
     flush_paragraph()
@@ -370,6 +405,26 @@ def _strip_blockquote_prefixes(line: str) -> str:
         if next_line == stripped:
             return stripped
         stripped = next_line
+
+
+def _blockquote_depth(line: str) -> int:
+    depth = 0
+    stripped = line
+    while depth < _MAX_BLOCKQUOTE_DEPTH:
+        match = _BLOCKQUOTE_RE.match(stripped)
+        if not match:
+            break
+        depth += 1
+        stripped = stripped[match.end() :]
+    return depth
+
+
+def _whole_line_style(line: str) -> str:
+    if _WHOLE_STRONG_RE.match(line):
+        return "strong"
+    if _WHOLE_EMPHASIS_RE.match(line):
+        return "emphasis"
+    return ""
 
 
 def _clean_markdown_line(

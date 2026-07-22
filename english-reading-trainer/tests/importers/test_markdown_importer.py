@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,7 @@ print("Code should not become a sentence.")
     ]
     assert blocks[0]["text"] == "First Chapter"
     assert '"level": 1' in blocks[0]["payload_json"]
+    assert '"quote_depth": 1' in blocks[2]["payload_json"]
     assert blocks[3]["text"] == "Second Chapter"
     assert '"level": 2' in blocks[3]["payload_json"]
     assert blocks[4]["text"] == ""
@@ -234,6 +236,82 @@ across lines.
     assert '"ordered": true' in blocks[2].payload_json
     assert '"level": 2' in blocks[4].payload_json
     assert '"ordered": false' in blocks[5].payload_json
+
+
+def test_markdown_blocks_preserve_quote_depth_and_task_state() -> None:
+    blocks = _markdown_blocks(
+        """> First quoted line
+> wraps in the same quote.
+>
+>> Nested quote.
+
+- [ ] Pending practice item.
+- [x] Completed practice item.
+> - [x] Completed quoted item.
+
+Plain paragraph.
+"""
+    )
+
+    assert [(block.kind, block.text) for block in blocks] == [
+        ("prose", "First quoted line wraps in the same quote."),
+        ("prose", "Nested quote."),
+        ("list_item", "Pending practice item."),
+        ("list_item", "Completed practice item."),
+        ("list_item", "Completed quoted item."),
+        ("prose", "Plain paragraph."),
+    ]
+    assert json.loads(blocks[0].payload_json) == {"quote_depth": 1}
+    assert json.loads(blocks[1].payload_json) == {"quote_depth": 2}
+    assert json.loads(blocks[2].payload_json) == {
+        "ordered": False,
+        "marker": "-",
+        "task": True,
+        "checked": False,
+    }
+    assert json.loads(blocks[3].payload_json)["checked"] is True
+    assert json.loads(blocks[4].payload_json) == {
+        "ordered": False,
+        "marker": "-",
+        "quote_depth": 1,
+        "task": True,
+        "checked": True,
+    }
+    assert blocks[5].payload_json == ""
+
+
+def test_markdown_blocks_split_when_quote_depth_changes_without_blank_line() -> None:
+    blocks = _markdown_blocks("> Quoted sentence.\nPlain sentence.\n>>>>>>>>> Deep quote.")
+
+    assert [block.text for block in blocks] == [
+        "Quoted sentence.",
+        "Plain sentence.",
+        "Deep quote.",
+    ]
+    assert [json.loads(block.payload_json or "{}") for block in blocks] == [
+        {"quote_depth": 1},
+        {},
+        {"quote_depth": 6},
+    ]
+
+
+def test_markdown_blocks_preserve_safe_whole_block_emphasis() -> None:
+    blocks = _markdown_blocks(
+        "**You:**\n\n*Read this carefully.*\n\n**Only** part is strong.\n\n**Mismatched__"
+    )
+
+    assert [block.text for block in blocks] == [
+        "You:",
+        "Read this carefully.",
+        "Only part is strong.",
+        "**Mismatched__",
+    ]
+    assert [json.loads(block.payload_json or "{}") for block in blocks] == [
+        {"block_style": "strong"},
+        {"block_style": "emphasis"},
+        {},
+        {},
+    ]
 
 
 def test_markdown_blocks_register_reference_data_images() -> None:
