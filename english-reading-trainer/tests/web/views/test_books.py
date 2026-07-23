@@ -283,7 +283,8 @@ def test_library_filters_and_metadata_form_escape_and_select_values() -> None:
             "source_format": "md",
             "import_method": "url",
             "source_uri": "https://example.com/?a=<b>",
-        }
+        },
+        available_tags=["Trade", "Siemens", "<unsafe>", "trade"],
     )
 
     assert 'value="article" selected' in filters
@@ -294,11 +295,28 @@ def test_library_filters_and_metadata_form_escape_and_select_values() -> None:
     assert 'value="article" selected' in form
     assert 'type="hidden" name="library_status"' in form
     assert 'value="reading"' in form
-    assert 'type="hidden" name="tags" value="Trade, &lt;unsafe&gt;"' in form
+    assert 'id="library-metadata-form-4"' in form
+    assert 'class="library-metadata-tags"' in form
+    assert 'class="library-tag-picker" data-tag-picker' in form
+    assert '<summary aria-label="Tags for &lt;Article &quot;One&quot;&gt;">' in form
+    assert '<span class="library-tag-chip">Trade</span>' in form
+    assert '<span class="library-tag-chip">&lt;unsafe&gt;</span>' in form
+    assert (
+        'type="hidden" name="tags" form="library-metadata-form-4" '
+        'value="Trade, &lt;unsafe&gt;" data-tag-value'
+    ) in form
+    assert '<input type="checkbox" value="Trade" data-tag-option checked>' in form
+    assert '<input type="checkbox" value="Siemens" data-tag-option>' in form
+    assert (
+        '<input type="checkbox" value="&lt;unsafe&gt;" data-tag-option checked>'
+        in form
+    )
+    assert form.count('value="Trade" data-tag-option') == 1
+    assert 'aria-label="New tag"' in form
+    assert '<script src="/static/library-tags.js"></script>' in form
     assert 'id="item-library-status"' not in form
-    assert 'id="item-tags"' not in form
     assert "Library status</label>" not in form
-    assert "Tags <span" not in form
+    assert '<span id="item-tags-label">Tags</span>' in form
     assert "https://example.com/?a=&lt;b&gt;" in form
 
 

@@ -588,6 +588,63 @@ def test_library_tag_picker_selects_creates_removes_and_saves_multiple_tags(
     assert stored_tags == {"Siemens", "photolithography"}
 
 
+def test_item_details_tag_picker_selects_creates_removes_and_saves_tags(
+    browser: Browser,
+    db: DatabaseConnection,
+    library_open_state: dict[str, str | int],
+) -> None:
+    base_url = library_open_state["base_url"]
+    book_id = library_open_state["book_id"]
+
+    for page in _new_page(browser, f"{base_url}/books/{book_id}"):
+        picker = page.locator(".library-metadata-tags [data-tag-picker]")
+        value = picker.locator("[data-tag-value]")
+
+        assert picker.locator(".library-tag-chip").all_inner_texts() == ["Trade"]
+        picker.locator("summary").click()
+        picker.get_by_role("checkbox", name="Siemens").check()
+        picker.get_by_role("textbox", name="New tag").fill("customer-meeting")
+        picker.get_by_role("button", name="Add").click()
+        picker.get_by_role("checkbox", name="Trade").uncheck()
+        assert value.input_value() == "Siemens, customer-meeting"
+
+        page.get_by_role("button", name="Save metadata").click()
+        page.wait_for_load_state("networkidle")
+
+        saved_picker = page.locator(".library-metadata-tags [data-tag-picker]")
+        saved_tags = set(
+            saved_picker.locator(".library-tag-chip").all_inner_texts()
+        )
+        assert page.locator("#item-title").input_value() == "Multi-section Book"
+        assert page.locator("#item-author").input_value() == "Author"
+
+    assert saved_tags == {"Siemens", "customer-meeting"}
+    with db.get_connection() as conn:
+        stored_tags = {
+            str(row["name"])
+            for row in conn.execute(
+                """SELECT t.name
+                     FROM tags t
+                     JOIN book_tags bt ON bt.tag_id = t.id
+                    WHERE bt.book_id = ?""",
+                (book_id,),
+            ).fetchall()
+        }
+        item = conn.execute(
+            """SELECT title, author, content_kind, library_status
+                 FROM books WHERE id = ?""",
+            (book_id,),
+        ).fetchone()
+
+    assert stored_tags == {"Siemens", "customer-meeting"}
+    assert dict(item) == {
+        "title": "Multi-section Book",
+        "author": "Author",
+        "content_kind": "unclassified",
+        "library_status": "inbox",
+    }
+
+
 def test_initial_toolbar_panels_are_hidden(browser: Browser, reader_url: str) -> None:
     for page in _new_page(browser, reader_url):
         state = _visible_panels(page)

@@ -367,6 +367,8 @@ def test_css_ui_consistency_width_table_and_action_density_rules() -> None:
     assert ".library-table-wrap {" in css
     assert ".library-inline-select," in css
     assert ".library-tag-picker > summary," in css
+    assert ".library-metadata-tags" in css
+    assert "width: min(100%, 420px);" in css
     assert ".library-tag-options {" in css
     assert ".library-tag-chip {" in css
     assert ".library-tag-panel {" in css

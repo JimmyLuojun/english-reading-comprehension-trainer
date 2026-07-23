@@ -1452,6 +1452,9 @@ def _css() -> str:
     .library-tag-picker {
       min-width: 210px;
     }
+    .library-metadata-tags {
+      width: min(100%, 420px);
+    }
     .library-tag-picker > summary {
       min-height: 34px;
       display: flex;

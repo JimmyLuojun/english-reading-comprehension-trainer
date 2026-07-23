@@ -521,6 +521,42 @@ class TestBasicPages:
         assert f"/read/{book_id}?chapter=1" in response.text
         assert "Start from beginning" in response.text
 
+    def test_book_detail_renders_selected_and_reusable_tag_choices(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, _ = _seed_book(db, tmp_path)
+        client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Test Book",
+                "author": "Test Author",
+                "content_kind": "article",
+                "library_status": "reading",
+                "tags": "Trade",
+            },
+        )
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO tags (name, category) VALUES ('Siemens', 'library')"
+            )
+
+        response = client.get(f"/books/{book_id}")
+
+        assert response.status_code == 200
+        assert 'id="library-metadata-form-' in response.text
+        assert 'class="library-metadata-tags"' in response.text
+        assert 'data-tag-picker' in response.text
+        assert '<span class="library-tag-chip">Trade</span>' in response.text
+        assert (
+            '<input type="checkbox" value="Trade" data-tag-option checked>'
+            in response.text
+        )
+        assert (
+            '<input type="checkbox" value="Siemens" data-tag-option>'
+            in response.text
+        )
+        assert '<script src="/static/library-tags.js"></script>' in response.text
+
     def test_open_item_resumes_saved_progress_or_uses_direct_first_open(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:

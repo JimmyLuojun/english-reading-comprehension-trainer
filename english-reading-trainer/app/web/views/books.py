@@ -293,11 +293,23 @@ def _tag_delete_confirm(name: str, item_count: int) -> str:
     return f'Delete tag "{name}"? It will be removed from {item_count} {noun}.'
 
 
-def _library_item_form(book: dict[str, Any]) -> str:
+def _library_item_form(
+    book: dict[str, Any],
+    *,
+    available_tags: list[str] | None = None,
+) -> str:
+    form_id = f"library-metadata-form-{int(book['id'])}"
+    tags_picker = _library_tag_picker(
+        form_id=form_id,
+        title=str(book["title"]),
+        tags=str(book.get("tags") or ""),
+        available_tags=available_tags or [],
+    )
     return f"""
     <section class="band">
       <h2>Library metadata</h2>
-      <form method="post" action="/books/{book['id']}/metadata" class="stack-form">
+      <form id="{form_id}" method="post" action="/books/{book['id']}/metadata"
+            class="stack-form">
         <label for="item-title">Title</label>
         <input id="item-title" name="title" value="{_escape(book['title'])}" required>
         <label for="item-author">Author</label>
@@ -311,7 +323,10 @@ def _library_item_form(book: dict[str, Any]) -> str:
         </select>
         <input type="hidden" name="library_status"
                value="{_escape(book.get('library_status') or 'inbox')}">
-        <input type="hidden" name="tags" value="{_escape(book.get('tags') or '')}">
+        <span id="item-tags-label">Tags</span>
+        <div class="library-metadata-tags" aria-labelledby="item-tags-label">
+          {tags_picker}
+        </div>
         <button type="submit">Save metadata</button>
       </form>
       <dl class="source-metadata">
@@ -320,6 +335,7 @@ def _library_item_form(book: dict[str, Any]) -> str:
         <dt>Source reference</dt><dd>{_escape(book.get('source_uri') or 'Not recorded')}</dd>
       </dl>
     </section>
+    <script src="/static/library-tags.js"></script>
     """
 
 def _delete_book_form(book_id: int) -> str:

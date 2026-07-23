@@ -153,6 +153,7 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         if book is None:
             return _error_page("Library Item not found", status_code=404)
         chapters = _fetch_chapters(db, book_id)
+        tag_usage = _fetch_library_tag_usage(db)
         read_idx = _primary_read_idx(chapters)
         read_href = (
             f"/read/{book_id}?chapter={read_idx}"
@@ -166,7 +167,10 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             f'{item_type} · {book["author"] or "Unknown author"}',
             f'<a class="button" href="{read_href}">Start from beginning</a>',
         )}
-        {_library_item_form(book)}
+        {_library_item_form(
+            book,
+            available_tags=[str(tag["name"]) for tag in tag_usage],
+        )}
         {_chapters_table(
             book_id,
             chapters,
