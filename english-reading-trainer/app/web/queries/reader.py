@@ -230,7 +230,11 @@ def _fetch_active_word_cards(db: DatabaseConnection) -> list[dict[str, Any]]:
                       source_sentence.book_id AS source_book_id,
                       wcs.start_offset,
                       wcs.end_offset,
-                      wcs.selected_text
+                      wcs.selected_text,
+                      wcs.sense_id,
+                      wcs.context_analysis_id,
+                      wcs.resolution_status,
+                      wcs.resolution_confidence
                  FROM word_cards wc
                  LEFT JOIN ai_cache ac
                    ON ac.id = wc.ai_analysis_id AND ac.is_valid = 1

@@ -73,7 +73,7 @@ def test_highlight_word_cards_uses_exact_source_offsets() -> None:
     assert ">long</span>" in html
 
 
-def test_book_word_cards_are_deduplicated_and_book_scoped() -> None:
+def test_book_word_cards_are_deduplicated_and_track_cross_book_sources() -> None:
     cards = [
         {
             "id": 7,
@@ -105,8 +105,10 @@ def test_book_word_cards_are_deduplicated_and_book_scoped() -> None:
 
     result = _book_word_cards_with_terms(cards, 3)
 
-    assert [card["id"] for card in result] == [7, 9]
+    assert [card["id"] for card in result] == [7, 8, 9]
     assert result[0]["prior_terms"] == ["supposedly"]
+    assert result[0]["has_current_book_source"] is True
+    assert result[1]["has_current_book_source"] is False
 
 
 def test_highlight_word_cards_marks_unrecorded_repeat_as_prior_analysis() -> None:
@@ -125,7 +127,9 @@ def test_highlight_word_cards_marks_unrecorded_repeat_as_prior_analysis() -> Non
         "Supposedly true, and supposedly false.",
         [card],
         3,
-        prior_analysis_cards=[{**card, "prior_terms": ["Supposedly"]}],
+        prior_analysis_cards=[
+            {**card, "prior_terms": ["Supposedly"], "has_current_book_source": True}
+        ],
     )
 
     assert html.count('data-word-card="7"') == 1

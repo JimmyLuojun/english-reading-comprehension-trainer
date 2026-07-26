@@ -57,6 +57,12 @@ _VALID_WORD_RESPONSE = json.dumps({
     "morphology": {"root": "mitis", "family": ["mitigation"]},
     "predicted_error_types": ["L01"],
     "confidence": 0.9,
+    "sense_resolution": {
+        "decision": "new",
+        "matched_sense_id": None,
+        "reason": "No saved senses were supplied.",
+        "confidence": 0.95,
+    },
 })
 
 _VALID_WORD_RESPONSE_V2 = json.dumps({
@@ -98,7 +104,8 @@ def test_word_prompt_helpers_cover_plain_and_missing_templates() -> None:
         "word": "mitigate",
         "sentence": "They mitigate harm.",
     }) == "mitigate in They mitigate harm."
-    assert "{{ surface_form }}" in _load_prompt("word_analysis", "v5")
+    assert "{{ surface_form }}" in _load_prompt("word_analysis", "v7")
+    assert "{{ surface_form }}" in _load_prompt("word_analysis", "v6")
     with pytest.raises(FileNotFoundError, match="Prompt template not found"):
         _load_prompt("missing_word_prompt", "v0")
 

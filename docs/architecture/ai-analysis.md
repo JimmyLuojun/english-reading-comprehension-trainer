@@ -95,7 +95,7 @@ Current sentence analysis uses versioned schemas. v1 contains the structural and
 
 ### 9.2 词汇分析
 
-Current word analysis uses versioned schemas. v1 is the historical dictionary-view schema below; later versions add writer perspective, Chinese meaning, learner-note feedback, and v5 adds the minimal recursive field `role_in_sentence`.
+Current word analysis uses versioned schemas. v1 is the historical dictionary-view schema below; later versions add writer perspective, Chinese meaning, learner-note feedback, v5 adds the minimal recursive field `role_in_sentence`, and v6 adds source-aware `sense_resolution` against stable saved sense IDs. v7 is the current prompt: it keeps the v6 JSON contract while clarifying JSON-only output and adding an ambiguity example.
 
 ```json
 {

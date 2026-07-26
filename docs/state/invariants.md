@@ -20,6 +20,9 @@ These rules describe behavior that should not change accidentally. Each implemen
 - Backup restore requires the web service to be stopped and an explicit CLI `--yes`; restored databases must pass SQLite integrity checks before replacing the live file.
 - `sentences.id` is the stable anchor for reader selection, sentence cards, word card source links, AI analysis context, and review navigation.
 - `word_cards.lemma` remains globally unique for the current card model.
+- `word_cards` owns one lemma-level SM-2 state; `word_senses` owns stable meanings, and `word_card_sources` owns exact occurrence context and sense assignment.
+- A `word_card_sources.sense_id` must reference a sense owned by the same card.
+- A repeated exact surface form is only a candidate match. Cross-book UI and AI output must not silently assert or persist semantic identity before learner confirmation.
 
 ## Cards And Review
 

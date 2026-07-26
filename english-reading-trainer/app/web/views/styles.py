@@ -585,6 +585,34 @@ def _css() -> str:
       background: rgba(249, 115, 22, 0.13);
       text-decoration-color: #9a3412;
     }
+    .word-sense-list {
+      display: grid;
+      gap: 10px;
+    }
+    .word-sense-item {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .word-sense-item.current {
+      border-color: rgba(5, 150, 105, 0.7);
+      background: rgba(16, 185, 129, 0.08);
+    }
+    .word-sense-item p {
+      margin: 5px 0 0;
+    }
+    .word-sense-item button,
+    .word-sense-resolution button {
+      margin-top: 8px;
+    }
+    .word-sense-resolution {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-left: 3px solid #d97706;
+      border-radius: 6px;
+      background: rgba(251, 191, 36, 0.10);
+    }
     .selection-toolbar,
     .paragraph-toolbar {
       position: absolute;

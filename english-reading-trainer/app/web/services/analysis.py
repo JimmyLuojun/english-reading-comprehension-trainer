@@ -27,6 +27,15 @@ from app.cards.word_card_service import (
     list_word_card_sources,
     record_word_card_diagnosis,
 )
+from app.cards.word_sense_service import (
+    assign_source_sense,
+    create_and_assign_source_sense,
+    create_word_sense,
+    existing_senses_prompt_text,
+    get_word_source,
+    list_word_senses,
+    record_source_analysis,
+)
 from app.db_connection import DatabaseConnection
 from app.db_models import LexicalType
 from app.web.config import _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
@@ -309,12 +318,23 @@ def build_external_word_prompt_for_selection(
 def build_external_word_prompt_for_card(
     db: DatabaseConnection,
     card_id: int,
+    *,
+    source_id: int | None = None,
 ) -> dict[str, Any]:
     """Build an external word prompt for an existing word card."""
     card = get_word_card(db, card_id)
     if card is None:
         raise ValueError("Word card not found.")
-    sentence_id = int(card["first_sentence_id"])
+    source = (
+        _analysis_source_for_card(db, card_id, source_id)
+        if source_id is not None
+        else None
+    )
+    sentence_id = (
+        int(source["sentence_id"])
+        if source is not None
+        else int(card["first_sentence_id"])
+    )
     prompt = _external_word_prompt(
         db,
         sentence_id=sentence_id,
@@ -325,6 +345,7 @@ def build_external_word_prompt_for_card(
     return {
         "ok": True,
         "card_id": card_id,
+        "source_id": int(source["id"]) if source is not None else None,
         "sentence_id": sentence_id,
         "surface_form": card["surface_form"],
         "lexical_type": card.get("lexical_type") or LexicalType.WORD.value,
@@ -525,6 +546,20 @@ def save_external_word_analysis_for_selection(
             source_end_offset=selection["end_offset"],
             selected_text=selection["surface_form"],
         )
+        source = _matching_word_source(
+            db,
+            card_id=card_id,
+            sentence_id=sentence_id,
+            surface_form=selection["surface_form"],
+            start_offset=selection["start_offset"],
+            end_offset=selection["end_offset"],
+        )
+        if source is None:
+            return AnalysisOutcome(
+                error="Saved word source was not found.",
+                status_code=500,
+                retry=True,
+            )
         outcome = _attach_external_word_analysis(
             db,
             card_id,
@@ -532,26 +567,20 @@ def save_external_word_analysis_for_selection(
             data=validation.payload["analysis"],
             prompt_version=validation.payload["prompt_version"],
             sentence_text=validation.payload["sentence_text"],
+            source_id=int(source["id"]),
         )
         if outcome.is_error:
             return outcome
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
 
-    payload = _fetch_word_analysis_payload(db, card_id)
+    payload = _fetch_word_analysis_payload(db, card_id, int(source["id"]))
     if payload is None:
         return AnalysisOutcome(error="External word analysis was not saved.", status_code=500, retry=True)
     payload["from_cache"] = False
     payload["is_stale"] = False
     payload["word_card"] = _word_card_payload(db, card_id)
-    payload["source"] = _matching_word_source(
-        db,
-        card_id=card_id,
-        sentence_id=sentence_id,
-        surface_form=selection["surface_form"],
-        start_offset=selection["start_offset"],
-        end_offset=selection["end_offset"],
-    )
+    payload["source"] = source
     return AnalysisOutcome(payload=payload)
 
 
@@ -560,14 +589,28 @@ def save_external_word_analysis_for_card(
     card_id: int,
     *,
     external_result: str,
+    source_id: int | None = None,
 ) -> AnalysisOutcome:
     """Validate external JSON and replace an existing word card analysis."""
     card = get_word_card(db, card_id)
     if card is None:
         return AnalysisOutcome(error="Word card not found.", status_code=404)
+    try:
+        source = (
+            _analysis_source_for_card(db, card_id, source_id)
+            if source_id is not None
+            else None
+        )
+    except ValueError as exc:
+        return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
+    sentence_id = (
+        int(source["sentence_id"])
+        if source is not None
+        else int(card["first_sentence_id"])
+    )
     validation = _validate_external_word_json(
         db,
-        sentence_id=int(card["first_sentence_id"]),
+        sentence_id=sentence_id,
         surface_form=str(card["surface_form"] or ""),
         lexical_type=str(card.get("lexical_type") or LexicalType.WORD.value),
         external_result=external_result,
@@ -581,10 +624,15 @@ def save_external_word_analysis_for_card(
         data=validation.payload["analysis"],
         prompt_version=validation.payload["prompt_version"],
         sentence_text=validation.payload["sentence_text"],
+        source_id=int(source["id"]) if source is not None else None,
     )
     if outcome.is_error:
         return outcome
-    payload = _fetch_word_analysis_payload(db, card_id)
+    payload = (
+        _fetch_word_analysis_payload(db, card_id, int(source["id"]))
+        if source is not None
+        else _fetch_word_analysis_payload(db, card_id)
+    )
     if payload is None:
         return AnalysisOutcome(error="External word analysis was not saved.", status_code=500, retry=True)
     payload["from_cache"] = False
@@ -602,11 +650,13 @@ def _validate_external_word_json(
     external_result: str,
 ) -> AnalysisOutcome:
     try:
-        raw_json = _normalize_external_word_json(
-            extract_external_json_block(external_result),
-            lexical_type=lexical_type,
-        )
+        extracted_json = extract_external_json_block(external_result)
         prompt_version = _active_word_prompt_version(db)
+        raw_json = _normalize_external_word_json(
+            extracted_json,
+            lexical_type=lexical_type,
+            include_sense_resolution=prompt_version in {"v6", "v7"},
+        )
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
     try:
@@ -631,24 +681,41 @@ def _validate_external_word_json(
     )
 
 
-def _attach_external_word_analysis(
+def _analysis_source_for_card(
     db: DatabaseConnection,
     card_id: int,
-    *,
-    surface_form: str,
+    source_id: int | None,
+) -> dict[str, Any] | None:
+    if source_id is not None:
+        source = get_word_source(db, source_id)
+        if source is None or int(source["card_id"]) != int(card_id):
+            raise ValueError("Word source does not belong to this card.")
+        return source
+    try:
+        sources = list_word_card_sources(db, card_id)
+    except AttributeError:
+        sources = []
+    if sources:
+        return get_word_source(db, int(sources[0]["id"]))
+    card = get_word_card(db, card_id)
+    if card is None:
+        return None
+    return {
+        "id": 0,
+        "card_id": card_id,
+        "sentence_id": card["first_sentence_id"],
+        "selected_text": card.get("surface_form") or "",
+        "sense_id": None,
+    }
+
+
+def _update_legacy_word_analysis(
+    db: DatabaseConnection,
+    card_id: int,
+    cache_id: int,
     data: dict[str, Any],
-    prompt_version: str,
-    sentence_text: str,
-) -> AnalysisOutcome:
-    cache_id = save_to_cache(
-        db,
-        compute_content_hash(surface_form + " | " + sentence_text, ""),
-        prompt_version,
-        _EXTERNAL_MODEL_NAME,
-        json.dumps(data, ensure_ascii=False),
-        True,
-        replace_valid=True,
-    )
+) -> None:
+    """Maintain the original one-analysis fields as a compatibility mirror."""
     with db.get_connection() as conn:
         conn.execute(
             """UPDATE word_cards
@@ -666,8 +733,122 @@ def _attach_external_word_analysis(
                 card_id,
             ),
         )
+
+
+def _save_contextual_word_analysis(
+    db: DatabaseConnection,
+    *,
+    card_id: int,
+    source_id: int,
+    cache_id: int,
+    data: dict[str, Any],
+) -> int | None:
+    """Save one occurrence analysis and create only an unambiguous first sense."""
+    source = _analysis_source_for_card(db, card_id, source_id)
+    if source is None:
+        raise ValueError("Word source not found.")
+    resolution = data.get("sense_resolution") or {}
+    confidence = resolution.get("confidence")
+    confidence_value = float(confidence) if isinstance(confidence, (int, float)) else None
+    senses = list_word_senses(db, card_id)
+    record_source_analysis(
+        db,
+        source_id,
+        cache_id,
+        status="uncertain" if senses else "new",
+        confidence=confidence_value,
+    )
+    if senses:
+        return int(source["sense_id"]) if source.get("sense_id") else None
+
+    sense_id = create_word_sense(db, card_id, cache_id, data)
+    assign_source_sense(
+        db,
+        source_id,
+        sense_id,
+        status="new",
+        confidence=confidence_value,
+    )
+    _update_legacy_word_analysis(db, card_id, cache_id, data)
+    return sense_id
+
+
+def confirm_word_source_sense(
+    db: DatabaseConnection,
+    source_id: int,
+    *,
+    sense_id: int | None = None,
+    create_new: bool = False,
+) -> dict[str, Any]:
+    """Confirm reuse or promote the current occurrence into a new stable sense."""
+    source = get_word_source(db, source_id)
+    if source is None:
+        raise ValueError("Word source not found.")
+    analysis = source.get("analysis") or {}
+    resolution = analysis.get("sense_resolution") or {}
+    confidence = resolution.get("confidence")
+    confidence_value = float(confidence) if isinstance(confidence, (int, float)) else None
+    if create_new:
+        assigned_id = create_and_assign_source_sense(
+            db,
+            source_id,
+            status="new",
+            confidence=confidence_value,
+        )
+    elif sense_id is not None:
+        assign_source_sense(
+            db,
+            source_id,
+            sense_id,
+            status="matched" if resolution.get("decision") == "same" else "manual",
+            confidence=confidence_value,
+        )
+        assigned_id = sense_id
+    else:
+        raise ValueError("Choose an existing meaning or create a new one.")
+    payload = _fetch_word_analysis_payload(db, int(source["card_id"]), source_id)
+    if payload is None:
+        raise ValueError("Saved word analysis not found.")
+    payload["assigned_sense_id"] = assigned_id
+    return payload
+
+
+def _attach_external_word_analysis(
+    db: DatabaseConnection,
+    card_id: int,
+    *,
+    surface_form: str,
+    data: dict[str, Any],
+    prompt_version: str,
+    sentence_text: str,
+    source_id: int | None = None,
+) -> AnalysisOutcome:
+    cache_id = save_to_cache(
+        db,
+        compute_content_hash(surface_form + " | " + sentence_text, ""),
+        prompt_version,
+        _EXTERNAL_MODEL_NAME,
+        json.dumps(data, ensure_ascii=False),
+        True,
+        replace_valid=True,
+    )
+    if source_id is None:
+        source = _analysis_source_for_card(db, card_id, None)
+        source_id = int(source["id"]) if source is not None else None
+    if source_id is not None:
+        _save_contextual_word_analysis(
+            db,
+            card_id=card_id,
+            source_id=source_id,
+            cache_id=cache_id,
+            data=data,
+        )
+    else:
+        _update_legacy_word_analysis(db, card_id, cache_id, data)
     record_word_card_diagnosis(db, card_id, data)
-    return AnalysisOutcome(payload={"ok": True})
+    return AnalysisOutcome(
+        payload={"ok": True, "cache_id": cache_id, "source_id": source_id}
+    )
 
 
 def extract_external_json_block(external_result: str) -> str:
@@ -728,7 +909,12 @@ def _normalize_external_sentence_json(raw_json: str) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-def _normalize_external_word_json(raw_json: str, *, lexical_type: str) -> str:
+def _normalize_external_word_json(
+    raw_json: str,
+    *,
+    lexical_type: str,
+    include_sense_resolution: bool = False,
+) -> str:
     try:
         data = json.loads(raw_json)
     except json.JSONDecodeError:
@@ -742,6 +928,16 @@ def _normalize_external_word_json(raw_json: str, *, lexical_type: str) -> str:
     error_codes = data.get("predicted_error_types")
     if isinstance(error_codes, list):
         data["predicted_error_types"] = error_codes[:_MAX_WORD_ERROR_CODES]
+    if include_sense_resolution:
+        data.setdefault(
+            "sense_resolution",
+            {
+                "decision": "uncertain",
+                "matched_sense_id": None,
+                "reason": "This external result did not compare the current context with saved meanings.",
+                "confidence": 0.0,
+            },
+        )
     return json.dumps(data, ensure_ascii=False)
 
 
@@ -793,6 +989,7 @@ def _word_card_payload(db: DatabaseConnection, card_id: int) -> dict[str, Any] |
     card = get_word_card(db, card_id)
     if card is None:
         return None
+    senses = list_word_senses(db, card_id)
     return {
         "id": card["id"],
         "lemma": card["lemma"],
@@ -800,6 +997,7 @@ def _word_card_payload(db: DatabaseConnection, card_id: int) -> dict[str, Any] |
         "lexical_type": card["lexical_type"],
         "current_meaning": card.get("current_meaning") or "",
         "user_note": card.get("user_note") or "",
+        "sense_count": len(senses),
     }
 
 
@@ -853,6 +1051,7 @@ def analyze_word_card_for_reader(
     db: DatabaseConnection,
     card_id: int,
     *,
+    source_id: int | None = None,
     context_text: str = "",
     prefer_pro: bool = False,
     force_refresh: bool = False,
@@ -864,13 +1063,22 @@ def analyze_word_card_for_reader(
     if card is None:
         return AnalysisOutcome(error="Word card not found.", status_code=404)
     try:
-        sentence = _fetch_sentence_for_analysis(db, card["first_sentence_id"])
+        source = _analysis_source_for_card(db, card_id, source_id)
+        if source is None:
+            return AnalysisOutcome(error="Word source not found.", status_code=404)
+        source_id = int(source["id"])
+        sentence = _fetch_sentence_for_analysis(db, int(source["sentence_id"]))
         result = fastapi_app.analyze_word(
             db,
-            surface_form=card["surface_form"],
+            surface_form=str(source.get("selected_text") or card["surface_form"]),
             sentence_text=sentence["text"],
             context=context_text.strip(),
             learner_note=(card.get("user_note") or "").strip(),
+            existing_senses=(
+                existing_senses_prompt_text(db, card_id)
+                if source_id
+                else "(none)"
+            ),
             model=get_pro_analysis_model() if prefer_pro else None,
             allow_stale=False,
             force_refresh=force_refresh,
@@ -884,7 +1092,16 @@ def analyze_word_card_for_reader(
                 status_code=502,
                 retry=True,
             )
-        fastapi_app._update_word_card_analysis_id(db, card_id, result.cache_id)
+        if source_id:
+            _save_contextual_word_analysis(
+                db,
+                card_id=card_id,
+                source_id=source_id,
+                cache_id=result.cache_id,
+                data=result.data,
+            )
+        else:
+            fastapi_app._update_word_card_analysis_id(db, card_id, result.cache_id)
         record_word_card_diagnosis(db, card_id, result.data)
     except ValueError as exc:
         return AnalysisOutcome(error=str(exc), status_code=400, retry=False)
@@ -896,7 +1113,11 @@ def analyze_word_card_for_reader(
     except FileNotFoundError as exc:
         return AnalysisOutcome(error=str(exc), status_code=502, retry=True)
 
-    payload = _fetch_word_analysis_payload(db, card_id)
+    payload = (
+        _fetch_word_analysis_payload(db, card_id, source_id)
+        if source_id
+        else _fetch_word_analysis_payload(db, card_id)
+    )
     if payload is None:
         return AnalysisOutcome(error="Analysis was not saved.", status_code=500, retry=True)
     payload["from_cache"] = result.from_cache

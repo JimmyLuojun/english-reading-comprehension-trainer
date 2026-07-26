@@ -139,6 +139,11 @@
       const wordRole = document.getElementById("analysis-word-role");
       const wordAnalysisMeaning = document.getElementById("analysis-word-meaning");
       const wordAnalysisMeaningZh = document.getElementById("analysis-word-meaning-zh");
+      const wordSenseStatus = document.getElementById("analysis-word-sense-status");
+      const wordSenseResolution = document.getElementById("analysis-word-sense-resolution");
+      const wordSenseReason = document.getElementById("analysis-word-sense-reason");
+      const wordSenseActions = document.getElementById("analysis-word-sense-actions");
+      const wordSenses = document.getElementById("analysis-word-senses");
       const wordRegister = document.getElementById("analysis-word-register");
       const wordWhy = document.getElementById("analysis-word-why");
       const wordVsSimpler = document.getElementById("analysis-word-vs-simpler");
@@ -248,6 +253,7 @@
       let activeAnalysisSentenceId = null;
       let activeAnalysisSourceSentenceId = null;
       let activeAnalysisWordCardId = null;
+      let activeAnalysisWordSourceId = null;
       let activeAnalysisParagraphId = null;
       let activeExternalPromptSentenceId = null;
       let activeExternalPromptParagraphId = null;
@@ -255,6 +261,7 @@
       let activeExternalPromptWordCardId = null;
       let activeAnalysisPayload = null;
       let activeAnalysisLabel = "";
+      let wordSenseAssignmentInProgress = false;
       let analysisHistory = [];
       let activeWordDetailFromAnalysis = false;
       let activeParagraphId = null;
@@ -1996,7 +2003,7 @@
         const cardId = span?.dataset.wordCard || "";
         if (cardId && span.dataset.hasAnalysis === "1") {
           window.getSelection()?.removeAllRanges();
-          loadSavedWordAnalysis(cardId);
+          loadSavedWordAnalysis(cardId, span.dataset.sourceId || "");
           return;
         }
         showWordDetail(span);
@@ -2183,6 +2190,7 @@
             hideToolbar();
             requestWordAnalysis(String(payload.card_id), {
               contextText,
+              sourceId: payload.source?.id || "",
               pushCurrent: !panel.hidden,
             });
             return;
@@ -2254,6 +2262,7 @@
             hideToolbar();
             requestWordAnalysis(String(payload.card_id), {
               contextText: sentence?.textContent || "",
+              sourceId: payload.source?.id || "",
             });
             return;
           }
@@ -2475,6 +2484,7 @@
         if (panelMode === "word" && activeAnalysisWordCardId) {
           state.card_id = activeAnalysisWordCardId;
           state.source_sentence_id = activeAnalysisSourceSentenceId || "";
+          state.source_id = activeAnalysisWordSourceId || "";
         } else if (panelMode === "paragraph" && activeAnalysisParagraphId) {
           state.paragraph_id = activeAnalysisParagraphId;
         } else if (activeAnalysisSentenceId) {
@@ -2487,7 +2497,7 @@
         const state = saved?.analysis_state || {};
         if (!state.open) return false;
         if (state.mode === "word" && state.card_id) {
-          await loadSavedWordAnalysis(String(state.card_id));
+          await loadSavedWordAnalysis(String(state.card_id), String(state.source_id || ""));
         } else if (state.sentence_id) {
           const sentence = document.getElementById(`sentence-${state.sentence_id}`);
           if (!sentence) return false;
@@ -4552,7 +4562,10 @@
         if (panel.hidden) openPanel();
         prepareExternalWordResultBox({ cardId: String(cardId) }, "Copying prompt...");
         try {
-          const response = await fetch(`/analysis/word/${cardId}/external-prompt`);
+          const sourceQuery = activeAnalysisWordSourceId
+            ? `?source_id=${encodeURIComponent(activeAnalysisWordSourceId)}`
+            : "";
+          const response = await fetch(`/analysis/word/${cardId}/external-prompt${sourceQuery}`);
           const payload = await response.json();
           if (copySeq !== externalWordPromptCopySeq) return;
           if (!response.ok || !payload.ok) {
@@ -4766,6 +4779,9 @@
         if (analysisExternalStatus) analysisExternalStatus.textContent = "Saving...";
         const body = new URLSearchParams();
         body.set("external_result", externalResult);
+        if (activeAnalysisWordSourceId) {
+          body.set("source_id", activeAnalysisWordSourceId);
+        }
         try {
           const response = await fetch(`/analysis/word/${cardId}/external`, {
             method: "POST",
@@ -5137,19 +5153,144 @@
         applyGlossaryHighlights(container);
       }
 
+      async function assignActiveWordSense({ senseId = "", createNew = false } = {}) {
+        if (!activeAnalysisWordSourceId || wordSenseAssignmentInProgress) return;
+        wordSenseAssignmentInProgress = true;
+        wordSenses?.querySelectorAll("button").forEach((button) => {
+          button.disabled = true;
+        });
+        wordSenseActions?.querySelectorAll("button").forEach((button) => {
+          button.disabled = true;
+        });
+        if (wordSenseStatus) wordSenseStatus.textContent = "Saving meaning assignment...";
+        const body = new URLSearchParams();
+        if (senseId) body.set("sense_id", String(senseId));
+        if (createNew) body.set("create_new", "1");
+        try {
+          const response = await fetch(
+            `/analysis/word-source/${activeAnalysisWordSourceId}/sense`,
+            {
+              method: "POST",
+              headers: {"Content-Type": "application/x-www-form-urlencoded"},
+              body: body.toString(),
+            },
+          );
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            if (wordSenseStatus) wordSenseStatus.textContent = payload.error || "Meaning assignment failed.";
+            return;
+          }
+          renderWordAnalysis(payload);
+        } catch (error) {
+          if (wordSenseStatus) wordSenseStatus.textContent = `Meaning assignment failed: ${error}`;
+        } finally {
+          wordSenseAssignmentInProgress = false;
+          wordSenses?.querySelectorAll("button").forEach((button) => {
+            button.disabled = false;
+          });
+          wordSenseActions?.querySelectorAll("button").forEach((button) => {
+            button.disabled = false;
+          });
+        }
+      }
+
+      function renderWordSenses(payload) {
+        const senses = Array.isArray(payload.senses) ? payload.senses : [];
+        const currentSenseId = String(payload.current_sense_id || "");
+        const resolution = payload.sense_resolution || {};
+        if (wordSenses) wordSenses.replaceChildren();
+        if (wordSenseActions) wordSenseActions.replaceChildren();
+        if (wordSenseResolution) wordSenseResolution.hidden = true;
+
+        if (!senses.length) {
+          if (wordSenseStatus) wordSenseStatus.textContent = "No stable meaning saved yet.";
+          return;
+        }
+        if (wordSenseStatus) {
+          wordSenseStatus.textContent = currentSenseId
+            ? `${senses.length} saved meaning${senses.length === 1 ? "" : "s"} · meaning used here is highlighted`
+            : `${senses.length} saved meaning${senses.length === 1 ? "" : "s"} · this occurrence is not classified`;
+        }
+        senses.forEach((sense, index) => {
+          const item = document.createElement("article");
+          item.className = "word-sense-item";
+          if (String(sense.id) === currentSenseId) item.classList.add("current");
+          const heading = document.createElement("strong");
+          heading.textContent = `Meaning ${index + 1}${String(sense.id) === currentSenseId ? " · used here" : ""}`;
+          const meaning = document.createElement("p");
+          meaning.className = "analysis-text";
+          meaning.textContent = sense.meaning_en || "—";
+          item.append(heading, meaning);
+          if (sense.meaning_zh) {
+            const zh = document.createElement("p");
+            zh.className = "analysis-text analysis-translation";
+            zh.textContent = `中文：${sense.meaning_zh}`;
+            item.append(zh);
+          }
+          if (sense.representative_book_title || sense.representative_sentence) {
+            const source = document.createElement("p");
+            source.className = "analysis-text muted";
+            source.textContent = [
+              sense.representative_book_title || "",
+              sense.representative_sentence || "",
+            ].filter(Boolean).join(" · ");
+            item.append(source);
+          }
+          if (activeAnalysisWordSourceId && String(sense.id) !== currentSenseId) {
+            const use = document.createElement("button");
+            use.type = "button";
+            use.textContent = `Use Meaning ${index + 1}`;
+            use.addEventListener("click", () => assignActiveWordSense({ senseId: sense.id }));
+            item.append(use);
+          }
+          wordSenses?.append(item);
+        });
+
+        if (!activeAnalysisWordSourceId || (currentSenseId && !payload.sense_confirmation_required)) return;
+        if (wordSenseResolution) wordSenseResolution.hidden = false;
+        const decision = resolution.decision || "uncertain";
+        const matchedSenseId = String(resolution.matched_sense_id || "");
+        if (wordSenseReason) {
+          const prefix = decision === "same"
+            ? "AI recommendation: reuse a saved meaning."
+            : decision === "new"
+            ? "AI recommendation: create a new meaning."
+            : "AI could not determine the meaning safely.";
+          wordSenseReason.textContent = `${prefix} ${resolution.reason || ""}`.trim();
+        }
+        if (decision === "same" && matchedSenseId) {
+          const matchedIndex = senses.findIndex((sense) => String(sense.id) === matchedSenseId);
+          if (matchedIndex >= 0) {
+            const reuse = document.createElement("button");
+            reuse.type = "button";
+            reuse.textContent = `Use Meaning ${matchedIndex + 1}`;
+            reuse.addEventListener("click", () => assignActiveWordSense({ senseId: matchedSenseId }));
+            wordSenseActions?.append(reuse);
+          }
+        }
+        const create = document.createElement("button");
+        create.type = "button";
+        create.textContent = "Create new meaning";
+        create.addEventListener("click", () => assignActiveWordSense({ createNew: true }));
+        wordSenseActions?.append(create);
+      }
+
       function renderWordAnalysis(payload, seqAtRequest = toolbarInteractionSeq) {
         const a = payload.analysis || {};
         maybeHideToolbarAfterRender(seqAtRequest);
         activeAnalysisPayload = payload;
         activeAnalysisLabel = (payload.surface_form || payload.lemma || "word").trim();
         activeAnalysisWordCardId = String(payload.card_id || "");
+        activeAnalysisWordSourceId = String(payload.source_id || payload.source?.id || "");
         if (activeAnalysisWordCardId) {
           reader.querySelectorAll(`[data-word-card="${activeAnalysisWordCardId}"]`).forEach((span) => {
             span.dataset.hasAnalysis = "1";
           });
           reader.querySelectorAll(`[data-prior-analysis-card="${activeAnalysisWordCardId}"]`).forEach((span) => {
             span.dataset.hasAnalysis = "1";
-            span.title = "Analyzed earlier in this book — click to view";
+            span.title = span.dataset.crossBook === "1"
+              ? "Saved meanings exist in another book — meaning not checked here"
+              : "Analyzed earlier in this book — click to view";
           });
         }
         activeAnalysisSourceSentenceId = String(payload.sentence_id || "");
@@ -5177,14 +5318,18 @@
           wordRole.textContent = a.role_in_sentence || "—";
           applyGlossaryHighlights(wordRole);
         }
+        const currentSense = (payload.senses || []).find(
+          (sense) => String(sense.id) === String(payload.current_sense_id || ""),
+        );
         if (wordAnalysisMeaning) {
-          wordAnalysisMeaning.textContent = a.meaning_in_context || "—";
+          wordAnalysisMeaning.textContent = currentSense?.meaning_en || a.meaning_in_context || "—";
           applyGlossaryHighlights(wordAnalysisMeaning);
         }
         if (wordAnalysisMeaningZh) {
-          const chineseMeaning = a.chinese_meaning || a.chinese_gloss || "";
+          const chineseMeaning = currentSense?.meaning_zh || a.chinese_meaning || a.chinese_gloss || "";
           wordAnalysisMeaningZh.textContent = chineseMeaning ? `中文：${chineseMeaning}` : "中文：—";
         }
+        renderWordSenses(payload);
         if (wordRegister) {
           wordRegister.textContent = a.register || "—";
           applyGlossaryHighlights(wordRegister);
@@ -5270,6 +5415,7 @@
           clearAnalysisHistory();
         }
         activeAnalysisWordCardId = cardId;
+        const sourceId = String(options.sourceId || activeAnalysisWordSourceId || "");
         const contextText = normalizeContextText(
           options.contextText || wordAnalysisContextByCardId.get(String(cardId)) || "",
         );
@@ -5280,6 +5426,7 @@
           const body = new URLSearchParams();
           if (options.preferPro) body.set("prefer_pro", "1");
           if (options.forceRefresh) body.set("force_refresh", "1");
+          if (sourceId) body.set("source_id", sourceId);
           if (contextText) body.set("context_text", contextText);
           const response = await fetch(`/analysis/word/${cardId}`, {
             method: "POST",
@@ -5297,15 +5444,17 @@
         }
       }
 
-      async function loadSavedWordAnalysis(cardId) {
+      async function loadSavedWordAnalysis(cardId, sourceId = "") {
         if (!cardId) return;
         clearAnalysisHistory();
         activeAnalysisWordCardId = cardId;
+        activeAnalysisWordSourceId = String(sourceId || "");
         const seqAtRequest = toolbarInteractionSeq;
         setPanelLoadingWord("Loading word analysis...");
         hideToolbar();
         try {
-          const response = await fetch(`/analysis/word/${cardId}`);
+          const suffix = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : "";
+          const response = await fetch(`/analysis/word/${cardId}${suffix}`);
           const payload = await response.json();
           if (!response.ok || !payload.ok) {
             renderWordAnalysisError(payload.error || "No saved word analysis found.", Boolean(payload.retry));
@@ -5314,6 +5463,53 @@
           renderWordAnalysis(payload, seqAtRequest);
         } catch (error) {
           renderWordAnalysisError(`Could not load word analysis: ${error}`, true);
+        }
+      }
+
+      async function loadPriorWordOccurrence(priorAnalysisWord) {
+        const cardId = priorAnalysisWord?.dataset.priorAnalysisCard || "";
+        const sentence = priorAnalysisWord?.closest("[data-sentence-id]");
+        const sentenceId = sentence?.dataset.sentenceId || "";
+        const surfaceForm = priorAnalysisWord?.textContent?.trim() || "";
+        if (!cardId || !sentenceId || !surfaceForm) {
+          loadSavedWordAnalysis(cardId);
+          return;
+        }
+        const offsets = uniqueOffsetsInSentence(sentence, surfaceForm);
+        const body = new URLSearchParams({
+          sentence_id: sentenceId,
+          surface_form: surfaceForm,
+          lexical_type: priorAnalysisWord.dataset.lexicalType || "word",
+          return_to: returnTo,
+        });
+        addSourceFields(body, offsets);
+        setPanelLoadingWord(`Loading saved meanings for “${surfaceForm}”...`);
+        try {
+          const response = await fetch("/mark/word", {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "X-Requested-With": "fetch",
+            },
+            body,
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok || !payload.source) {
+            renderWordAnalysisError(
+              payload.error || "Could not register this occurrence.",
+              true,
+            );
+            return;
+          }
+          registerWordCard(payload.word_card);
+          decorateWordCardElement(priorAnalysisWord, payload.word_card, payload.source);
+          priorAnalysisWord.classList.remove("prior-analysis-word");
+          priorAnalysisWord.removeAttribute("data-prior-analysis-card");
+          priorAnalysisWord.removeAttribute("data-cross-book");
+          wordAnalysisContextByCardId.set(String(cardId), sentence.textContent || "");
+          loadSavedWordAnalysis(cardId, String(payload.source.id));
+        } catch (error) {
+          renderWordAnalysisError(`Could not register this occurrence: ${error}`, true);
         }
       }
 
@@ -5857,7 +6053,7 @@
         ) {
           event.preventDefault();
           if (event.detail > 1) return;
-          loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);
+          loadPriorWordOccurrence(priorAnalysisWord);
           return;
         }
         const wordSpan = event.target.closest("[data-word-card]");
@@ -5888,7 +6084,7 @@
         if (priorAnalysisWord?.dataset.hasAnalysis === "1") {
           event.preventDefault();
           window.getSelection()?.removeAllRanges();
-          loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);
+          loadPriorWordOccurrence(priorAnalysisWord);
           return;
         }
         const wordSpan = event.target.closest("[data-word-card]");

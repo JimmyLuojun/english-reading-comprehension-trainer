@@ -14,7 +14,12 @@ from app.cards.sentence_card_service import (
     save_sentence_structure,
     save_sentence_translation,
 )
-from app.cards.word_card_service import create_or_update_word_card
+from app.cards.word_card_service import create_or_update_word_card, list_word_card_sources
+from app.cards.word_sense_service import (
+    assign_source_sense,
+    create_word_sense,
+    record_source_analysis,
+)
 from app.db_connection import DatabaseConnection
 from app.db_models import LexicalType
 from app.importers.txt_importer import import_txt
@@ -324,6 +329,96 @@ def test_sentence_and_word_analysis_payloads(tmp_path: Path) -> None:
 
     assert word_payload["surface_form"] == "cat"
     assert word_payload["analysis"] == {"ok": True}
+
+
+def test_word_payload_uses_clicked_source_and_requires_resolution_confirmation(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseConnection(tmp_path / "word-source.db")
+    db.apply_migrations(MIGRATIONS_DIR)
+    first_id, second_id = _seed_sentences(
+        db,
+        tmp_path,
+        "The coating is thin. Check coating requirements.",
+    )
+    card_id, _ = create_or_update_word_card(db, first_id, "coating")
+    create_or_update_word_card(db, second_id, "coating")
+    sources = {
+        int(source["sentence_id"]): source
+        for source in list_word_card_sources(db, card_id)
+    }
+    first_analysis = {
+        "meaning_in_context": "a thin material applied to a surface",
+        "chinese_meaning": "涂层",
+        "pos": "noun",
+    }
+    first_cache_id = _insert_cache(
+        db,
+        first_analysis,
+        content_hash="first-coating-analysis",
+    )
+    _update_word_card_analysis_id(db, card_id, first_cache_id)
+    sense_id = create_word_sense(db, card_id, first_cache_id, first_analysis)
+    assign_source_sense(
+        db,
+        int(sources[first_id]["id"]),
+        sense_id,
+        status="manual",
+    )
+
+    unclassified = _fetch_word_analysis_payload(
+        db,
+        card_id,
+        int(sources[second_id]["id"]),
+    )
+    assert unclassified["sentence_id"] == second_id
+    assert unclassified["source"]["sentence_text"] == "Check coating requirements."
+    assert unclassified["sense_confirmation_required"] is False
+
+    second_analysis = {
+        **first_analysis,
+        "sense_resolution": {
+            "decision": "same",
+            "matched_sense_id": sense_id,
+            "reason": "The material-layer meaning fits.",
+            "confidence": 0.93,
+        },
+    }
+    second_cache_id = _insert_cache(
+        db,
+        second_analysis,
+        content_hash="second-coating-analysis",
+    )
+    record_source_analysis(
+        db,
+        int(sources[second_id]["id"]),
+        second_cache_id,
+        status="uncertain",
+        confidence=0.93,
+    )
+
+    pending = _fetch_word_analysis_payload(
+        db,
+        card_id,
+        int(sources[second_id]["id"]),
+    )
+    assert pending["analysis"] == second_analysis
+    assert pending["sense_confirmation_required"] is True
+
+    assign_source_sense(
+        db,
+        int(sources[second_id]["id"]),
+        sense_id,
+        status="matched",
+        confidence=0.93,
+    )
+    confirmed = _fetch_word_analysis_payload(
+        db,
+        card_id,
+        int(sources[second_id]["id"]),
+    )
+    assert confirmed["current_sense_id"] == sense_id
+    assert confirmed["sense_confirmation_required"] is False
 
 
 def test_sentence_analysis_payload_is_stale_when_translation_changes(

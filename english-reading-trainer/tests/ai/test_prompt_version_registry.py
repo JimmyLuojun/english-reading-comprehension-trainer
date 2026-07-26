@@ -52,21 +52,21 @@ class TestSyncPromptVersions:
     ) -> None:
         result = sync_prompt_versions(db, REAL_PROMPTS_DIR)
 
-        assert result.inserted == 24
-        assert result.total_files == 24
+        assert result.inserted == 26
+        assert result.total_files == 26
         assert result.active_versions == {
             "paragraph_logic_lens": "v4",
             "profile_summary": "v1",
             "sentence_analysis_diagnose": "v7",
             "sentence_analysis_predict": "v7",
-            "word_analysis": "v5",
+            "word_analysis": "v7",
         }
         with db.get_connection() as conn:
             count = conn.execute("SELECT COUNT(*) FROM prompt_versions").fetchone()[0]
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-            assert count == 24
+            assert count == 26
         assert active_count == 5
 
     def test_sync_is_idempotent(

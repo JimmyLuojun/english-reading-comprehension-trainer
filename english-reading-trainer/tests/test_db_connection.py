@@ -6,6 +6,7 @@ Covers: connection, WAL mode, FK enforcement, migration runner idempotency,
 all tables/columns from §1 of design.md, constraint violations, seed data.
 """
 
+import json
 import sqlite3
 import shutil
 from pathlib import Path
@@ -61,6 +62,7 @@ class TestMigrationRunner:
         assert "015_word_card_source_offsets.sql" in applied
         assert "016_migration_checksums.sql" in applied
         assert "017_library_items.sql" in applied
+        assert "018_word_senses.sql" in applied
 
     def test_migrations_are_idempotent(self, db: DatabaseConnection) -> None:
         applied_second = db.apply_migrations(MIGRATIONS_DIR)
@@ -85,6 +87,114 @@ class TestMigrationRunner:
         assert "015_word_card_source_offsets.sql" in recorded
         assert "016_migration_checksums.sql" in recorded
         assert "017_library_items.sql" in recorded
+        assert "018_word_senses.sql" in recorded
+
+    def test_word_senses_migration_backfills_only_primary_occurrence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        old_migrations = tmp_path / "pre_word_sense_migrations"
+        old_migrations.mkdir()
+        for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            if sql_file.name != "018_word_senses.sql":
+                shutil.copy(sql_file, old_migrations / sql_file.name)
+
+        db = DatabaseConnection(tmp_path / "word_senses_upgrade.db")
+        db.apply_migrations(old_migrations)
+        response = {
+            "meaning_in_context": "a material applied as a thin surface layer",
+            "chinese_meaning": "涂层",
+            "pos": "noun",
+        }
+        with db.get_connection() as conn:
+            book_id = conn.execute(
+                """INSERT INTO books
+                   (title, source_format, file_hash, imported_at)
+                   VALUES ('Legacy', 'txt', 'legacy-word-sense', '2026-01-01')"""
+            ).lastrowid
+            chapter_id = conn.execute(
+                """INSERT INTO chapters
+                   (book_id, idx, title, sentence_start, sentence_end)
+                   VALUES (?, 1, 'Ch', 0, 2)""",
+                (book_id,),
+            ).lastrowid
+            paragraph_id = conn.execute(
+                """INSERT INTO paragraphs
+                   (chapter_id, idx, sentence_start, sentence_end)
+                   VALUES (?, 1, 0, 2)""",
+                (chapter_id,),
+            ).lastrowid
+            sentence_ids = []
+            for idx, text in enumerate(
+                ("The coating is thin.", "Check coating requirements.")
+            ):
+                sentence_ids.append(
+                    conn.execute(
+                        """INSERT INTO sentences
+                           (book_id, chapter_id, paragraph_id, idx, text, text_hash,
+                            char_offset_start, char_offset_end)
+                           VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
+                        (
+                            book_id,
+                            chapter_id,
+                            paragraph_id,
+                            idx,
+                            text,
+                            f"legacy-sentence-{idx}",
+                            len(text),
+                        ),
+                    ).lastrowid
+                )
+            analysis_id = conn.execute(
+                """INSERT INTO ai_cache
+                   (content_hash, prompt_version, model, response_json,
+                    is_valid, created_at)
+                   VALUES ('legacy-coating', 'v5', 'test', ?, 1, '2026-01-01')""",
+                (json.dumps(response),),
+            ).lastrowid
+            card_id = conn.execute(
+                """INSERT INTO word_cards
+                   (lemma, surface_form, first_sentence_id, current_meaning, pos,
+                    created_at, due_at, occurrence_count, ai_analysis_id)
+                   VALUES ('coating', 'coating', ?, 'legacy meaning', 'noun',
+                           '2026-01-01', '2026-01-01', 2, ?)""",
+                (sentence_ids[0], analysis_id),
+            ).lastrowid
+            for is_primary, sentence_id in enumerate(sentence_ids):
+                conn.execute(
+                    """INSERT INTO word_card_sources
+                       (card_id, sentence_id, surface_form, source_key,
+                        start_offset, end_offset, selected_text, is_primary, created_at)
+                       VALUES (?, ?, 'coating', 'coating', 4, 11, 'coating', ?, '2026-01-01')""",
+                    (card_id, sentence_id, 1 if is_primary == 0 else 0),
+                )
+
+        assert db.apply_migrations(MIGRATIONS_DIR) == ["018_word_senses.sql"]
+
+        with db.get_connection() as conn:
+            sense = conn.execute(
+                "SELECT * FROM word_senses WHERE card_id = ?",
+                (card_id,),
+            ).fetchone()
+            sources = conn.execute(
+                """SELECT is_primary, sense_id, context_analysis_id,
+                          resolution_status, resolution_confidence
+                     FROM word_card_sources
+                    WHERE card_id = ?
+                    ORDER BY is_primary DESC""",
+                (card_id,),
+            ).fetchall()
+        assert sense["meaning_en"] == response["meaning_in_context"]
+        assert sense["meaning_zh"] == "涂层"
+        assert dict(sources[0]) == {
+            "is_primary": 1,
+            "sense_id": sense["id"],
+            "context_analysis_id": analysis_id,
+            "resolution_status": "manual",
+            "resolution_confidence": 1.0,
+        }
+        assert sources[1]["sense_id"] is None
+        assert sources[1]["context_analysis_id"] is None
 
     def test_library_item_migration_preserves_legacy_truth_and_constraints(
         self,
@@ -431,6 +541,7 @@ class TestMigrationRunner:
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
             "017_library_items.sql",
+            "018_word_senses.sql",
         ]
         assert "input_translation" in db.get_table_columns("ai_cache")
         assert "input_structure" in db.get_table_columns("ai_cache")
@@ -523,6 +634,7 @@ class TestMigrationRunner:
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
             "017_library_items.sql",
+            "018_word_senses.sql",
         ]
         with db.get_connection() as conn:
             sentence_code = conn.execute(
@@ -799,6 +911,7 @@ class TestConstraints:
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
             "017_library_items.sql",
+            "018_word_senses.sql",
         ]
         with db.get_connection() as conn:
             counts = {
@@ -969,6 +1082,7 @@ class TestConstraints:
             "015_word_card_source_offsets.sql",
             "016_migration_checksums.sql",
             "017_library_items.sql",
+            "018_word_senses.sql",
         ]
         with db.get_connection() as conn:
             row = conn.execute(

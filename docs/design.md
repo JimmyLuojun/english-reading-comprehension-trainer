@@ -75,6 +75,7 @@
 - [外部网页选句分析方案](features/external-web-sentence-analysis.md)：计划中的 Chrome Extension + 本地 FastAPI bridge，第一版按 `s` 选中网页当前句子并在右侧 drawer 显示结合上下文的 AI 分析；后续再做来源管理、词/短语分析和 Review 整合。
 - [External Word AI Prompt / 外部 AI 词汇分析提示词](features/external-word-ai-prompt.md)：Reader 词/短语/搭配外部 AI 快速分析闭环；用分组浮层 `Word | Phrase | Collocation` + `Copy prompt` + `AI analysis`，支持未保存选词直接复制 prompt、已有 Word Analysis 面板复制 prompt，以及 paste-back 验证保存为正常 Word Analysis。
 - [重复已分析词汇提示](features/repeated-analyzed-vocabulary.md)：同一本书内再次出现已完成 AI 分析的相同词/短语/搭配时，以词性同色的细点状下划线提示；点击只读取既有分析，不创建来源或覆盖上下文含义。多语境含义模型留待后续单独设计。
+- [跨书语境义项](features/contextual-word-senses.md)：已实现——相同表达跨书出现时显示未核验的点状提示；点击先登记精确 occurrence，再按当前句分析；AI 推荐复用/新建/不确定，由学习者确认，并在一个词卡下展示全部稳定义项。
 - [Reader Analysis Panel](features/reader-analysis-panel.md)：AI 分析解释词汇回链、覆盖式面板、阅读位置保持。
 - [Logic Reading Lens / 文章逻辑视角](features/logic-reading-lens.md)：已实现——句子分析 v7 显示 `argument_role` / reason / check；Reader 支持裸键 `p` 选择段落、独立段落浮层、右侧段落 argument-flow 分析和 Copy prompt；不复制正式逻辑训练项目，不新增第二套 Review。
 - [PDF 导入执行方案](features/pdf-import.md)：已实现的 PDF 导入归一化方案。
@@ -100,6 +101,7 @@
 - [Sentence analysis input snapshots ADR](decisions/2026-06-20-sentence-analysis-input-snapshots.md)：句子分析 cache 行保存本次分析依据的译文/结构快照，Reader 只在快照与当前输入不同且非空时显示只读复盘框。
 - [Local data and service hardening ADR](decisions/2026-07-10-local-data-and-service-hardening.md)：SQLite 备份/可验证恢复、原子且带 checksum 的迁移、本地 token/CSRF、URL SSRF 防护、可观测性与 Reader 静态资源拆分。
 - [Library Item compatibility layer ADR](decisions/2026-07-17-library-item-compatibility-layer.md)：Library Item 作为产品概念，保留 `books`/`book_id` 作为兼容物理模型。
+- [Word senses and occurrence analyses ADR](decisions/2026-07-25-word-senses-and-occurrence-analysis.md)：review card、稳定义项与逐 occurrence 语境分析分层；跨书匹配不静默确认。
 - [不变量](state/invariants.md)：跨功能必须保持的业务规则。
 - [当前 SQLite schema](state/schema.sql)：由真实数据库 `.schema` 生成；schema 迁移后必须更新。
 - [产品化路线](productization-roadmap.md)：自用稳定化、后续分发和暂不投入清单。

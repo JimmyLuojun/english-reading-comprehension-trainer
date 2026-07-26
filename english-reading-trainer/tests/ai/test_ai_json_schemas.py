@@ -23,6 +23,8 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
     WORD_ANALYSIS_SCHEMA_V5,
+    WORD_ANALYSIS_SCHEMA_V6,
+    WORD_ANALYSIS_SCHEMA_V7,
 )
 from app.db_models import VALID_ERROR_CODES
 
@@ -842,6 +844,62 @@ class TestWordSchemaV5InvalidInstances:
     def test_v4_word_rejected_by_v5_schema(self) -> None:
         with pytest.raises(jsonschema.ValidationError):
             _validate(VALID_WORD_V4, WORD_ANALYSIS_SCHEMA_V5)
+
+
+class TestWordSchemaV6:
+    def test_valid_sense_resolution_passes(self) -> None:
+        payload = {
+            **VALID_WORD_V5,
+            "sense_resolution": {
+                "decision": "same",
+                "matched_sense_id": 12,
+                "reason": "The contextual meaning is equivalent.",
+                "confidence": 0.92,
+            },
+        }
+        _validate(payload, WORD_ANALYSIS_SCHEMA_V6)
+
+    @pytest.mark.parametrize("decision", ["same", "new", "uncertain"])
+    def test_all_resolution_decisions_are_allowed(self, decision: str) -> None:
+        payload = {
+            **VALID_WORD_V5,
+            "sense_resolution": {
+                "decision": decision,
+                "matched_sense_id": 1 if decision == "same" else None,
+                "reason": "Contextual comparison completed.",
+                "confidence": 0.8,
+            },
+        }
+        _validate(payload, WORD_ANALYSIS_SCHEMA_V6)
+
+    def test_missing_resolution_is_rejected(self) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(VALID_WORD_V5, WORD_ANALYSIS_SCHEMA_V6)
+
+    def test_unknown_resolution_decision_is_rejected(self) -> None:
+        payload = {
+            **VALID_WORD_V5,
+            "sense_resolution": {
+                "decision": "probably",
+                "matched_sense_id": None,
+                "reason": "Invalid decision.",
+                "confidence": 0.8,
+            },
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            _validate(payload, WORD_ANALYSIS_SCHEMA_V6)
+
+    def test_v7_keeps_the_v6_json_contract(self) -> None:
+        payload = {
+            **VALID_WORD_V5,
+            "sense_resolution": {
+                "decision": "uncertain",
+                "matched_sense_id": None,
+                "reason": "The current sentence does not identify the coating type.",
+                "confidence": 0.72,
+            },
+        }
+        _validate(payload, WORD_ANALYSIS_SCHEMA_V7)
 
 
 # ---------------------------------------------------------------------------

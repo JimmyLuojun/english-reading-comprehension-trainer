@@ -407,7 +407,7 @@ class TestBasicPages:
             active_count = conn.execute(
                 "SELECT COUNT(*) FROM prompt_versions WHERE is_active = 1"
             ).fetchone()[0]
-        assert count == 24
+        assert count == 26
         assert active_count == 5
 
     def test_dashboard_empty(self, client: TestClient) -> None:
@@ -1440,7 +1440,7 @@ class TestReadingAndMarking:
         assert "text-decoration-thickness: 0.12em" in response.text
         assert "rgba(251, 191, 36, 0.34)" in response.text
 
-    def test_read_page_marks_analyzed_repeat_only_inside_source_book(
+    def test_read_page_marks_analyzed_repeat_and_cross_book_candidate(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         book_id, sentence_ids = _seed_text_book(
@@ -1492,7 +1492,9 @@ class TestReadingAndMarking:
         assert source_book.text.count(f'data-word-card="{card_id}"') == 1
         assert source_book.text.count(f'data-prior-analysis-card="{card_id}"') == 1
         assert "Analyzed earlier in this book — click to view" in source_book.text
-        assert f'data-prior-analysis-card="{card_id}"' not in other_book.text
+        assert f'data-prior-analysis-card="{card_id}"' in other_book.text
+        assert 'data-cross-book="1"' in other_book.text
+        assert "Saved meanings exist in another book — meaning not checked here" in other_book.text
 
     def test_explicit_chapter_does_not_restore_saved_progress(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
@@ -2227,7 +2229,7 @@ class TestReadingAndMarking:
         assert payload["ok"] is True
         assert payload["surface_form"] == "cat"
         assert payload["sentence_id"] == sentence_ids[0]
-        assert payload["active_prompt_version"] == "v5"
+        assert payload["active_prompt_version"] == "v7"
         assert payload["is_stale"] is True
         assert payload["analysis"]["meaning_in_context"] == "a small domestic feline animal"
         assert payload["analysis"]["chinese_meaning"] == "小型家养猫科动物"
@@ -3788,6 +3790,7 @@ class TestWordAnalysisPanelV2:
                     "UPDATE word_cards SET ai_analysis_id = ? WHERE id = ?",
                     (cache_id, card_id),
                 )
+            mock_result.cache_id = cache_id
             response = client.post(f"/analysis/word/{card_id}")
 
         assert response.status_code == 200

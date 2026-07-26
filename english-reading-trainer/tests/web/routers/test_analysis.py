@@ -191,6 +191,58 @@ def test_get_word_analysis_route_returns_payload(monkeypatch) -> None:
     assert response.json() == {"ok": True, "card_id": 7}
 
 
+def test_get_word_analysis_route_passes_source_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fetch(db, card_id, source_id):
+        captured.update(card_id=card_id, source_id=source_id)
+        return {"ok": True, "card_id": card_id, "source_id": source_id}
+
+    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", fetch)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get("/analysis/word/7?source_id=13")
+
+    assert response.status_code == 200
+    assert captured == {"card_id": 7, "source_id": 13}
+
+
+def test_confirm_word_source_sense_route(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def confirm(db, source_id, **kwargs):
+        captured.update(source_id=source_id, **kwargs)
+        return {"ok": True, "source_id": source_id, "current_sense_id": kwargs["sense_id"]}
+
+    monkeypatch.setattr(analysis, "confirm_word_source_sense", confirm)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/word-source/5/sense",
+        data={"sense_id": "12"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"source_id": 5, "sense_id": 12, "create_new": False}
+    assert response.json()["current_sense_id"] == 12
+
+
+def test_confirm_word_source_sense_route_maps_invalid_choice(monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise ValueError("Choose an existing meaning or create a new one.")
+
+    monkeypatch.setattr(analysis, "confirm_word_source_sense", fail)
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post("/analysis/word-source/5/sense")
+
+    assert response.status_code == 400
+    assert response.json()["retry"] is False
+
+
 def test_paragraph_logic_route_parses_force_refresh(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -380,6 +432,29 @@ def test_external_word_card_prompt_route_returns_prompt(monkeypatch) -> None:
     }
 
 
+def test_external_word_card_prompt_route_passes_source_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_prompt(*args, **kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "prompt": "context prompt"}
+
+    monkeypatch.setattr(
+        analysis,
+        "build_external_word_prompt_for_card",
+        fake_prompt,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).get(
+        "/analysis/word/7/external-prompt?source_id=19"
+    )
+
+    assert response.status_code == 200
+    assert captured == {"source_id": 19}
+
+
 def test_external_word_card_prompt_route_maps_value_error(monkeypatch) -> None:
     def fail_prompt(*args, **kwargs):
         raise ValueError("Word card not found.")
@@ -495,6 +570,37 @@ def test_external_word_card_analysis_route_passes_pasted_result(monkeypatch) -> 
     assert captured == {
         "card_id": 7,
         "external_result": "full word reply",
+    }
+
+
+def test_external_word_card_analysis_route_passes_source_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Outcome:
+        is_error = False
+        payload = {"ok": True}
+
+    def fake_save(*args, **kwargs):
+        captured.update(kwargs)
+        return Outcome()
+
+    monkeypatch.setattr(
+        analysis,
+        "save_external_word_analysis_for_card",
+        fake_save,
+    )
+    app = FastAPI()
+    register_analysis_routes(app, lambda: object())
+
+    response = TestClient(app).post(
+        "/analysis/word/7/external",
+        data={"external_result": "full word reply", "source_id": "19"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "external_result": "full word reply",
+        "source_id": 19,
     }
 
 

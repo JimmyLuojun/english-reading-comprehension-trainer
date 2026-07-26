@@ -17,6 +17,8 @@ book_tags
 
 sentence_cards
 word_cards          -- 含单词与短语（见 §3）
+word_senses         -- 一个词卡下的稳定语境义项
+word_card_sources   -- 精确 occurrence、义项指派与逐句分析
 review_logs
 
 tags
@@ -55,6 +57,12 @@ word_cards(id, lemma, surface_form, lexical_type,  -- word | phrase | collocatio
            created_at, last_reviewed_at, review_count,
            mastery_state, ef, interval_days, repetitions, due_at,
            occurrence_count, user_note, ai_analysis_id)
+word_senses(id, card_id, meaning_en, meaning_zh, pos,
+            representative_analysis_id, created_at, updated_at)
+word_card_sources(id, card_id, sentence_id, surface_form, source_key,
+                  start_offset, end_offset, selected_text, is_primary,
+                  sense_id, context_analysis_id,
+                  resolution_status, resolution_confidence, created_at)
 
 -- 复习（记录 SM-2 算法状态前后值，便于回放与调参）
 review_logs(id, card_type, card_id, reviewed_at,
@@ -95,6 +103,9 @@ prompt_versions(id, name, version, body_md, created_at, is_active)
 - `mastery_state` 与 SM-2 状态字段并存：`ef / interval_days / repetitions` 是算法状态，`mastery_state` 是衍生标签（new / learning / mature / lapsed），由 `repetitions` 与 `ef` 派生（见 §7.4）。
 - `due_at` 直接预计算下次到期，避免每次查询时算。
 - `ai_analysis_id` 指向 `ai_cache`，不直接存 JSON 在卡片表里。
+- `word_cards` 仍是 lemma 级 SM-2 复习单元；`word_senses` 保存可复用的稳定含义；`word_card_sources` 保存某次原文 occurrence 的精确位置、当前义项指派和该句专属 AI 分析。
+- `word_cards.current_meaning` / `ai_analysis_id` 暂作为旧 Cards/Review 路径的兼容镜像，不再代表该词在所有书中的唯一含义。
+- 同形表达跨书再次出现只表示“已有候选义项”，不表示语义已经相同。分析 prompt 以稳定 sense ID 返回 `same/new/uncertain` 建议，最终复用或新建由学习者确认。
 
 `[已确认 2026-06-14]`
 

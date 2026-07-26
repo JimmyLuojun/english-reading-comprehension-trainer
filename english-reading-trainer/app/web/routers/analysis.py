@@ -23,6 +23,7 @@ from app.web.services.analysis import (
     build_external_sentence_prompt,
     build_external_word_prompt_for_card,
     build_external_word_prompt_for_selection,
+    confirm_word_source_sense,
     save_external_paragraph_logic_for_reader,
     save_external_sentence_analysis_for_reader,
     save_external_word_analysis_for_card,
@@ -175,8 +176,12 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         return JSONResponse(outcome.payload)
 
     @web_app.get("/analysis/word/{card_id}")
-    def get_word_analysis(card_id: int) -> JSONResponse:
-        payload = _fetch_word_analysis_payload(db_factory(), card_id)
+    def get_word_analysis(card_id: int, source_id: int | None = None) -> JSONResponse:
+        payload = (
+            _fetch_word_analysis_payload(db_factory(), card_id, source_id)
+            if source_id is not None
+            else _fetch_word_analysis_payload(db_factory(), card_id)
+        )
         if payload is None:
             return JSONResponse(
                 {"ok": False, "error": "No saved analysis for this word.", "retry": True},
@@ -185,13 +190,24 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         return JSONResponse(payload)
 
     @web_app.get("/analysis/word/{card_id}/external-prompt")
-    async def external_word_card_prompt_endpoint(card_id: int) -> JSONResponse:
+    async def external_word_card_prompt_endpoint(
+        card_id: int,
+        source_id: int | None = None,
+    ) -> JSONResponse:
         try:
-            payload = await run_in_threadpool(
-                build_external_word_prompt_for_card,
-                db_factory(),
-                card_id,
-            )
+            if source_id is None:
+                payload = await run_in_threadpool(
+                    build_external_word_prompt_for_card,
+                    db_factory(),
+                    card_id,
+                )
+            else:
+                payload = await run_in_threadpool(
+                    build_external_word_prompt_for_card,
+                    db_factory(),
+                    card_id,
+                    source_id=source_id,
+                )
         except ValueError as exc:
             return JSONResponse(
                 {"ok": False, "error": str(exc), "retry": False},
@@ -205,12 +221,22 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         request: Request,
     ) -> JSONResponse:
         form = await _read_form(request)
-        outcome = await run_in_threadpool(
-            save_external_word_analysis_for_card,
-            db_factory(),
-            card_id,
-            external_result=form.get("external_result", ""),
-        )
+        source_id = _optional_int_form_value(form.get("source_id"))
+        if source_id is None:
+            outcome = await run_in_threadpool(
+                save_external_word_analysis_for_card,
+                db_factory(),
+                card_id,
+                external_result=form.get("external_result", ""),
+            )
+        else:
+            outcome = await run_in_threadpool(
+                save_external_word_analysis_for_card,
+                db_factory(),
+                card_id,
+                external_result=form.get("external_result", ""),
+                source_id=source_id,
+            )
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
         return JSONResponse(outcome.payload)
@@ -222,6 +248,7 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
             analyze_word_card_for_reader,
             db_factory(),
             card_id,
+            source_id=_optional_int_form_value(form.get("source_id")),
             context_text=form.get("context_text", ""),
             prefer_pro=_truthy_form_value(form.get("prefer_pro")),
             force_refresh=_truthy_form_value(form.get("force_refresh")),
@@ -229,6 +256,27 @@ def register_analysis_routes(web_app: FastAPI, db_factory: Callable[[], Database
         if outcome.is_error:
             return JSONResponse(outcome.error_payload(), status_code=outcome.status_code)
         return JSONResponse(outcome.payload)
+
+    @web_app.post("/analysis/word-source/{source_id}/sense")
+    async def confirm_word_source_sense_endpoint(
+        source_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        form = await _read_form(request)
+        try:
+            payload = await run_in_threadpool(
+                confirm_word_source_sense,
+                db_factory(),
+                source_id,
+                sense_id=_optional_int_form_value(form.get("sense_id")),
+                create_new=_truthy_form_value(form.get("create_new")),
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": str(exc), "retry": False},
+                status_code=400,
+            )
+        return JSONResponse(payload)
 
     @web_app.post("/analysis/selection/word-external-prompt")
     async def external_word_selection_prompt_endpoint(request: Request) -> JSONResponse:

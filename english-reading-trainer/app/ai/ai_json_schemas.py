@@ -16,6 +16,8 @@ WORD_ANALYSIS_SCHEMA_V2     — v2 prompt, writer-perspective fields (§22)
 WORD_ANALYSIS_SCHEMA_V3     — v3 prompt, adds Chinese meaning for reader panel
 WORD_ANALYSIS_SCHEMA_V4     — v4 prompt, adds learner-note feedback
 WORD_ANALYSIS_SCHEMA_V5     — v5 prompt, adds role in sentence
+WORD_ANALYSIS_SCHEMA_V6     — v6 prompt, adds contextual sense resolution
+WORD_ANALYSIS_SCHEMA_V7     — v7 prompt clarification; JSON contract unchanged
 """
 
 from app.db_models import ERROR_TYPES, ErrorLayer, VALID_ERROR_CODES
@@ -543,3 +545,45 @@ WORD_ANALYSIS_SCHEMA_V5: dict = {
         "role_in_sentence": {"type": "string", "minLength": 1},
     },
 }
+
+# ---------------------------------------------------------------------------
+# Word / phrase / collocation analysis schema v6
+# Adds an ID-addressable recommendation without treating it as a confirmed
+# source-to-sense assignment.
+# ---------------------------------------------------------------------------
+
+WORD_ANALYSIS_SCHEMA_V6: dict = {
+    **WORD_ANALYSIS_SCHEMA_V5,
+    "required": [
+        *WORD_ANALYSIS_SCHEMA_V5["required"],
+        "sense_resolution",
+    ],
+    "properties": {
+        **WORD_ANALYSIS_SCHEMA_V5["properties"],
+        "sense_resolution": {
+            "type": "object",
+            "required": ["decision", "matched_sense_id", "reason", "confidence"],
+            "additionalProperties": False,
+            "properties": {
+                "decision": {
+                    "type": "string",
+                    "enum": ["same", "new", "uncertain"],
+                },
+                "matched_sense_id": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                },
+                "reason": {"type": "string", "minLength": 1},
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
+            },
+        },
+    },
+}
+
+# v7 strengthens instructions and adds an ambiguity example without changing
+# the persisted JSON contract.
+WORD_ANALYSIS_SCHEMA_V7: dict = WORD_ANALYSIS_SCHEMA_V6

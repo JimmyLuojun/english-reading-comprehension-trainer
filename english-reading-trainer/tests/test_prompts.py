@@ -26,7 +26,7 @@ PROMPT_FILES = {
     "sentence_analysis_predict":  PROMPTS_DIR / "sentence_analysis_predict.v7.md",
     "sentence_analysis_diagnose": PROMPTS_DIR / "sentence_analysis_diagnose.v7.md",
     "paragraph_logic_lens":       PROMPTS_DIR / "paragraph_logic_lens.v4.md",
-    "word_analysis":              PROMPTS_DIR / "word_analysis.v5.md",
+    "word_analysis":              PROMPTS_DIR / "word_analysis.v7.md",
     "profile_summary":            PROMPTS_DIR / "profile_summary.v1.md",
 }
 SENTENCE_ANALYSIS_PREDICT_V1 = PROMPTS_DIR / "sentence_analysis_predict.v1.md"
@@ -46,6 +46,8 @@ SENTENCE_ANALYSIS_DIAGNOSE_V7 = PROMPTS_DIR / "sentence_analysis_diagnose.v7.md"
 WORD_ANALYSIS_V3 = PROMPTS_DIR / "word_analysis.v3.md"
 WORD_ANALYSIS_V4 = PROMPTS_DIR / "word_analysis.v4.md"
 WORD_ANALYSIS_V5 = PROMPTS_DIR / "word_analysis.v5.md"
+WORD_ANALYSIS_V6 = PROMPTS_DIR / "word_analysis.v6.md"
+WORD_ANALYSIS_V7 = PROMPTS_DIR / "word_analysis.v7.md"
 PARAGRAPH_LOGIC_LENS_V1 = PROMPTS_DIR / "paragraph_logic_lens.v1.md"
 PARAGRAPH_LOGIC_LENS_V2 = PROMPTS_DIR / "paragraph_logic_lens.v2.md"
 PARAGRAPH_LOGIC_LENS_V3 = PROMPTS_DIR / "paragraph_logic_lens.v3.md"
@@ -60,7 +62,8 @@ REQUIRED_VARS = {
                                    "learner_profile", "user_structure"],
     "paragraph_logic_lens": ["paragraph", "sentence_lines", "context"],
     "word_analysis": ["surface_form", "sentence", "context",
-                      "related_cards", "learner_note", "learner_profile"],
+                      "existing_senses", "related_cards", "learner_note",
+                      "learner_profile"],
     "profile_summary": ["lookback_days", "total_reviews",
                         "sentence_card_count", "word_card_count",
                         "error_type_stats"],
@@ -189,7 +192,7 @@ class TestFrontmatter:
         ("sentence_analysis_predict", "v7"),
         ("sentence_analysis_diagnose", "v7"),
         ("paragraph_logic_lens", "v4"),
-        ("word_analysis", "v5"),
+        ("word_analysis", "v7"),
         ("profile_summary", "v1"),
     ])
     def test_version_matches_filename(self, name: str, expected_version: str) -> None:
@@ -273,7 +276,8 @@ class TestJSONSchemaFieldsInPrompts:
         "lemma", "lexical_type", "pos", "meaning_in_context",
         "chinese_meaning", "role_in_sentence", "register", "why_this_word",
         "vs_simpler", "learner_note_check",
-        "morphology", "predicted_error_types", "confidence",
+        "morphology", "predicted_error_types", "sense_resolution",
+        "matched_sense_id", "confidence",
     ]
 
     @pytest.mark.parametrize("name", ["sentence_analysis_predict", "sentence_analysis_diagnose"])
@@ -305,6 +309,22 @@ class TestJSONSchemaFieldsInPrompts:
         text = WORD_ANALYSIS_V5.read_text(encoding="utf-8")
         assert "version: v5" in text
         assert "role_in_sentence" in text
+
+    def test_historical_word_prompt_v6_contains_sense_resolution(self) -> None:
+        text = WORD_ANALYSIS_V6.read_text(encoding="utf-8")
+        assert "version: v6" in text
+        assert "{{ existing_senses }}" in text
+        assert "sense_resolution" in text
+        assert "matched_sense_id" in text
+        assert "same | new | uncertain" in text
+
+    def test_current_word_prompt_v7_clarifies_ambiguous_coating(self) -> None:
+        text = WORD_ANALYSIS_V7.read_text(encoding="utf-8")
+        assert "version: v7" in text
+        assert "{{ existing_senses }}" in text
+        assert "Few-shot Example" in text
+        assert "unspecified protective coating" in text
+        assert 'decision: "uncertain"' in text
 
     def test_historical_sentence_prompt_v1_files_remain(self) -> None:
         assert SENTENCE_ANALYSIS_PREDICT_V1.exists()

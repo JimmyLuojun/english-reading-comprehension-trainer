@@ -414,14 +414,16 @@ def _book_word_cards_with_terms(
     word_cards: list[dict[str, Any]],
     book_id: int,
 ) -> list[dict[str, Any]]:
-    """Return cards sourced from this book with exact terms for repeat detection."""
+    """Return exact saved terms, retaining whether their sources are in this book."""
     cards_by_id: dict[int, dict[str, Any]] = {}
     terms_by_id: dict[int, dict[str, str]] = {}
     for card in word_cards:
-        if card.get("source_book_id") != book_id:
-            continue
         card_id = int(card["id"])
         cards_by_id.setdefault(card_id, card.copy())
+        if card.get("source_book_id") == book_id:
+            cards_by_id[card_id]["has_current_book_source"] = True
+        else:
+            cards_by_id[card_id].setdefault("has_current_book_source", False)
         terms = terms_by_id.setdefault(card_id, {})
         for key in ("selected_text", "surface_form"):
             term = str(card.get(key) or "").strip()
@@ -528,12 +530,18 @@ def _highlight_word_cards(
     for start, end, card, is_prior in sorted(selected, key=lambda item: item[0]):
         pieces.append(_escape(text[cursor:start]))
         if is_prior:
-            label = "Analyzed earlier in this book — click to view"
+            same_book = bool(card.get("has_current_book_source"))
+            label = (
+                "Analyzed earlier in this book — click to view"
+                if same_book
+                else "Saved meanings exist in another book — meaning not checked here"
+            )
             has_analysis = "1" if card.get("has_analysis") else "0"
             title = f' title="{label}"' if card.get("has_analysis") else ""
             pieces.append(
                 f'<span class="prior-analysis-word"'
                 f' data-prior-analysis-card="{card["id"]}"'
+                f' data-cross-book="{0 if same_book else 1}"'
                 f' data-lexical-type="{_escape(str(card.get("lexical_type") or ""))}"'
                 f' data-has-analysis="{has_analysis}"{title}'
                 f'>{_escape(text[start:end])}</span>'
@@ -951,6 +959,15 @@ def _analysis_panel() -> str:
           <h3>Meaning in context</h3>
           <p id="analysis-word-meaning" class="analysis-text"></p>
           <p id="analysis-word-meaning-zh" class="analysis-text analysis-translation"></p>
+        </section>
+        <section id="analysis-word-senses-section" class="analysis-section">
+          <h3>Saved meanings</h3>
+          <p id="analysis-word-sense-status" class="analysis-text muted"></p>
+          <div id="analysis-word-sense-resolution" class="word-sense-resolution" hidden>
+            <p id="analysis-word-sense-reason" class="analysis-text"></p>
+            <div id="analysis-word-sense-actions" class="word-notes-actions"></div>
+          </div>
+          <div id="analysis-word-senses" class="word-sense-list"></div>
         </section>
         <section class="analysis-section">
           <h3>Register</h3>

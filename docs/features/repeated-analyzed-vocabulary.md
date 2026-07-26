@@ -1,6 +1,7 @@
 # Repeated analyzed vocabulary indicator
 
-Status: implemented (2026-07-18)
+Status: superseded by
+[`contextual-word-senses.md`](contextual-word-senses.md) (2026-07-25)
 
 ## Goal
 
@@ -8,7 +9,7 @@ When a learner meets the same saved expression again elsewhere in a book, the
 Reader should reveal that a valid AI analysis already exists before the learner
 selects the expression.
 
-## Implemented behavior
+## Original 2026-07-18 behavior
 
 - An exact saved source occurrence keeps the existing lexical-type highlight
   and solid underline.
@@ -31,12 +32,11 @@ The implementation reuses `word_cards.ai_analysis_id`, validity-aware
 `ai_cache` joins, and existing `word_card_sources`; no schema migration is
 required.
 
-## Deferred scope
+## Superseded scope
 
-Multiple context-specific meanings are intentionally not implemented. A word
-card still has one active AI analysis even when it has multiple sources. The
-dotted marker therefore means only "analyzed earlier," not "the earlier meaning
-has been confirmed for this sentence." A future design must decide how senses,
-per-source analyses, review cards, and reanalysis history relate before adding
-context-specific meanings.
-
+The original same-book, read-only marker was the precursor to the implemented
+contextual-sense model. The current Reader can show the marker across books,
+register the clicked occurrence, analyze its exact sentence, and preserve or
+create stable meanings under one lemma-level review card. The marker still
+means only “saved meanings exist”; it never confirms that a prior meaning fits
+the new sentence.

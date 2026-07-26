@@ -214,7 +214,12 @@ CREATE TABLE IF NOT EXISTS "word_card_sources" (
     end_offset      INTEGER,
     selected_text   TEXT    NOT NULL DEFAULT '',
     is_primary      INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0, 1)),
-    created_at      TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL, sense_id INTEGER REFERENCES word_senses(id) ON DELETE SET NULL, context_analysis_id INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL, resolution_status TEXT NOT NULL DEFAULT ''
+    CHECK(resolution_status IN ('', 'matched', 'new', 'uncertain', 'manual')), resolution_confidence REAL
+    CHECK(
+        resolution_confidence IS NULL
+        OR (resolution_confidence >= 0.0 AND resolution_confidence <= 1.0)
+    ),
     CHECK (
         (start_offset IS NULL AND end_offset IS NULL)
         OR (start_offset >= 0 AND end_offset > start_offset)
@@ -241,3 +246,41 @@ CREATE TABLE book_tags (
 CREATE INDEX idx_books_content_kind ON books(content_kind);
 CREATE INDEX idx_books_library_status ON books(library_status);
 CREATE INDEX idx_book_tags_tag ON book_tags(tag_id);
+CREATE TABLE word_senses (
+    id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id                    INTEGER NOT NULL REFERENCES word_cards(id) ON DELETE CASCADE,
+    meaning_en                 TEXT    NOT NULL,
+    meaning_zh                 TEXT    NOT NULL DEFAULT '',
+    pos                        TEXT    NOT NULL DEFAULT '',
+    representative_analysis_id INTEGER REFERENCES ai_cache(id) ON DELETE SET NULL,
+    created_at                 TEXT    NOT NULL,
+    updated_at                 TEXT    NOT NULL
+);
+CREATE INDEX idx_word_senses_card
+    ON word_senses(card_id, id);
+CREATE INDEX idx_word_card_sources_sense
+    ON word_card_sources(sense_id);
+CREATE TRIGGER word_card_sources_sense_card_insert
+BEFORE INSERT ON word_card_sources
+WHEN NEW.sense_id IS NOT NULL
+ AND NOT EXISTS (
+       SELECT 1
+         FROM word_senses ws
+        WHERE ws.id = NEW.sense_id
+          AND ws.card_id = NEW.card_id
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'word source sense belongs to another card');
+END;
+CREATE TRIGGER word_card_sources_sense_card_update
+BEFORE UPDATE OF sense_id, card_id ON word_card_sources
+WHEN NEW.sense_id IS NOT NULL
+ AND NOT EXISTS (
+       SELECT 1
+         FROM word_senses ws
+        WHERE ws.id = NEW.sense_id
+          AND ws.card_id = NEW.card_id
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'word source sense belongs to another card');
+END;

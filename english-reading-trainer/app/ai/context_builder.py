@@ -24,7 +24,7 @@ _MIGRATIONS   = _PROJECT_ROOT / "migrations"
 _CONTEXT_WINDOW = 2   # sentences before/after to include as context
 _MAX_RELATED    = 5   # max related cards to include in prompt
 _SENTENCE_PROMPT_VERSION = "v7"
-_WORD_PROMPT_VERSION = "v5"
+_WORD_PROMPT_VERSION = "v7"
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +75,15 @@ def build_word_prompt(
     as it appears in *sentence_id*.
     """
     ctx = _fetch_sentence_context(db, sentence_id)
+    from app.cards.word_card_service import get_word_card_by_lemma
+    from app.cards.word_sense_service import existing_senses_prompt_text
+
+    card = get_word_card_by_lemma(db, surface_form.lower().strip())
+    existing_senses = (
+        existing_senses_prompt_text(db, int(card["id"]))
+        if card is not None
+        else "(none — this analysis will create the first saved meaning)"
+    )
     template = _load_prompt("word_analysis", _WORD_PROMPT_VERSION)
     return _render(template, {
         "surface_form":    surface_form,
@@ -83,6 +92,7 @@ def build_word_prompt(
         "learner_note":    "(none)",
         "related_cards":   ctx["related_cards_text"],
         "learner_profile": ctx["learner_profile"],
+        "existing_senses": existing_senses,
     })
 
 

@@ -11,6 +11,7 @@ from app.cards.similar_card_finder import (
     SimilarSentenceMistake,
     find_similar_sentence_mistakes,
 )
+from app.cards.word_sense_service import get_word_source, list_word_senses
 from app.db_connection import DatabaseConnection
 from app.web.config import (
     _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION,
@@ -208,25 +209,63 @@ def _fetch_paragraph_logic_payload(
 def _fetch_word_analysis_payload(
     db: DatabaseConnection,
     card_id: int,
+    source_id: int | None = None,
 ) -> dict[str, Any] | None:
+    source = get_word_source(db, source_id) if source_id is not None else None
+    if source_id is not None and (
+        source is None or int(source["card_id"]) != int(card_id)
+    ):
+        return None
     with db.get_connection() as conn:
-        row = conn.execute(
-            """SELECT wc.id AS card_id, wc.surface_form, wc.lemma,
-                      wc.first_sentence_id,
-                      ac.id AS cache_id, ac.prompt_version, ac.model,
-                      ac.response_json, ac.created_at
-                 FROM word_cards wc
-                 JOIN ai_cache ac ON ac.id = wc.ai_analysis_id
-                WHERE wc.id = ? AND wc.archived_at IS NULL AND ac.is_valid = 1""",
-            (card_id,),
-        ).fetchone()
+        if source is not None and source.get("context_analysis_id"):
+            row = conn.execute(
+                """SELECT wc.id AS card_id, wc.surface_form, wc.lemma,
+                          wcs.sentence_id,
+                          ac.id AS cache_id, ac.prompt_version, ac.model,
+                          ac.response_json, ac.created_at
+                     FROM word_cards wc
+                     JOIN word_card_sources wcs
+                       ON wcs.id = ? AND wcs.card_id = wc.id
+                     JOIN ai_cache ac
+                       ON ac.id = wcs.context_analysis_id AND ac.is_valid = 1
+                    WHERE wc.id = ? AND wc.archived_at IS NULL""",
+                (source_id, card_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT wc.id AS card_id, wc.surface_form, wc.lemma,
+                          wc.first_sentence_id AS sentence_id,
+                          ac.id AS cache_id, ac.prompt_version, ac.model,
+                          ac.response_json, ac.created_at
+                     FROM word_cards wc
+                     JOIN ai_cache ac ON ac.id = wc.ai_analysis_id
+                    WHERE wc.id = ? AND wc.archived_at IS NULL AND ac.is_valid = 1""",
+                (card_id,),
+            ).fetchone()
     if row is None:
         return None
     active_version = _active_word_prompt_version(db)
+    analysis = json.loads(row["response_json"])
+    senses = list_word_senses(db, card_id)
+    sense_ids = {int(item["id"]) for item in senses}
+    resolution = analysis.get("sense_resolution")
+    if isinstance(resolution, dict):
+        matched_id = resolution.get("matched_sense_id")
+        if matched_id is not None and int(matched_id) not in sense_ids:
+            resolution = {
+                **resolution,
+                "decision": "uncertain",
+                "matched_sense_id": None,
+                "reason": "The suggested saved meaning is no longer available.",
+            }
     return {
         "ok": True,
         "card_id": row["card_id"],
-        "sentence_id": row["first_sentence_id"],
+        "source_id": source_id,
+        "source": source,
+        "sentence_id": (
+            source["sentence_id"] if source is not None else row["sentence_id"]
+        ),
         "surface_form": row["surface_form"],
         "lemma": row["lemma"],
         "cache_id": row["cache_id"],
@@ -236,7 +275,16 @@ def _fetch_word_analysis_payload(
         "created_at": row["created_at"],
         "is_stale": row["prompt_version"] != active_version,
         "from_cache": True,
-        "analysis": json.loads(row["response_json"]),
+        "analysis": analysis,
+        "senses": senses,
+        "current_sense_id": source.get("sense_id") if source else None,
+        "sense_resolution": resolution,
+        "sense_confirmation_required": bool(
+            source
+            and senses
+            and isinstance(resolution, dict)
+            and source.get("resolution_status") == "uncertain"
+        ),
     }
 
 

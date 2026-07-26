@@ -285,7 +285,7 @@ def test_analysis_glossary_highlights_nested_word_sections() -> None:
     assert "applyGlossaryHighlights(container);" in render_vs_simpler
 
 
-def test_prior_analysis_word_click_loads_saved_analysis_without_card_actions() -> None:
+def test_prior_analysis_word_click_registers_exact_occurrence_before_loading() -> None:
     script = _selection_script()
     click_handler = script[script.index('reader.addEventListener("click"'):]
     click_handler = click_handler[: click_handler.index('reader.addEventListener("pointerdown"')]
@@ -293,12 +293,18 @@ def test_prior_analysis_word_click_loads_saved_analysis_without_card_actions() -
     double_click = double_click[: double_click.index('document.addEventListener("keydown"')]
 
     assert 'event.target.closest("[data-prior-analysis-card]")' in click_handler
-    assert "loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);" in click_handler
+    assert "loadPriorWordOccurrence(priorAnalysisWord);" in click_handler
     assert 'priorAnalysisWord?.dataset.hasAnalysis === "1"' in click_handler
     assert 'event.target.closest("[data-prior-analysis-card]")' in double_click
-    assert "loadSavedWordAnalysis(priorAnalysisWord.dataset.priorAnalysisCard);" in double_click
+    assert "loadPriorWordOccurrence(priorAnalysisWord);" in double_click
     assert 'priorAnalysisWord?.dataset.hasAnalysis === "1"' in double_click
     assert "deleteWordCardsAndReload" not in click_handler
+
+    occurrence_loader = script[script.index("async function loadPriorWordOccurrence"):]
+    occurrence_loader = occurrence_loader[: occurrence_loader.index("function openInitialSentenceAnalysis")]
+    assert 'const response = await fetch("/mark/word"' in occurrence_loader
+    assert "addSourceFields(body, offsets);" in occurrence_loader
+    assert "loadSavedWordAnalysis(cardId, String(payload.source.id));" in occurrence_loader
 
 
 def test_completed_word_analysis_activates_dormant_repeat_markers() -> None:
@@ -308,7 +314,20 @@ def test_completed_word_analysis_activates_dormant_repeat_markers() -> None:
 
     assert 'reader.querySelectorAll(`[data-prior-analysis-card="${activeAnalysisWordCardId}"]`)' in render
     assert 'span.dataset.hasAnalysis = "1";' in render
-    assert 'span.title = "Analyzed earlier in this book — click to view";' in render
+    assert 'span.dataset.crossBook === "1"' in render
+    assert "Saved meanings exist in another book — meaning not checked here" in render
+    assert "Analyzed earlier in this book — click to view" in render
+
+
+def test_word_sense_assignment_prevents_duplicate_submissions() -> None:
+    script = _selection_script()
+    assignment = script[script.index("async function assignActiveWordSense"):]
+    assignment = assignment[: assignment.index("function renderWordSenses")]
+
+    assert "wordSenseAssignmentInProgress) return;" in assignment
+    assert "wordSenseAssignmentInProgress = true;" in assignment
+    assert "button.disabled = true;" in assignment
+    assert "wordSenseAssignmentInProgress = false;" in assignment
 
 
 def test_source_word_card_param_loads_saved_word_analysis() -> None:
@@ -318,7 +337,7 @@ def test_source_word_card_param_loads_saved_word_analysis() -> None:
     boot = script[script.index("restoreReaderProgress();"):]
 
     assert 'initialParams.get("word_card")' in script
-    assert 'fetch(`/analysis/word/${cardId}`)' in load_saved
+    assert 'fetch(`/analysis/word/${cardId}${suffix}`)' in load_saved
     assert "renderWordAnalysis(payload, seqAtRequest);" in load_saved
     assert "if (initialWordCardId)" in boot
     assert "loadSavedWordAnalysis(initialWordCardId)" in boot
@@ -1669,8 +1688,8 @@ def test_reader_click_opens_saved_word_analysis_before_word_detail() -> None:
     click_handler = click_handler[: click_handler.index('reader.addEventListener("pointerdown"')]
 
     assert 'span.dataset.hasAnalysis === "1"' in open_word
-    assert "loadSavedWordAnalysis(cardId);" in open_word
-    assert open_word.index("loadSavedWordAnalysis(cardId);") < open_word.index(
+    assert 'loadSavedWordAnalysis(cardId, span.dataset.sourceId || "");' in open_word
+    assert open_word.index('loadSavedWordAnalysis(cardId, span.dataset.sourceId || "");') < open_word.index(
         "showWordDetail(span);"
     )
     assert "if (event.detail > 1) return;" in click_handler

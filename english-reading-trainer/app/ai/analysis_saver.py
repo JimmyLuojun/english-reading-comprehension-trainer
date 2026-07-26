@@ -20,6 +20,8 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
     WORD_ANALYSIS_SCHEMA_V5,
+    WORD_ANALYSIS_SCHEMA_V6,
+    WORD_ANALYSIS_SCHEMA_V7,
 )
 from app.ai.ai_response_cache import compute_content_hash, save_to_cache
 from app.ai.json_output_validator import parse_and_validate
@@ -319,8 +321,10 @@ def _word_analysis_schema(prompt_version: str) -> dict:
         "v3": WORD_ANALYSIS_SCHEMA_V3,
         "v4": WORD_ANALYSIS_SCHEMA_V4,
         "v5": WORD_ANALYSIS_SCHEMA_V5,
+        "v6": WORD_ANALYSIS_SCHEMA_V6,
+        "v7": WORD_ANALYSIS_SCHEMA_V7,
     }
-    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V5)
+    return schemas.get(prompt_version, WORD_ANALYSIS_SCHEMA_V7)
 
 
 def _sentence_analysis_schema(prompt_version: str) -> dict:

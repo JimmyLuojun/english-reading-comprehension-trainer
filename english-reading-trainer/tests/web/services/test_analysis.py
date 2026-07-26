@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from app.db_connection import DatabaseConnection
 from app.web.services import analysis
 
@@ -685,6 +687,43 @@ def test_build_external_word_prompt_for_card_rejects_missing_card(monkeypatch) -
         raise AssertionError("Expected ValueError")
 
 
+def test_build_external_word_prompt_for_card_uses_explicit_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "coating",
+            "lexical_type": "word",
+            "user_note": "",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda db, card_id, source_id: {
+            "id": source_id,
+            "sentence_id": 27,
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "build_word_prompt",
+        lambda db, sentence_id, surface_form: f"{sentence_id}:{surface_form}",
+    )
+
+    payload = analysis.build_external_word_prompt_for_card(
+        object(),
+        7,
+        source_id=19,
+    )
+
+    assert payload["source_id"] == 19
+    assert payload["sentence_id"] == 27
+    assert "27:coating" in payload["prompt"]
+
+
 def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -734,7 +773,11 @@ def test_save_external_word_selection_returns_word_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         analysis,
         "_fetch_word_analysis_payload",
-        lambda db, card_id: {"ok": True, "card_id": card_id, "is_stale": True},
+        lambda db, card_id, source_id=None: {
+            "ok": True,
+            "card_id": card_id,
+            "is_stale": True,
+        },
     )
     monkeypatch.setattr(
         analysis,
@@ -796,6 +839,11 @@ def test_save_external_word_selection_returns_attach_error(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(analysis, "create_or_update_word_card", lambda *a, **k: (7, True))
+    monkeypatch.setattr(
+        analysis,
+        "_matching_word_source",
+        lambda *args, **kwargs: {"id": 3, "sentence_id": 9},
+    )
     monkeypatch.setattr(
         analysis,
         "_attach_external_word_analysis",
@@ -869,10 +917,19 @@ def test_save_external_word_selection_reports_missing_saved_payload(monkeypatch)
     monkeypatch.setattr(analysis, "create_or_update_word_card", lambda *a, **k: (7, True))
     monkeypatch.setattr(
         analysis,
+        "_matching_word_source",
+        lambda *args, **kwargs: {"id": 3, "sentence_id": 9},
+    )
+    monkeypatch.setattr(
+        analysis,
         "_attach_external_word_analysis",
         lambda *args, **kwargs: analysis.AnalysisOutcome(payload={"ok": True}),
     )
-    monkeypatch.setattr(analysis, "_fetch_word_analysis_payload", lambda db, card_id: None)
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id, source_id=None: None,
+    )
 
     outcome = analysis.save_external_word_analysis_for_selection(
         object(),
@@ -1075,6 +1132,300 @@ def test_save_external_word_card_returns_payload(monkeypatch) -> None:
         "from_cache": False,
         "word_card": {"id": 7, "surface_form": "evidenced"},
     }
+
+
+def test_save_external_word_card_uses_explicit_source(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "coating",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda db, card_id, source_id: {
+            "id": source_id,
+            "sentence_id": 27,
+        },
+    )
+
+    def validate(*args, **kwargs):
+        captured["validated_sentence_id"] = kwargs["sentence_id"]
+        return analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v6",
+                "sentence_text": "Check the coating requirements.",
+            }
+        )
+
+    def attach(*args, **kwargs):
+        captured["attached_source_id"] = kwargs["source_id"]
+        return analysis.AnalysisOutcome(payload={"ok": True})
+
+    monkeypatch.setattr(analysis, "_validate_external_word_json", validate)
+    monkeypatch.setattr(analysis, "_attach_external_word_analysis", attach)
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda db, card_id, source_id: {
+            "ok": True,
+            "card_id": card_id,
+            "source_id": source_id,
+            "is_stale": False,
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_word_card_payload",
+        lambda db, card_id: {"id": card_id},
+    )
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+        source_id=19,
+    )
+
+    assert outcome.is_error is False
+    assert captured == {
+        "validated_sentence_id": 27,
+        "attached_source_id": 19,
+    }
+    assert outcome.payload["source_id"] == 19
+
+
+def test_save_external_word_selection_reports_missing_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_validated_word_selection",
+        lambda *args, **kwargs: {
+            "surface_form": "coating",
+            "lexical_type": "word",
+            "start_offset": 4,
+            "end_offset": 11,
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_validate_external_word_json",
+        lambda *args, **kwargs: analysis.AnalysisOutcome(
+            payload={
+                "analysis": _valid_word_analysis(),
+                "prompt_version": "v6",
+                "sentence_text": "The coating is thin.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "create_or_update_word_card",
+        lambda *args, **kwargs: (7, False),
+    )
+    monkeypatch.setattr(analysis, "_matching_word_source", lambda *a, **k: None)
+
+    outcome = analysis.save_external_word_analysis_for_selection(
+        object(),
+        sentence_id=9,
+        surface_form="coating",
+        lexical_type="word",
+        external_result="{}",
+    )
+
+    assert outcome.status_code == 500
+    assert outcome.error == "Saved word source was not found."
+
+
+def test_save_external_word_card_maps_invalid_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "get_word_card",
+        lambda db, card_id: {
+            "id": card_id,
+            "first_sentence_id": 9,
+            "surface_form": "coating",
+        },
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("Word source does not belong to this card.")
+        ),
+    )
+
+    outcome = analysis.save_external_word_analysis_for_card(
+        object(),
+        7,
+        external_result="{}",
+        source_id=19,
+    )
+
+    assert outcome.status_code == 400
+    assert outcome.error == "Word source does not belong to this card."
+
+
+def test_analysis_source_validation_and_missing_card(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "get_word_source", lambda db, source_id: None)
+    with pytest.raises(ValueError, match="does not belong"):
+        analysis._analysis_source_for_card(object(), 7, 19)
+
+    monkeypatch.setattr(analysis, "list_word_card_sources", lambda db, card_id: [])
+    monkeypatch.setattr(analysis, "get_word_card", lambda db, card_id: None)
+    assert analysis._analysis_source_for_card(object(), 7, None) is None
+
+
+def test_save_contextual_analysis_keeps_existing_assignment_pending(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda *args, **kwargs: {"id": 19, "sense_id": 3},
+    )
+    monkeypatch.setattr(analysis, "list_word_senses", lambda db, card_id: [{"id": 3}])
+    monkeypatch.setattr(
+        analysis,
+        "record_source_analysis",
+        lambda *args, **kwargs: captured.update(kwargs),
+    )
+
+    sense_id = analysis._save_contextual_word_analysis(
+        object(),
+        card_id=7,
+        source_id=19,
+        cache_id=23,
+        data={"sense_resolution": {"confidence": 0.91}},
+    )
+
+    assert sense_id == 3
+    assert captured == {"status": "uncertain", "confidence": 0.91}
+
+
+def test_save_contextual_analysis_rejects_missing_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(ValueError, match="Word source not found"):
+        analysis._save_contextual_word_analysis(
+            object(),
+            card_id=7,
+            source_id=19,
+            cache_id=23,
+            data={},
+        )
+
+
+def test_confirm_word_source_sense_paths(monkeypatch) -> None:
+    source = {
+        "id": 19,
+        "card_id": 7,
+        "analysis": {
+            "sense_resolution": {
+                "decision": "same",
+                "confidence": 0.91,
+            }
+        },
+    }
+    assigned: list[dict[str, object]] = []
+    monkeypatch.setattr(analysis, "get_word_source", lambda db, source_id: source)
+    monkeypatch.setattr(
+        analysis,
+        "create_and_assign_source_sense",
+        lambda *args, **kwargs: 31,
+    )
+    monkeypatch.setattr(
+        analysis,
+        "assign_source_sense",
+        lambda *args, **kwargs: assigned.append(kwargs),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda *args, **kwargs: {"ok": True},
+    )
+
+    created = analysis.confirm_word_source_sense(
+        object(),
+        19,
+        create_new=True,
+    )
+    reused = analysis.confirm_word_source_sense(
+        object(),
+        19,
+        sense_id=3,
+    )
+
+    assert created["assigned_sense_id"] == 31
+    assert reused["assigned_sense_id"] == 3
+    assert assigned == [{"status": "matched", "confidence": 0.91}]
+
+
+def test_confirm_word_source_sense_errors(monkeypatch) -> None:
+    monkeypatch.setattr(analysis, "get_word_source", lambda db, source_id: None)
+    with pytest.raises(ValueError, match="Word source not found"):
+        analysis.confirm_word_source_sense(object(), 19, sense_id=3)
+
+    monkeypatch.setattr(
+        analysis,
+        "get_word_source",
+        lambda db, source_id: {"card_id": 7, "analysis": {}},
+    )
+    with pytest.raises(ValueError, match="Choose an existing"):
+        analysis.confirm_word_source_sense(object(), 19)
+
+    monkeypatch.setattr(
+        analysis,
+        "_fetch_word_analysis_payload",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(analysis, "assign_source_sense", lambda *a, **k: None)
+    with pytest.raises(ValueError, match="Saved word analysis not found"):
+        analysis.confirm_word_source_sense(object(), 19, sense_id=3)
+
+
+def test_attach_external_word_analysis_legacy_fallback(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(analysis, "save_to_cache", lambda *args, **kwargs: 23)
+    monkeypatch.setattr(
+        analysis,
+        "_analysis_source_for_card",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        analysis,
+        "_update_legacy_word_analysis",
+        lambda db, card_id, cache_id, data: captured.update(
+            {"card_id": card_id, "cache_id": cache_id}
+        ),
+    )
+    monkeypatch.setattr(
+        analysis,
+        "record_word_card_diagnosis",
+        lambda *args, **kwargs: None,
+    )
+
+    outcome = analysis._attach_external_word_analysis(
+        object(),
+        7,
+        surface_form="coating",
+        data=_valid_word_analysis(),
+        prompt_version="v6",
+        sentence_text="The coating is thin.",
+    )
+
+    assert outcome.payload["source_id"] is None
+    assert captured == {"card_id": 7, "cache_id": 23}
 
 
 def test_save_external_word_selection_preserves_selected_card_when_lemma_differs(

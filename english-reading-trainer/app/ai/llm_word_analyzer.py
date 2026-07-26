@@ -16,6 +16,8 @@ from app.ai.ai_json_schemas import (
     WORD_ANALYSIS_SCHEMA_V3,
     WORD_ANALYSIS_SCHEMA_V4,
     WORD_ANALYSIS_SCHEMA_V5,
+    WORD_ANALYSIS_SCHEMA_V6,
+    WORD_ANALYSIS_SCHEMA_V7,
 )
 from app.ai.ai_provider_config import get_ai_provider_settings
 from app.ai.ai_response_cache import compute_content_hash, get_cached, save_to_cache
@@ -24,7 +26,7 @@ from app.db_connection import DatabaseConnection
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _PROMPT_NAME = "word_analysis"
-_PROMPT_VERSION = "v5"
+_PROMPT_VERSION = "v7"
 
 _SCHEMAS = {
     "v1": WORD_ANALYSIS_SCHEMA,
@@ -32,6 +34,8 @@ _SCHEMAS = {
     "v3": WORD_ANALYSIS_SCHEMA_V3,
     "v4": WORD_ANALYSIS_SCHEMA_V4,
     "v5": WORD_ANALYSIS_SCHEMA_V5,
+    "v6": WORD_ANALYSIS_SCHEMA_V6,
+    "v7": WORD_ANALYSIS_SCHEMA_V7,
 }
 
 _RETRY_SUFFIX = (
@@ -61,6 +65,7 @@ def analyze_word(
     context: str = "",
     learner_note: str = "",
     related_cards: str = "",
+    existing_senses: str = "",
     learner_profile: str = "",
     model: str | None = None,
     prompt_version: str = _PROMPT_VERSION,
@@ -105,10 +110,11 @@ def analyze_word(
         "context":        context or "(none)",
         "learner_note":   learner_note or "(none)",
         "related_cards":  related_cards or "(none)",
+        "existing_senses": existing_senses or "(none)",
         "learner_profile": learner_profile or "(none)",
     })
 
-    schema = _SCHEMAS.get(prompt_version, WORD_ANALYSIS_SCHEMA_V5)
+    schema = _SCHEMAS.get(prompt_version, WORD_ANALYSIS_SCHEMA_V7)
     raw = _call_llm(prompt, model)
     data, is_valid = _validate_attempt(raw, schema)
 
