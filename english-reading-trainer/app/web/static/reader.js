@@ -5475,7 +5475,9 @@
           loadSavedWordAnalysis(cardId);
           return;
         }
-        const offsets = uniqueOffsetsInSentence(sentence, surfaceForm);
+        const range = document.createRange();
+        range.selectNodeContents(priorAnalysisWord);
+        const offsets = rangeOffsetsWithinElement(range, sentence);
         const body = new URLSearchParams({
           sentence_id: sentenceId,
           surface_form: surfaceForm,

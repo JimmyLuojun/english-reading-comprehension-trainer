@@ -7,6 +7,7 @@ all tables/columns from §1 of design.md, constraint violations, seed data.
 """
 
 import json
+import os
 import sqlite3
 import shutil
 from pathlib import Path
@@ -335,6 +336,68 @@ class TestMigrationRunner:
 
         with pytest.raises(FileNotFoundError, match="Database does not exist"):
             db.create_backup()
+
+    @pytest.mark.parametrize("retention", [1, 20])
+    def test_restore_oldest_snapshot_when_retention_is_full(
+        self, db: DatabaseConnection, retention: int
+    ) -> None:
+        db._backup_retention = retention
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO books (title, source_format, file_hash, imported_at) "
+                "VALUES ('Original', 'txt', 'retention-restore', '2026-01-01')"
+            )
+        selected = db.create_backup()
+        os.utime(selected, (1, 1))
+        for index in range(retention - 1):
+            db.create_backup(reason=f"later-{index}")
+        with db.get_connection() as conn:
+            conn.execute("UPDATE books SET title = 'Current'")
+
+        safety = db.restore_backup(selected)
+
+        assert not selected.exists()  # Normal retention still applies.
+        assert len(list(db.backup_dir.glob("*.db"))) == retention
+        with db.get_connection() as conn:
+            assert conn.execute("SELECT title FROM books").fetchone()[0] == "Original"
+        with sqlite3.connect(safety) as conn:
+            assert conn.execute("SELECT title FROM books").fetchone()[0] == "Current"
+        assert db.check_integrity().is_healthy
+
+    def test_restore_cleans_staged_snapshot_if_safety_backup_fails(
+        self, db: DatabaseConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        selected = db.create_backup()
+        before = db.db_path.read_bytes()
+
+        def fail_backup(**kwargs: object) -> Path:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(db, "create_backup", fail_backup)
+        with pytest.raises(OSError, match="disk full"):
+            db.restore_backup(selected)
+
+        assert selected.is_file()
+        assert db.db_path.read_bytes() == before
+        assert not db.db_path.with_name(f".{db.db_path.name}.restore").exists()
+
+    def test_restore_does_not_recreate_snapshot_lost_after_validation(
+        self, db: DatabaseConnection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        selected = db.create_backup()
+        verify = db._verify_database_file
+
+        def validate_then_remove(path: Path) -> None:
+            verify(path)
+            path.unlink()
+
+        monkeypatch.setattr(db, "_verify_database_file", validate_then_remove)
+        with pytest.raises(sqlite3.OperationalError, match="unable to open"):
+            db.restore_backup(selected)
+
+        assert not selected.exists()
+        assert db.table_exists("books")
+        assert not db.db_path.with_name(f".{db.db_path.name}.restore").exists()
 
     def test_restore_requires_existing_backup(self, db: DatabaseConnection, tmp_path: Path) -> None:
         with pytest.raises(DatabaseRestoreError, match="Backup does not exist"):

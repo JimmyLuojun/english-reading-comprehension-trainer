@@ -77,7 +77,10 @@ def delete_book(book_id: int) -> Any:
    WHERE s.book_id = ?;
    ```
 
-4. **尝试 re-anchor**（在 Python 里逐张做，不在 SQL 里用 `instr` 模糊匹配）：
+4. **尝试 re-anchor**（优先保留已登记来源，否则按文本匹配）：
+
+   - 先查该词卡在其他书中的 `word_card_sources`，按来源 ID 选一个幸存来源，保持它的 ID、offset、语境分析和 sense assignment；将其设为唯一 primary，并同步 `first_sentence_id`。
+   - 没有幸存的已登记来源时，再执行下面的文本匹配；命中后创建该句的 primary source，不从被删除的 occurrence 复制义项确认或语境分析。
 
    - 拉出**其他书**的候选句子集合（懒加载，按需 `SELECT id, text FROM sentences WHERE book_id != ?`）。
    - 匹配规则：
@@ -114,7 +117,7 @@ def delete_book(book_id: int) -> Any:
 
    `chapters / paragraphs / sentences / book_assets / chapter_blocks` 全部走 cascade。
 
-8. **commit**。
+8. **重算来源数并 commit**：为被删除书影响的全部词卡重算 `occurrence_count`，包括只丢失 secondary source 的词卡。来源重设、计数和删除必须在同一事务内完成；任何一步失败都回滚。
 
 9. **清理磁盘**（事务外）：
 
@@ -128,7 +131,7 @@ def delete_book(book_id: int) -> Any:
 
 - `ai_cache` 行数前后不变。
 - 其他书的 `sentences / sentence_cards / word_cards / review_logs` 不受影响。
-- 可迁移词卡删书前后 `ef / interval_days / repetitions / review_count / due_at / archived_at / user_note / current_meaning` 完全一致，仅 `first_sentence_id` 变化。
+- 可迁移词卡删书前后 `ef / interval_days / repetitions / review_count / due_at / archived_at / user_note / current_meaning` 完全一致；同步更新 `first_sentence_id`、primary source 和剩余 occurrence 数。
 - 可迁移词卡对应的 `review_logs` 一行不少。
 - 待删除词卡的 `review_logs` 全部清空，其他书的同类 `review_logs` 不受影响。
 

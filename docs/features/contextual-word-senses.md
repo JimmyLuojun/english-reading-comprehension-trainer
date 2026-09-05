@@ -20,6 +20,9 @@ meaning under one review card.
 - The active word prompt is v7. Historical v6 is immutable; v7 retains its JSON
   contract and adds clearer JSON-only and ambiguous-`coating` guidance.
 - The contextual analysis is saved for the exact source occurrence.
+- Clicking a dotted marker registers its exact DOM range and converts it into
+  a saved-source marker. Repeated copies of the same word in one sentence keep
+  separate source IDs and Unicode code-point offsets, including after reload.
 - With existing senses, the learner confirms reuse or creation before a stable
   assignment is made.
 - Clicking an analyzed occurrence shows the meaning used there, its contextual

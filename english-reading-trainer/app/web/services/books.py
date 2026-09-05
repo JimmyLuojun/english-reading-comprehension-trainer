@@ -9,6 +9,7 @@ from app.web.queries import (
     _delete_library_tag,
     _fetch_book,
     _purge_book_assets_dir,
+    _rename_library_tag,
     _update_library_item,
 )
 
@@ -51,6 +52,15 @@ def update_library_item(
 
 def delete_library_tag(
     db: DatabaseConnection, tag_id: int
-) -> tuple[str, list[int]] | None:
-    """Delete a library tag and report the items it was removed from."""
+) -> dict[str, object] | None:
+    """Delete a global tag and all of its relationships."""
     return _delete_library_tag(db, tag_id)
+
+
+def rename_library_tag(
+    db: DatabaseConnection,
+    tag_id: int,
+    new_name: str,
+) -> dict[str, object] | None:
+    """Rename a library-manageable tag across all related records."""
+    return _rename_library_tag(db, tag_id, new_name)

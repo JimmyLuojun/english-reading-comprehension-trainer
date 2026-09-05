@@ -226,71 +226,132 @@ def _library_notice(
     saved: int = 0,
     saved_title: str = "",
     deleted_tag: str = "",
+    renamed_tag: str = "",
+    renamed_to: str = "",
     tag_items: str = "",
+    tag_sentence_cards: int = 0,
+    tag_word_cards: int = 0,
 ) -> str:
-    """Render one-time save/tag-delete feedback for the Library list."""
+    """Render one-time save and global tag-operation feedback."""
     titles = {int(row["id"]): str(row["title"]) for row in rows}
     messages: list[str] = []
     if saved:
         title = saved_title or titles.get(saved, "")
         messages.append(f"Saved {_escape(title)}." if title else "Saved.")
     if deleted_tag:
-        item_ids = [
-            int(raw)
-            for raw in tag_items.split(",")
-            if raw.strip().isdigit()
-        ]
+        item_ids = _tag_item_ids(tag_items)
         message = f"Tag {_escape(deleted_tag)} deleted"
-        if item_ids:
-            links = ", ".join(
-                f'<a href="/books#library-item-{item_id}">'
-                f'{_escape(titles.get(item_id) or f"Item {item_id}")}</a>'
-                for item_id in item_ids
-            )
-            noun = "item" if len(item_ids) == 1 else "items"
-            message += (
-                f"; removed from {len(item_ids)} {noun}: {links}. "
-                "You can update them below."
-            )
-        else:
-            message += "; no items were using it."
+        message += _tag_impact_message(
+            item_ids,
+            titles,
+            sentence_card_count=tag_sentence_cards,
+            word_card_count=tag_word_cards,
+            verb="removed from",
+        )
+        messages.append(message)
+    if renamed_tag and renamed_to:
+        item_ids = _tag_item_ids(tag_items)
+        message = (
+            f"Tag {_escape(renamed_tag)} renamed to {_escape(renamed_to)}"
+        )
+        message += _tag_impact_message(
+            item_ids,
+            titles,
+            sentence_card_count=tag_sentence_cards,
+            word_card_count=tag_word_cards,
+            verb="updated across",
+        )
         messages.append(message)
     if not messages:
         return ""
     return f'<p class="flash" role="status">{" ".join(messages)}</p>'
 
 
+def _tag_item_ids(raw_ids: str) -> list[int]:
+    return [
+        int(raw)
+        for raw in raw_ids.split(",")
+        if raw.strip().isdigit()
+    ]
+
+
+def _tag_impact_message(
+    item_ids: list[int],
+    titles: dict[int, str],
+    *,
+    sentence_card_count: int,
+    word_card_count: int,
+    verb: str,
+) -> str:
+    relationships: list[str] = []
+    if item_ids:
+        links = ", ".join(
+            f'<a href="/books#library-item-{item_id}">'
+            f'{_escape(titles.get(item_id) or f"Item {item_id}")}</a>'
+            for item_id in item_ids
+        )
+        noun = "Library Item" if len(item_ids) == 1 else "Library Items"
+        relationships.append(f"{len(item_ids)} {noun}: {links}")
+    if sentence_card_count:
+        noun = "sentence card" if sentence_card_count == 1 else "sentence cards"
+        relationships.append(f"{sentence_card_count} {noun}")
+    if word_card_count:
+        noun = "word card" if word_card_count == 1 else "word cards"
+        relationships.append(f"{word_card_count} {noun}")
+    if not relationships:
+        return "; no records were using it."
+    return f"; {verb} {', '.join(relationships)}."
+
+
 def _library_tag_manager(tags_usage: list[dict[str, Any]]) -> str:
-    """Render the collapsible tag management section for the Library list."""
+    """Render global rename/delete controls for Library-manageable tags."""
     if not tags_usage:
         return ""
     entries = "".join(
         "<li>"
-        f'<span class="tag-manager-name">{_escape(str(tag["name"]))}</span>'
-        f'<span class="muted">{int(tag["item_count"])} '
-        f'{"item" if int(tag["item_count"]) == 1 else "items"}</span>'
+        '<div class="tag-manager-details">'
+        f'<form method="post" action="/tags/{int(tag["id"])}/rename" '
+        'class="tag-manager-rename-form">'
+        f'<input name="name" value="{_escape(str(tag["name"]))}" '
+        f'aria-label="New name for {_escape(str(tag["name"]))}" '
+        'maxlength="60" required>'
+        '<button class="small" type="submit">Rename</button></form>'
+        f'<span class="muted">{_tag_usage_text(tag)}</span></div>'
         f'<form method="post" action="/tags/{int(tag["id"])}/delete" '
         'class="inline-form">'
         f'<button class="danger small" type="submit" '
         f'onclick="return confirm('
-        f'{_escape(json.dumps(_tag_delete_confirm(str(tag["name"]), int(tag["item_count"]))))}'
+        f'{_escape(json.dumps(_tag_delete_confirm(tag)))}'
         f')">Delete</button></form></li>'
         for tag in tags_usage
     )
     return (
         '<details class="tag-manager">'
-        "<summary>Manage tags</summary>"
+        "<summary>Manage tags · rename or delete</summary>"
         f'<ul class="tag-manager-list">{entries}</ul>'
-        '<p class="muted tag-manager-hint">Add a tag from any item\'s tag '
-        "picker and save that row. Deleting a tag here removes "
-        "it from every item.</p>"
+        '<p class="muted tag-manager-hint">Changes here are global. Renaming '
+        "updates every related Library Item and card; deleting removes the tag "
+        "from all of them.</p>"
         "</details>"
     )
 
 
-def _tag_delete_confirm(name: str, item_count: int) -> str:
-    noun = "item" if item_count == 1 else "items"
-    return f'Delete tag "{name}"? It will be removed from {item_count} {noun}.'
+def _tag_usage_text(tag: dict[str, Any]) -> str:
+    item_count = int(tag["item_count"])
+    sentence_count = int(tag.get("sentence_card_count", 0))
+    word_count = int(tag.get("word_card_count", 0))
+    return (
+        f"{item_count} Library {'Item' if item_count == 1 else 'Items'} · "
+        f"{sentence_count} sentence {'card' if sentence_count == 1 else 'cards'} · "
+        f"{word_count} word {'card' if word_count == 1 else 'cards'}"
+    )
+
+
+def _tag_delete_confirm(tag: dict[str, Any]) -> str:
+    return (
+        f'Delete tag "{tag["name"]}" globally? It will be removed from '
+        f"{_tag_usage_text(tag)}."
+    )
 
 
 def _library_item_form(

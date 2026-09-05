@@ -699,7 +699,7 @@ class TestBasicPages:
 
         assert 'class="flash"' in landing.text
         assert "Tag Trade deleted" in landing.text
-        assert "removed from 1 item" in landing.text
+        assert "removed from 1 Library Item" in landing.text
         assert f'href="/books#library-item-{book_id}"' in landing.text
         assert f'<tr id="library-item-{book_id}"' in landing.text
         assert "Logic" in landing.text
@@ -718,7 +718,7 @@ class TestBasicPages:
                 == 0
             )
 
-    def test_library_tag_delete_keeps_tag_row_used_by_word_cards(
+    def test_library_tag_delete_cascades_to_word_card_relationships(
         self, client: TestClient, db: DatabaseConnection, tmp_path: Path
     ) -> None:
         book_id, sentence_ids = _seed_book(db, tmp_path)
@@ -765,15 +765,109 @@ class TestBasicPages:
                 conn.execute(
                     "SELECT COUNT(*) FROM tags WHERE id = ?", (trade_id,)
                 ).fetchone()[0]
-                == 1
+                == 0
             )
             assert (
                 conn.execute(
                     "SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?",
                     (trade_id,),
                 ).fetchone()[0]
-                == 1
+                == 0
             )
+
+        landing = client.get(response.headers["location"])
+        assert "1 word card" in landing.text
+
+    def test_library_tag_rename_updates_every_related_record(
+        self, client: TestClient, db: DatabaseConnection, tmp_path: Path
+    ) -> None:
+        book_id, sentence_ids = _seed_book(db, tmp_path)
+        client.post(
+            f"/books/{book_id}/metadata",
+            data={
+                "title": "Test Book",
+                "author": "Author",
+                "content_kind": "book",
+                "library_status": "inbox",
+                "tags": "Trade",
+            },
+        )
+        with db.get_connection() as conn:
+            trade_id = int(
+                conn.execute(
+                    "SELECT id FROM tags WHERE name = 'Trade'"
+                ).fetchone()["id"]
+            )
+            card_id = conn.execute(
+                """INSERT INTO sentence_cards
+                   (sentence_id, created_at, due_at)
+                   VALUES (?, '2026-01-01', '2026-01-02')""",
+                (sentence_ids[0],),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO sentence_card_tags (card_id, tag_id) VALUES (?, ?)",
+                (card_id, trade_id),
+            )
+
+        response = client.post(
+            f"/tags/{trade_id}/rename",
+            data={"name": "  Commerce  "},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert "renamed_tag=Trade" in location
+        assert "renamed_to=Commerce" in location
+        assert f"tag_items={book_id}" in location
+        assert "tag_sentence_cards=1" in location
+        landing = client.get(location)
+        assert "Tag Trade renamed to Commerce" in landing.text
+        assert "updated across 1 Library Item" in landing.text
+        assert "1 sentence card" in landing.text
+        with db.get_connection() as conn:
+            assert conn.execute(
+                "SELECT name FROM tags WHERE id = ?", (trade_id,)
+            ).fetchone()["name"] == "Commerce"
+            assert conn.execute(
+                """SELECT t.name FROM tags t
+                   JOIN sentence_card_tags sct ON sct.tag_id = t.id
+                   WHERE sct.card_id = ?""",
+                (card_id,),
+            ).fetchone()["name"] == "Commerce"
+
+    def test_library_tag_rename_validates_and_reports_missing_tags(
+        self, client: TestClient, db: DatabaseConnection
+    ) -> None:
+        with db.get_connection() as conn:
+            first_id = int(
+                conn.execute(
+                    "INSERT INTO tags (name, category) VALUES ('First', 'library')"
+                ).lastrowid
+            )
+            conn.execute(
+                "INSERT INTO tags (name, category) VALUES ('Second', 'library')"
+            )
+
+        blank = client.post(f"/tags/{first_id}/rename", data={"name": " "})
+        duplicate = client.post(
+            f"/tags/{first_id}/rename", data={"name": "second"}
+        )
+        comma = client.post(
+            f"/tags/{first_id}/rename", data={"name": "Trade, finance"}
+        )
+        missing = client.post("/tags/999/rename", data={"name": "Missing"})
+
+        assert blank.status_code == 400
+        assert "Tag name is required" in blank.text
+        assert duplicate.status_code == 400
+        assert "already exists" in duplicate.text
+        assert comma.status_code == 400
+        assert "cannot contain commas" in comma.text
+        with db.get_connection() as conn:
+            assert conn.execute("SELECT name FROM tags WHERE id = ?", (first_id,)).fetchone()[0] == "First"
+        assert missing.status_code == 404
+        assert "Tag not found" in missing.text
 
     def test_library_tag_delete_returns_404_for_missing_tag(
         self, client: TestClient

@@ -23,6 +23,7 @@ from app.web.queries import (
 from app.web.services.books import (
     delete_book_and_assets,
     delete_library_tag,
+    rename_library_tag,
     update_library_item,
 )
 from app.web.views import (
@@ -47,7 +48,11 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         tag: str = "",
         saved: int = 0,
         deleted_tag: str = "",
+        renamed_tag: str = "",
+        renamed_to: str = "",
         tag_items: str = "",
+        tag_sentence_cards: int = 0,
+        tag_word_cards: int = 0,
     ) -> HTMLResponse:
         db = db_factory()
         rows = _fetch_books(
@@ -72,7 +77,11 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
             saved=saved,
             saved_title=saved_title,
             deleted_tag=deleted_tag,
+            renamed_tag=renamed_tag,
+            renamed_to=renamed_to,
             tag_items=tag_items,
+            tag_sentence_cards=tag_sentence_cards,
+            tag_word_cards=tag_word_cards,
         )
         body += _library_filters(
             tags,
@@ -137,11 +146,33 @@ def register_book_routes(web_app: FastAPI, db_factory: Callable[[], DatabaseConn
         result = delete_library_tag(db, tag_id)
         if result is None:
             return _error_page("Tag not found", status_code=404)
-        name, book_ids = result
         query = urlencode(
             {
-                "deleted_tag": name,
-                "tag_items": ",".join(str(book_id) for book_id in book_ids),
+                "deleted_tag": result["name"],
+                "tag_items": ",".join(str(book_id) for book_id in result["book_ids"]),
+                "tag_sentence_cards": result["sentence_card_count"],
+                "tag_word_cards": result["word_card_count"],
+            }
+        )
+        return _redirect(f"/books?{query}")
+
+    @web_app.post("/tags/{tag_id}/rename")
+    async def rename_tag(request: Request, tag_id: int) -> Any:
+        form = await _read_form(request)
+        db = db_factory()
+        try:
+            result = rename_library_tag(db, tag_id, form.get("name", ""))
+        except ValueError as exc:
+            return _error_page(str(exc), status_code=400)
+        if result is None:
+            return _error_page("Tag not found", status_code=404)
+        query = urlencode(
+            {
+                "renamed_tag": result["old_name"],
+                "renamed_to": result["new_name"],
+                "tag_items": ",".join(str(book_id) for book_id in result["book_ids"]),
+                "tag_sentence_cards": result["sentence_card_count"],
+                "tag_word_cards": result["word_card_count"],
             }
         )
         return _redirect(f"/books?{query}")

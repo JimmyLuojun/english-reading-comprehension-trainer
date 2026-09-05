@@ -588,6 +588,51 @@ def test_library_tag_picker_selects_creates_removes_and_saves_multiple_tags(
     assert stored_tags == {"Siemens", "photolithography"}
 
 
+def test_library_tag_manager_renames_and_deletes_tags_globally(
+    browser: Browser,
+    db: DatabaseConnection,
+    library_open_state: dict[str, str | int],
+) -> None:
+    base_url = library_open_state["base_url"]
+    book_id = library_open_state["book_id"]
+
+    for page in _new_page(browser, f"{base_url}/books"):
+        manager = page.locator(".tag-manager")
+        manager.locator("summary").click()
+        trade_input = manager.get_by_role("textbox", name="New name for Trade")
+        trade_input.fill("Commerce")
+        trade_input.locator("xpath=ancestor::form").get_by_role(
+            "button", name="Rename"
+        ).click()
+        page.wait_for_url("**/books?renamed_tag=Trade**")
+
+        assert "Tag Trade renamed to Commerce" in page.get_by_role("status").inner_text()
+        assert page.locator(
+            f"#library-item-{book_id} .library-tag-chip",
+            has_text="Commerce",
+        ).count() == 1
+
+        manager = page.locator(".tag-manager")
+        manager.locator("summary").click()
+        commerce_row = manager.get_by_role(
+            "textbox", name="New name for Commerce"
+        ).locator("xpath=ancestor::li")
+        page.once("dialog", lambda dialog: dialog.accept())
+        commerce_row.get_by_role("button", name="Delete").click()
+        page.wait_for_url("**/books?deleted_tag=Commerce**")
+
+        assert "Tag Commerce deleted" in page.get_by_role("status").inner_text()
+        assert page.locator(
+            f"#library-item-{book_id} .library-tag-chip",
+            has_text="Commerce",
+        ).count() == 0
+
+    with db.get_connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tags WHERE name = 'Commerce'"
+        ).fetchone()[0] == 0
+
+
 def test_item_details_tag_picker_selects_creates_removes_and_saves_tags(
     browser: Browser,
     db: DatabaseConnection,
@@ -928,7 +973,7 @@ def test_click_marked_word_with_saved_analysis_opens_analysis_panel(
     }
 
 
-def test_click_prior_analysis_repeat_opens_saved_analysis(
+def test_click_prior_analysis_repeat_registers_source_and_opens_saved_analysis(
     browser: Browser,
     reader_url: str,
     db: DatabaseConnection,
@@ -957,8 +1002,56 @@ def test_click_prior_analysis_repeat_opens_saved_analysis(
     assert state == {
         "panelHidden": False,
         "toolbarHidden": True,
-        "priorStillPresent": True,
+        "priorStillPresent": False,
     }
+    with db.get_connection() as conn:
+        sources = conn.execute(
+            "SELECT start_offset, end_offset, selected_text FROM word_card_sources ORDER BY id"
+        ).fetchall()
+    assert len(sources) == 2
+    assert sources[1]["selected_text"] == "cat"
+    assert sources[1]["end_offset"] - sources[1]["start_offset"] == 3
+
+
+@pytest.mark.parametrize(
+    ("text", "starts"),
+    [("A cat watches another cat.", [2, 22]), ("🐈 A CAT watches another cat.", [4, 24])],
+)
+def test_repeated_word_clicks_save_distinct_exact_sources(
+    browser: Browser, reader_url: str, db: DatabaseConnection,
+    text: str, starts: list[int],
+) -> None:
+    _attach_word_analysis(db)
+    with db.get_connection() as conn:
+        sentence_id = conn.execute("SELECT id FROM sentences ORDER BY id LIMIT 1 OFFSET 1").fetchone()[0]
+        conn.execute("UPDATE sentences SET text = ? WHERE id = ?", (text, sentence_id))
+    returned_sources = []
+    for page in _new_page(browser, reader_url):
+        sentence = page.locator(f'#sentence-{sentence_id}')
+        assert sentence.locator('[data-prior-analysis-card]').count() == 2
+        for _ in range(2):
+            with page.expect_response(lambda response: response.url.endswith("/mark/word")) as response:
+                sentence.locator('[data-prior-analysis-card]').first.click()
+            returned_sources.append(response.value.json()["source"])
+            page.wait_for_function(
+                '() => document.getElementById("analysis-word-meaning").textContent '
+                '=== "a small domestic feline"'
+            )
+        page.reload()
+        assert sentence.locator('[data-prior-analysis-card]').count() == 0
+        assert sentence.locator('[data-source-id]').count() == 2
+        assert sentence.locator('[data-source-id]').evaluate_all(
+            '(nodes) => nodes.map(node => Number(node.dataset.sourceStart))'
+        ) == starts
+    assert len({source["id"] for source in returned_sources}) == 2
+    assert [source["start_offset"] for source in returned_sources] == starts
+    assert [source["end_offset"] for source in returned_sources] == [start + 3 for start in starts]
+    with db.get_connection() as conn:
+        sources = conn.execute(
+            "SELECT start_offset, end_offset FROM word_card_sources WHERE sentence_id = ? ORDER BY start_offset",
+            (sentence_id,),
+        ).fetchall()
+    assert [(row[0], row[1]) for row in sources] == [(start, start + 3) for start in starts]
 
 
 def test_double_click_marked_word_shows_only_word_detail(browser: Browser, reader_url: str) -> None:

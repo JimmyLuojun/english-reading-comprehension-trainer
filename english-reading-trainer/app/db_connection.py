@@ -126,13 +126,16 @@ class DatabaseConnection:
             raise DatabaseRestoreError(f"Backup does not exist: {source_path}")
 
         self._verify_database_file(source_path)
-        pre_restore_backup = self.create_backup(reason="pre-restore")
         temporary_path = self._db_path.with_name(f".{self._db_path.name}.restore")
         try:
-            with sqlite3.connect(source_path, timeout=self._timeout_seconds) as source:
+            # Stage the selected snapshot before creating the safety backup:
+            # retention cleanup may prune the selected file itself.
+            source_uri = source_path.resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(source_uri, uri=True, timeout=self._timeout_seconds) as source:
                 with sqlite3.connect(temporary_path) as destination:
                     source.backup(destination)
             self._verify_database_file(temporary_path)
+            pre_restore_backup = self.create_backup(reason="pre-restore")
             os.replace(temporary_path, self._db_path)
             for suffix in ("-wal", "-shm"):
                 Path(f"{self._db_path}{suffix}").unlink(missing_ok=True)

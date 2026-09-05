@@ -21,7 +21,11 @@
 
 `library_status` 是手工整理状态，不是阅读位置。Reader 位置仍由当前 browser localStorage 负责，未引入第二个进度事实源。
 
-Library 详情页编辑 title、author、content type 和 item tags；library status 仍只在 Library 列表维护。Library 列表的 item title 通过统一 open 入口进入阅读流，独立的 Details 操作进入详情页。列表可按 type、status、tag 过滤；每一行可直接修改 content type、library status 和 tags，并通过该行的 Save 单独保存，保存后保留当前筛选条件。列表行与详情页共用同一个多选 tag picker：摘要以 chips 显示当前选择，展开后可同时勾选或取消任意已有 tag，也可在同一控件中新建 tag；未被 item 使用但仍属于 library category 的 tag 也会列为可选项。浏览器将选择同步到原有逗号分隔的隐藏字段，因此既有 POST 接口和 `book_tags` 多对多 schema 不变，不需要数据迁移。行内编辑不修改 title、author、内容结构、卡片、标注或阅读位置。详情页保存 title/author/type/tags 时会原样保留已有 status。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。行内 Save 后重定向回列表并携带 `saved` 参数，列表顶部渲染一次性 `Saved ‹title›.` 提示。`Manage tags` 折叠区列出全部 library tag（含未被任何 item 使用的 orphan）及其 item 数；`POST /tags/{tag_id}/delete` 从所有 item 移除该 tag，随后列表提示受影响的 item 并链接到对应行锚点（`#library-item-{id}`），用户可直接修改这些 item 的 tags。tag 通过任一 picker 的 New tag 输入创建（首次保存自动写入 `tags` 表）；若 tag 仍被 word/sentence 卡片引用，删除时只解除 `book_tags` 关联，保留共享 `tags` 行。
+Library 详情页编辑 title、author、content type 和 item tags；library status 仍只在 Library 列表维护。Library 列表的 item title 通过统一 open 入口进入阅读流，独立的 Details 操作进入详情页。列表可按 type、status、tag 过滤；每一行可直接修改 content type、library status 和 tags，并通过该行的 Save 单独保存，保存后保留当前筛选条件。列表行与详情页共用同一个多选 tag picker：摘要以 chips 显示当前选择，展开后可同时勾选或取消任意已有 tag，也可在同一控件中新建 tag；未被 item 使用但仍属于 library category 的 tag 也会列为可选项。浏览器将选择同步到原有逗号分隔的隐藏字段，因此既有 POST 接口和 `book_tags` 多对多 schema 不变，不需要数据迁移。行内编辑不修改 title、author、内容结构、卡片、标注或阅读位置。详情页保存 title/author/type/tags 时会原样保留已有 status。Tags 复用全局 `tags` 表，通过 `book_tags` 关联，不引入 Collections。行内 Save 后重定向回列表并携带 `saved` 参数，列表顶部渲染一次性 `Saved ‹title›.` 提示。
+
+`Manage tags · rename or delete` 折叠区列出全部 library tag（含未被任何 item 使用的 orphan），并分别显示 Library Item、sentence card、word card 的关联数量。每个 tag 可通过 `POST /tags/{tag_id}/rename` 全局重命名；关联表继续引用同一 `tag_id`，因此所有相关 item/card 同时获得新名称。名称会去除首尾空白、限制为 60 字符；大小写不敏感的同名 tag 会返回错误，不做隐式合并。`POST /tags/{tag_id}/delete` 删除 `tags` 主记录，依靠现有 `ON DELETE CASCADE` 同时解除 `book_tags`、`sentence_card_tags`、`word_card_tags` 的全部关联；删除按钮的确认文案会先列出三类影响数量。重命名或删除完成后，Library 顶部反馈受影响记录数量，并为受影响 item 提供行锚点。tag 仍通过任一 picker 的 New tag 输入创建（首次保存自动写入 `tags` 表）。
+
+单个 tag 名称不能包含英文逗号：picker 用逗号分隔多个 tag，Rename 和 Library metadata 的单标签验证会拒绝带逗号的名称，避免下次保存时被拆成两个标签。拒绝 Rename 时保留原名称和全部关联。
 
 ### 2.1 阅读入口与 Contents
 

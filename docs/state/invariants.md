@@ -18,6 +18,7 @@ These rules describe behavior that should not change accidentally. Each implemen
 - Applied migration files are immutable: their recorded SHA-256 checksums must match on every later startup.
 - Pending migrations run in one SQLite transaction, with a recoverable online backup created first; a failed migration must leave neither schema changes nor a migration record behind.
 - Backup restore requires the web service to be stopped and an explicit CLI `--yes`; restored databases must pass SQLite integrity checks before replacing the live file.
+- Restore stages and validates the selected snapshot before creating its safety backup, so retention cleanup cannot destroy the pending restore input. The selected source is opened read-only and must never be recreated if missing.
 - `sentences.id` is the stable anchor for reader selection, sentence cards, word card source links, AI analysis context, and review navigation.
 - `word_cards.lemma` remains globally unique for the current card model.
 - `word_cards` owns one lemma-level SM-2 state; `word_senses` owns stable meanings, and `word_card_sources` owns exact occurrence context and sense assignment.
@@ -35,6 +36,7 @@ These rules describe behavior that should not change accidentally. Each implemen
 - Sentence cards belong to the deleted book and are removed with that book.
 - Word cards should be re-anchored to matching sentences in other books when possible.
 - Re-anchorable word cards keep SM-2 state and review logs.
+- Surviving word cards retain a primary source consistent with `first_sentence_id`; occurrence counts match the remaining recorded sources. Source repair and book deletion commit or roll back together.
 - Only word cards that cannot be re-anchored are deleted with their own review logs.
 
 ## Reader

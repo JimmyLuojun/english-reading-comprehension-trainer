@@ -320,41 +320,75 @@ def test_library_filters_and_metadata_form_escape_and_select_values() -> None:
     assert "https://example.com/?a=&lt;b&gt;" in form
 
 
-def test_library_notice_renders_save_and_tag_delete_feedback() -> None:
+def test_library_notice_renders_save_and_global_tag_feedback() -> None:
     rows = [{"id": 1, "title": "<Book>"}, {"id": 2, "title": "Article"}]
 
     assert _library_notice(rows) == ""
     saved = _library_notice(rows, saved=1)
     assert 'class="flash"' in saved
     assert "Saved &lt;Book&gt;." in saved
-    deleted = _library_notice(rows, deleted_tag="Trade", tag_items="1, 2")
+    deleted = _library_notice(
+        rows,
+        deleted_tag="Trade",
+        tag_items="1, 2",
+        tag_sentence_cards=1,
+        tag_word_cards=2,
+    )
     assert "Tag Trade deleted" in deleted
-    assert "removed from 2 items" in deleted
+    assert "removed from 2 Library Items" in deleted
+    assert "1 sentence card" in deleted
+    assert "2 word cards" in deleted
     assert '<a href="/books#library-item-1">&lt;Book&gt;</a>' in deleted
     assert '<a href="/books#library-item-2">Article</a>' in deleted
     single = _library_notice(rows, deleted_tag="Solo", tag_items="2")
-    assert "removed from 1 item:" in single
+    assert "removed from 1 Library Item:" in single
     unused = _library_notice(rows, deleted_tag="<unsafe>", tag_items="")
-    assert "Tag &lt;unsafe&gt; deleted; no items were using it." in unused
+    assert "Tag &lt;unsafe&gt; deleted; no records were using it." in unused
+    renamed = _library_notice(
+        rows,
+        renamed_tag='<Old>',
+        renamed_to='New & improved',
+        tag_items="1, nope",
+        tag_sentence_cards=2,
+    )
+    assert "Tag &lt;Old&gt; renamed to New &amp; improved" in renamed
+    assert "updated across 1 Library Item" in renamed
+    assert "2 sentence cards" in renamed
     unknown = _library_notice([], saved=9, deleted_tag="Ghost", tag_items="7")
     assert "Saved." in unknown
     assert '<a href="/books#library-item-7">Item 7</a>' in unknown
 
 
-def test_library_tag_manager_renders_usage_and_delete_forms() -> None:
+def test_library_tag_manager_renders_usage_rename_and_delete_forms() -> None:
     assert _library_tag_manager([]) == ""
 
     html = _library_tag_manager(
         [
-            {"id": 3, "name": 'Trade "hot"', "item_count": 1},
-            {"id": 4, "name": "logic", "item_count": 2},
+            {
+                "id": 3,
+                "name": 'Trade "hot"',
+                "item_count": 1,
+                "sentence_card_count": 2,
+                "word_card_count": 1,
+            },
+            {
+                "id": 4,
+                "name": "logic",
+                "item_count": 2,
+                "sentence_card_count": 0,
+                "word_card_count": 0,
+            },
         ]
     )
 
-    assert "Manage tags" in html
+    assert "Manage tags · rename or delete" in html
+    assert 'action="/tags/3/rename"' in html
+    assert 'name="name" value="Trade &quot;hot&quot;"' in html
+    assert ">Rename</button>" in html
     assert 'action="/tags/3/delete"' in html
     assert 'action="/tags/4/delete"' in html
     assert "Trade &quot;hot&quot;" in html
-    assert ">1 item</span>" in html
-    assert "2 items" in html
+    assert "1 Library Item · 2 sentence cards · 1 word card" in html
+    assert "2 Library Items · 0 sentence cards · 0 word cards" in html
     assert 'onclick="return confirm(&quot;Delete tag' in html
+    assert "Changes here are global" in html

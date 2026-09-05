@@ -14,3 +14,4 @@ def test_register_book_routes_adds_book_endpoints() -> None:
     assert ("POST", "/books/{book_id}/metadata") in paths
     assert ("GET", "/books/{book_id}") in paths
     assert ("POST", "/tags/{tag_id}/delete") in paths
+    assert ("POST", "/tags/{tag_id}/rename") in paths

@@ -581,9 +581,35 @@ def test_build_external_sentence_prompt_wraps_project_prompt(monkeypatch) -> Non
     assert "当前分析模式：诊断模式" in prompt
     assert "尤其不要漏掉 `confidence`" in prompt
     assert "`confidence` 是必填顶层字段" in prompt
+    assert "不要填写 `cause` 或 `result`" in prompt
+    assert "句子本身提出因果论点时用 `claim`" in prompt
+    assert "用结果支撑上下文论点时用 `evidence`" in prompt
     assert "`takeaway_suggestion`, `confidence`" in prompt
     assert "只输出一个 ```json 代码块```" in prompt
     assert "PROJECT PROMPT 猫坐着。 主干：cat sat" in prompt
+
+
+@pytest.mark.parametrize(
+    ("external_role", "expected_role"),
+    [("cause", "claim"), ("result", "evidence"), (" RESULT ", "evidence")],
+)
+def test_normalize_external_sentence_json_maps_relation_labels_to_argument_roles(
+    external_role: str,
+    expected_role: str,
+) -> None:
+    normalized = analysis._normalize_external_sentence_json(
+        json.dumps({"argument_role": external_role})
+    )
+
+    assert json.loads(normalized)["argument_role"] == expected_role
+
+
+def test_normalize_external_sentence_json_keeps_unknown_argument_role_for_validation() -> None:
+    normalized = analysis._normalize_external_sentence_json(
+        json.dumps({"argument_role": "thesis"})
+    )
+
+    assert json.loads(normalized)["argument_role"] == "thesis"
 
 
 def test_build_external_word_prompt_for_selection_uses_offsets_and_contract(
@@ -1948,7 +1974,7 @@ def test_save_external_sentence_analysis_reuses_saver_and_payload(monkeypatch) -
     }
 
 
-def test_save_external_sentence_analysis_adds_missing_confidence_for_v7_json(
+def test_save_external_sentence_analysis_normalizes_role_and_adds_missing_confidence(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1988,7 +2014,7 @@ def test_save_external_sentence_analysis_adds_missing_confidence_for_v7_json(
         "simplified_en": "Coincidentally, Rottmayer became newly defiant.",
         "chinese_gloss": "碰巧的是，罗特梅耶的态度里多出了一股锋芒。",
         "blocking_point": "Isolating the nested since clause.",
-        "argument_role": "claim",
+        "argument_role": "result",
         "argument_role_reason": "The sentence makes an accusatory observation.",
         "argument_role_check": "Check whether the correlation is being used as a claim.",
         "predicted_error_types": ["G03", "L01", "D01"],
@@ -2022,6 +2048,7 @@ def test_save_external_sentence_analysis_adds_missing_confidence_for_v7_json(
     assert outcome.is_error is False
     assert outcome.payload is not None
     assert outcome.payload["analysis"]["confidence"] == 0.8
+    assert outcome.payload["analysis"]["argument_role"] == "evidence"
     assert outcome.payload["analysis"]["structure_feedback"]["is_correct"] is False
 
 

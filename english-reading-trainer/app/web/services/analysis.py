@@ -61,6 +61,14 @@ _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE = 0.8
 _MAX_SENTENCE_ERROR_CODES = 3
 _MAX_WORD_ERROR_CODES = 2
 _PARAGRAPH_LOGIC_PROMPT_VERSION = _DEFAULT_PARAGRAPH_LOGIC_PROMPT_VERSION
+_EXTERNAL_ARGUMENT_ROLE_ALIASES = {
+    # External models sometimes return a sentence-to-sentence relation instead
+    # of the sentence's rhetorical job. Keep the v7 schema strict while
+    # translating the two recurring mistakes using the mappings documented in
+    # the copied external prompt.
+    "cause": "claim",
+    "result": "evidence",
+}
 
 
 @dataclass(frozen=True)
@@ -262,6 +270,7 @@ def build_external_sentence_prompt(
 
 JSON 规则：
 - JSON 必须严格符合下方 PROJECT JSON CONTRACT 的 schema。
+- `argument_role` 表示句子在论证中的角色，不是句间因果关系。不要填写 `cause` 或 `result`：句子本身提出因果论点时用 `claim`，用结果支撑上下文论点时用 `evidence`。
 - 最后 JSON 的顶层必须包含 PROJECT JSON CONTRACT 要求的所有字段，尤其不要漏掉 `confidence`。
 - `confidence` 是必填顶层字段，必须是 0.0 到 1.0 之间的数字；不确定时也要给出合理置信度，例如 0.82。
 - 输出最终 JSON 前，先自检这些顶层字段都存在：`subject_skeleton`, `clauses`, `modifiers`, `logic_markers`, `anaphora`, `simplified_en`, `chinese_gloss`, `blocking_point`, `argument_role`, `argument_role_reason`, `argument_role_check`, `predicted_error_types`, `diagnosis_basis`, `diagnosed_error_types`, `diagnosis_evidence`, `takeaway_suggestion`, `confidence`。
@@ -900,6 +909,13 @@ def _normalize_external_sentence_json(raw_json: str) -> str:
         return raw_json
     if not isinstance(data, dict):
         return raw_json
+    argument_role = data.get("argument_role")
+    if isinstance(argument_role, str):
+        normalized_role = argument_role.strip().lower()
+        data["argument_role"] = _EXTERNAL_ARGUMENT_ROLE_ALIASES.get(
+            normalized_role,
+            argument_role,
+        )
     if "confidence" not in data:
         data["confidence"] = _EXTERNAL_SENTENCE_DEFAULT_CONFIDENCE
     for field in ("predicted_error_types", "diagnosed_error_types"):

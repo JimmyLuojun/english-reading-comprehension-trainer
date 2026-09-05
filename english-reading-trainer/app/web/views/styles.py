@@ -1597,9 +1597,30 @@ def _css() -> str:
     .tag-manager-list li {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 8px;
     }
-    .tag-manager-name { font-weight: 600; }
+    .tag-manager-details {
+      min-width: 0;
+      flex: 1;
+      display: grid;
+      gap: 4px;
+    }
+    .tag-manager-rename-form {
+      display: grid;
+      grid-template-columns: minmax(140px, 320px) auto;
+      gap: 6px;
+      justify-content: start;
+    }
+    .tag-manager-rename-form input {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+    }
     .tag-manager-hint { margin: 12px 0 0; font-size: 12px; }
     .library-item-row { scroll-margin-top: 72px; }
     .library-item-row:target td { background: #eff6ff; }

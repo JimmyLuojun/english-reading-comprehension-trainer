@@ -78,8 +78,20 @@ def test_update_library_item_splits_tag_text(monkeypatch) -> None:
 
 
 def test_delete_library_tag_delegates_to_query(monkeypatch) -> None:
+    result = {"name": "Trade", "book_ids": [1, 2]}
     monkeypatch.setattr(
-        books, "_delete_library_tag", lambda db, tag_id: ("Trade", [1, 2])
+        books, "_delete_library_tag", lambda db, tag_id: result
     )
 
-    assert books.delete_library_tag(object(), 5) == ("Trade", [1, 2])
+    assert books.delete_library_tag(object(), 5) == result
+
+
+def test_rename_library_tag_delegates_to_query(monkeypatch) -> None:
+    result = {"old_name": "Trade", "new_name": "Commerce"}
+    monkeypatch.setattr(
+        books,
+        "_rename_library_tag",
+        lambda db, tag_id, new_name: result,
+    )
+
+    assert books.rename_library_tag(object(), 5, "Commerce") == result

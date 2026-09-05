@@ -147,6 +147,9 @@ def test_css_contains_reader_and_popover_selectors() -> None:
     assert "position: absolute;\n      inset: 0;" in css
     assert "inset: 0;\n      z-index: 1;" in css
     assert ".chapter-row-unavailable" in css
+    assert ".tag-manager-rename-form" in css
+    assert "grid-template-columns: minmax(140px, 320px) auto;" in css
+    assert ".tag-manager-rename-form input" in css
     assert ".sentence-field-cell" in css
     assert ".sentence-field-input" in css
     assert ".sentence-field-edit[hidden]" in css

@@ -7,6 +7,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from app.cards.word_card_service import (
+    _record_word_card_source_conn,
+    _sync_occurrence_count_conn,
+)
 from app.db_connection import DatabaseConnection
 from app.db_models import ContentKind, LexicalType, LibraryStatus
 from app.web.config import (
@@ -85,13 +89,17 @@ def _fetch_library_tags(db: DatabaseConnection) -> list[str]:
 
 
 def _fetch_library_tag_usage(db: DatabaseConnection) -> list[dict[str, Any]]:
-    """List library-manageable tags with the number of items using each."""
+    """List library-manageable tags and every type of related record."""
     with db.get_connection() as conn:
         rows = conn.execute(
             """SELECT t.id, t.name,
-                      COUNT(DISTINCT bt.book_id) AS item_count
+                      COUNT(DISTINCT bt.book_id) AS item_count,
+                      COUNT(DISTINCT sct.card_id) AS sentence_card_count,
+                      COUNT(DISTINCT wct.card_id) AS word_card_count
                  FROM tags t
                  LEFT JOIN book_tags bt ON bt.tag_id = t.id
+                 LEFT JOIN sentence_card_tags sct ON sct.tag_id = t.id
+                 LEFT JOIN word_card_tags wct ON wct.tag_id = t.id
                 WHERE t.category = 'library'
                    OR bt.book_id IS NOT NULL
                 GROUP BY t.id
@@ -102,15 +110,17 @@ def _fetch_library_tag_usage(db: DatabaseConnection) -> list[dict[str, Any]]:
 
 def _delete_library_tag(
     db: DatabaseConnection, tag_id: int
-) -> tuple[str, list[int]] | None:
-    """Remove a tag from all Library Items and report the affected item ids.
-
-    The shared tags row itself is deleted only when no word or sentence
-    card still references it.
-    """
+) -> dict[str, Any] | None:
+    """Delete a library-manageable tag and all of its relationships."""
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT name FROM tags WHERE id = ?", (tag_id,)
+            """SELECT t.name
+                 FROM tags t
+                WHERE t.id = ?
+                  AND (t.category = 'library' OR EXISTS (
+                        SELECT 1 FROM book_tags bt WHERE bt.tag_id = t.id
+                      ))""",
+            (tag_id,),
         ).fetchone()
         if row is None:
             return None
@@ -122,15 +132,77 @@ def _delete_library_tag(
                 (tag_id,),
             ).fetchall()
         ]
-        conn.execute("DELETE FROM book_tags WHERE tag_id = ?", (tag_id,))
-        card_refs = conn.execute(
-            """SELECT (SELECT COUNT(*) FROM sentence_card_tags WHERE tag_id = ?)
-                    + (SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?)""",
+        sentence_card_count, word_card_count = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM sentence_card_tags WHERE tag_id = ?),
+                      (SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?)""",
             (tag_id, tag_id),
-        ).fetchone()[0]
-        if card_refs == 0:
-            conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
-    return name, book_ids
+        ).fetchone()
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+    return {
+        "name": name,
+        "book_ids": book_ids,
+        "sentence_card_count": int(sentence_card_count),
+        "word_card_count": int(word_card_count),
+    }
+
+
+def _rename_library_tag(
+    db: DatabaseConnection,
+    tag_id: int,
+    new_name: str,
+) -> dict[str, Any] | None:
+    """Rename a library-manageable tag everywhere it is referenced."""
+    normalized_name = new_name.strip()
+    if not normalized_name:
+        raise ValueError("Tag name is required.")
+    if len(normalized_name) > 60:
+        raise ValueError("Tags must be 60 characters or fewer.")
+    if "," in normalized_name:
+        raise ValueError("Tag names cannot contain commas; commas separate tags.")
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """SELECT t.name
+                 FROM tags t
+                WHERE t.id = ?
+                  AND (t.category = 'library' OR EXISTS (
+                        SELECT 1 FROM book_tags bt WHERE bt.tag_id = t.id
+                      ))""",
+            (tag_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        old_name = str(row["name"])
+        duplicate = conn.execute(
+            """SELECT id FROM tags
+                WHERE name = ? COLLATE NOCASE AND id != ?""",
+            (normalized_name, tag_id),
+        ).fetchone()
+        if duplicate is not None:
+            raise ValueError("A tag with that name already exists.")
+        book_ids = [
+            int(link["book_id"])
+            for link in conn.execute(
+                "SELECT book_id FROM book_tags WHERE tag_id = ? ORDER BY book_id",
+                (tag_id,),
+            ).fetchall()
+        ]
+        sentence_card_count, word_card_count = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM sentence_card_tags WHERE tag_id = ?),
+                      (SELECT COUNT(*) FROM word_card_tags WHERE tag_id = ?)""",
+            (tag_id, tag_id),
+        ).fetchone()
+        conn.execute(
+            "UPDATE tags SET name = ? WHERE id = ?",
+            (normalized_name, tag_id),
+        )
+    return {
+        "old_name": old_name,
+        "new_name": normalized_name,
+        "book_ids": book_ids,
+        "sentence_card_count": int(sentence_card_count),
+        "word_card_count": int(word_card_count),
+    }
 
 
 def _update_library_item(
@@ -161,6 +233,8 @@ def _update_library_item(
             continue
         if len(tag_name) > 60:
             raise ValueError("Tags must be 60 characters or fewer.")
+        if "," in tag_name:
+            raise ValueError("Tag names cannot contain commas; commas separate tags.")
         seen.add(key)
         normalized_tags.append(tag_name)
 
@@ -231,12 +305,35 @@ def _delete_book(db: DatabaseConnection, book_id: int) -> DeleteBookResult | Non
                 (book_id,),
             ).fetchall()
         ]
+        affected_card_ids = {card["id"] for card in word_card_rows}
+        affected_card_ids.update(
+            row["card_id"]
+            for row in conn.execute(
+                """SELECT DISTINCT wcs.card_id
+                     FROM word_card_sources wcs
+                     JOIN sentences s ON s.id = wcs.sentence_id
+                    WHERE s.book_id = ?""",
+                (book_id,),
+            ).fetchall()
+        )
         candidate_rows = _fetch_reanchor_candidate_sentences(conn, book_id)
         word_card_ids_to_delete: list[int] = []
         word_cards_reanchored = 0
 
         for card in word_card_rows:
-            reanchor_sentence_id = _find_reanchor_sentence_id(card, candidate_rows)
+            surviving_source = conn.execute(
+                """SELECT wcs.id, wcs.sentence_id
+                     FROM word_card_sources wcs
+                     JOIN sentences s ON s.id = wcs.sentence_id
+                    WHERE wcs.card_id = ? AND s.book_id != ?
+                    ORDER BY wcs.id
+                    LIMIT 1""",
+                (card["id"], book_id),
+            ).fetchone()
+            reanchor_sentence_id = (
+                surviving_source["sentence_id"] if surviving_source
+                else _find_reanchor_sentence_id(card, candidate_rows)
+            )
             if reanchor_sentence_id is None:
                 word_card_ids_to_delete.append(card["id"])
                 continue
@@ -244,6 +341,23 @@ def _delete_book(db: DatabaseConnection, book_id: int) -> DeleteBookResult | Non
                 "UPDATE word_cards SET first_sentence_id = ? WHERE id = ?",
                 (reanchor_sentence_id, card["id"]),
             )
+            if surviving_source:
+                conn.execute(
+                    "UPDATE word_card_sources SET is_primary = 0 WHERE card_id = ?",
+                    (card["id"],),
+                )
+                conn.execute(
+                    "UPDATE word_card_sources SET is_primary = 1 WHERE id = ?",
+                    (surviving_source["id"],),
+                )
+            else:
+                _record_word_card_source_conn(
+                    conn,
+                    card_id=card["id"],
+                    sentence_id=reanchor_sentence_id,
+                    surface_form=card["surface_form"],
+                    is_primary=True,
+                )
             word_cards_reanchored += 1
 
         if word_card_ids_to_delete:
@@ -261,6 +375,8 @@ def _delete_book(db: DatabaseConnection, book_id: int) -> DeleteBookResult | Non
             )
 
         conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
+        for card_id in affected_card_ids:
+            _sync_occurrence_count_conn(conn, card_id)
 
     return DeleteBookResult(
         sentence_cards_deleted=sentence_cards_deleted,
