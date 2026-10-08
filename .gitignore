@@ -82,6 +82,7 @@ english-reading-trainer/data/*.db
 english-reading-trainer/data/*.db-*
 english-reading-trainer/data/assets/
 english-reading-trainer/data/backups/
+english-reading-trainer/data/repair-previews/
 english-reading-trainer/data/logs/
 
 # =============================================================================

@@ -230,6 +230,62 @@ def test_lines_to_paragraphs_separator_page_mismatch_and_cleaning() -> None:
     assert pdf._clean_paragraph("  a   b  ") == "a b"
 
 
+@pytest.mark.parametrize(
+    ("positions", "texts", "expected_breaks"),
+    [
+        ([72, 72, 87, 72], ["First", "paragraph.", "Second", "paragraph."], {2}),
+        ([72, 72.5, 73, 72], ["One", "wrapped", "paragraph", "only."], set()),
+        ([72, 87, 87, 72], ["First.", "‘Short.’", "Next", "paragraph."], {1, 2}),
+        ([72, 87], ["First.", "Last paragraph."], {1}),
+        ([72, 87], ["unfinished", "continuation"], set()),
+        ([72, 87, 87, 87, 72], ["A quote:", "several", "inset", "lines.", "After."], set()),
+        ([72, 120, 140, 72], ["Before.", "Centered", "heading", "After."], set()),
+        ([72, 87, 72], ["1. An item.", "hanging continuation", "Next."], set()),
+        ([72, 87, 72], ["• An item.", "hanging continuation", "Next."], set()),
+        ([72, None, 87, 72], ["First.", "Unknown.", "Second", "paragraph."], set()),
+        ([72, 87, None, 72], ["First.", "Second", "unknown", "paragraph."], set()),
+        ([None, None], ["First.", "Second."], set()),
+    ],
+)
+def test_paragraph_indents_require_first_line_geometry(positions, texts, expected_breaks):
+    lines = [
+        pdf.PdfLine(1, 100 + i * 12, 110 + i * 12, text, x0=x0)
+        for i, (x0, text) in enumerate(zip(positions, texts))
+    ]
+
+    assert pdf._paragraph_indent_breaks(lines) == expected_breaks
+    assert len(pdf._lines_to_paragraphs(lines)) == len(expected_breaks) + 1
+
+
+def test_indentation_keeps_hyphen_continuations_and_ignores_invalid_height():
+    lines = [
+        pdf.PdfLine(1, 100, 110, "An exam-", x0=72),
+        pdf.PdfLine(1, 112, 122, "ple continues", x0=87),
+        pdf.PdfLine(1, 124, 134, "here.", x0=72),
+    ]
+    assert [p.text for p in pdf._lines_to_paragraphs(lines)] == [
+        "An example continues here."
+    ]
+    assert pdf._paragraph_indent_breaks([pdf.PdfLine(1, 100, 100, "Bad", x0=72)]) == set()
+    assert pdf._paragraph_indent_breaks([]) == set()
+
+
+def test_indentation_uses_separate_margins_on_different_pages():
+    lines = [
+        pdf.PdfLine(1, 100, 110, "One.", x0=72),
+        pdf.PdfLine(2, 100, 110, "Next", x0=100),
+        pdf.PdfLine(2, 112, 122, "page.", x0=100),
+        pdf.PdfLine(2, 124, 134, "New", x0=115),
+        pdf.PdfLine(2, 136, 146, "paragraph.", x0=100),
+    ]
+    assert pdf._paragraph_indent_breaks(lines) == {3}
+
+
+def test_word_lines_preserve_horizontal_position_for_paragraph_detection():
+    lines = pdf._words_to_lines([_word("Indented", x0=87)], page_number=1)
+    assert lines[0].x0 == 87
+
+
 def test_figure_region_detection_covers_images_and_filtered_objects() -> None:
     page = _FakePage()
     page.lines = [

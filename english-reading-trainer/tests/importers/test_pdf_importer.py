@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import pdfplumber
+from reportlab.pdfgen import canvas
 
 from app.db_connection import DatabaseConnection
 from app.importers.pdf_importer import (
     PdfWordLine,
+    _body_words,
+    _body_words_with_font_metadata,
     _is_nonprose_line,
     calculate_pdf_file_hash,
     import_pdf,
@@ -51,6 +55,96 @@ def test_calculate_pdf_file_hash_reads_file(tmp_path: Path) -> None:
     pdf_path = make_text_pdf(tmp_path)
 
     assert calculate_pdf_file_hash(pdf_path) == calculate_pdf_file_hash(pdf_path)
+
+
+@pytest.mark.parametrize("font_size", [6, 10, 18])
+@pytest.mark.parametrize("char_spacing_ratio", [0, 0.08])
+def test_import_pdf_preserves_positioned_word_gaps(
+    db: DatabaseConnection,
+    tmp_path: Path,
+    font_size: int,
+    char_spacing_ratio: float,
+) -> None:
+    pdf_path = tmp_path / "positioned-words.pdf"
+    document = canvas.Canvas(str(pdf_path))
+    expected = "Mr. Jones agreed that they should all meet in the big barn."
+    char_spacing = font_size * char_spacing_ratio
+    for line_number, line in enumerate(
+        [expected, "Willingdon Beauty was highly regarded."]
+    ):
+        position = 72.0
+        for word in line.split():
+            text = document.beginText(position, 700 - line_number * 30)
+            text.setFont("Times-Roman", font_size)
+            text.setCharSpace(char_spacing)
+            text.textOut(word)
+            document.drawText(text)
+            position += (
+                document.stringWidth(word, "Times-Roman", font_size)
+                + (len(word) - 1) * char_spacing
+                + font_size * 0.24
+            )
+    document.save()
+
+    with pdfplumber.open(pdf_path) as source:
+        page = source.pages[0]
+        expected_words = (expected + " Willingdon Beauty was highly regarded.").split()
+        assert [word["text"] for word in _body_words(page, ())] == expected_words
+        assert [
+            word["text"]
+            for word in _body_words_with_font_metadata(page, excluded_regions=())
+        ] == expected_words
+
+    result = import_pdf(db, pdf_path)
+    imported = " ".join(_sentences_for_book(db, result.book_id))
+    assert expected in imported
+    assert "Willingdon Beauty was highly regarded." in imported
+
+
+@pytest.mark.parametrize("font_size", [6, 10, 18])
+def test_import_pdf_preserves_first_line_indented_paragraphs(
+    db: DatabaseConnection, tmp_path: Path, font_size: int,
+) -> None:
+    pdf_path = tmp_path / "indented-paragraphs.pdf"
+    document = canvas.Canvas(str(pdf_path))
+    document.setFont("Times-Roman", font_size)
+    lines = [
+        (1.5, "The opening paragraph wraps"),
+        (0, "onto this ordinary line."),
+        (1.5, "A new paragraph starts here and"),
+        (0, "continues on a second line."),
+        (1.5, "A short dialogue paragraph."),
+        (1.5, "Another paragraph spans an exam-"),
+        (0, "ple without a false break."),
+    ]
+    for index, (indent, text) in enumerate(lines):
+        document.drawString(72 + indent * font_size, 700 - index * font_size * 1.2, text)
+    document.save()
+
+    result = import_pdf(db, pdf_path)
+
+    with db.get_connection() as conn:
+        paragraphs = [
+            " ".join(row["text"] for row in conn.execute(
+                "SELECT text FROM sentences WHERE paragraph_id=? ORDER BY idx", (p["id"],)
+            ))
+            for p in conn.execute(
+                "SELECT p.id FROM paragraphs p JOIN chapters c ON c.id=p.chapter_id "
+                "WHERE c.book_id=? ORDER BY c.idx,p.idx", (result.book_id,)
+            ).fetchall()
+        ]
+        blocks = conn.execute(
+            "SELECT paragraph_id FROM chapter_blocks WHERE book_id=? ORDER BY idx",
+            (result.book_id,),
+        ).fetchall()
+    assert paragraphs == [
+        "The opening paragraph wraps onto this ordinary line.",
+        "A new paragraph starts here and continues on a second line.",
+        "A short dialogue paragraph.",
+        "Another paragraph spans an example without a false break.",
+    ]
+    assert result.paragraph_count == len(blocks) == 4
+    assert len({row["paragraph_id"] for row in blocks}) == 4
 
 
 def test_import_pdf_inserts_standard_reader_hierarchy(

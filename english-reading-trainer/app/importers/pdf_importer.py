@@ -32,7 +32,10 @@ _FOOTER_BAND_RATIO = 0.08
 _PAGES_PER_CHAPTER = 10
 _MIN_LINE_TOLERANCE = 3.0
 _LINE_TOLERANCE_RATIO = 0.6
+_WORD_X_TOLERANCE_RATIO = 0.2
 _PARAGRAPH_GAP_RATIO = 1.8
+_PARAGRAPH_END_RE = re.compile(r"[.!?](?:[\s\"'’”)\]]*)$")
+_LIST_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s+")
 _FIGURE_PADDING = 6.0
 _FIGURE_MERGE_GAP = 18.0
 _MIN_FIGURE_WIDTH = 36.0
@@ -143,6 +146,7 @@ class PdfLine:
     top: float
     bottom: float
     text: str
+    x0: float | None = None
 
 
 @dataclass(frozen=True)
@@ -417,7 +421,7 @@ def _body_words(
     page_height = float(getattr(page, "height", 0) or 0)
     header_cutoff = page_height * _HEADER_BAND_RATIO
     footer_cutoff = page_height * (1 - _FOOTER_BAND_RATIO)
-    words = page.extract_words() or []
+    words = page.extract_words(x_tolerance_ratio=_WORD_X_TOLERANCE_RATIO) or []
     body_words: list[dict[str, Any]] = []
 
     for word in words:
@@ -443,6 +447,7 @@ def _words_to_lines(words: list[dict[str, Any]], *, page_number: int) -> list[Pd
             top=line.top,
             bottom=line.bottom,
             text=line.text,
+            x0=line.x0,
         )
         for line in _words_to_word_lines(words, page_number=page_number)
     ]
@@ -527,16 +532,18 @@ def _lines_to_paragraphs(
 
     sorted_lines = sorted(lines, key=lambda line: (line.page_number, line.top))
     gap_threshold = _paragraph_gap_threshold(sorted_lines)
+    indent_breaks = _paragraph_indent_breaks(sorted_lines)
     paragraphs: list[str] = []
     paragraph_tops: list[float] = []
     current = sorted_lines[0].text
     current_top = sorted_lines[0].top
     previous = sorted_lines[0]
 
-    for line in sorted_lines[1:]:
+    for index, line in enumerate(sorted_lines[1:], start=1):
         gap = line.top - previous.bottom if line.page_number == previous.page_number else 0.0
         has_separator = _has_region_between(previous, line, separator_regions)
-        if (gap > gap_threshold or has_separator) and not _ends_with_hyphenated_word(current):
+        starts_paragraph = gap > gap_threshold or has_separator or index in indent_breaks
+        if starts_paragraph and not _ends_with_hyphenated_word(current):
             paragraphs.append(current)
             paragraph_tops.append(current_top)
             current = line.text
@@ -552,6 +559,51 @@ def _lines_to_paragraphs(
         for top, text in zip(paragraph_tops, paragraphs)
         if (cleaned := _clean_paragraph(text))
     ]
+
+
+def _paragraph_indent_breaks(lines: list[PdfLine]) -> set[int]:
+    """Find first-line indents that return to the page's body margin.
+
+    Coordinates are optional for older callers. A sustained inset (verse,
+    block quotes or hanging list continuations) is not itself a first-line
+    indent. Consecutive complete, single-line paragraphs can share an indent.
+    """
+    pages: dict[int, list[tuple[int, PdfLine]]] = {}
+    for index, line in enumerate(lines):
+        if line.x0 is not None and line.bottom > line.top:
+            pages.setdefault(line.page_number, []).append((index, line))
+    breaks: set[int] = set()
+    for page_lines in pages.values():
+        margin = min(line.x0 for _, line in page_lines)
+        height = statistics.median(line.bottom - line.top for _, line in page_lines)
+        tolerance = max(1.0, height * 0.2)
+        for position, (index, line) in enumerate(page_lines[1:], start=1):
+            indent = line.x0 - margin
+            if not max(3.0, height * 0.6) <= indent <= height * 3:
+                continue
+            previous_index, previous = page_lines[position - 1]
+            if previous_index != index - 1 or _LIST_LINE_RE.match(previous.text):
+                continue
+            if (
+                abs(previous.x0 - line.x0) <= tolerance
+                and not _PARAGRAPH_END_RE.search(previous.text)
+            ):
+                continue
+            if position + 1 < len(page_lines):
+                next_index, following = page_lines[position + 1]
+                if next_index != index + 1:
+                    continue
+                returns_to_margin = abs(following.x0 - margin) <= tolerance
+                single_line = (
+                    abs(following.x0 - line.x0) <= tolerance
+                    and _PARAGRAPH_END_RE.search(line.text)
+                )
+                if not (returns_to_margin or single_line):
+                    continue
+            elif not _PARAGRAPH_END_RE.search(previous.text):
+                continue
+            breaks.add(index)
+    return breaks
 
 
 def _has_region_between(
@@ -656,7 +708,10 @@ def _body_words_with_font_metadata(
     page_height = float(getattr(page, "height", 0) or 0)
     header_cutoff = page_height * _HEADER_BAND_RATIO
     footer_cutoff = page_height * (1 - _FOOTER_BAND_RATIO)
-    words = page.extract_words(extra_attrs=["fontname", "size"]) or []
+    words = page.extract_words(
+        extra_attrs=["fontname", "size"],
+        x_tolerance_ratio=_WORD_X_TOLERANCE_RATIO,
+    ) or []
     body_words: list[dict[str, Any]] = []
 
     for word in words:
